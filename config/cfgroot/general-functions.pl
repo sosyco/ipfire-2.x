@@ -17,7 +17,6 @@ package General;
 use strict;
 use Socket;
 use IO::Socket;
-use Locale::Codes::Country;
 use Net::SSLeay;
 use Net::IPv4Addr qw(:all);
 $|=1; # line buffering
@@ -28,6 +27,9 @@ $General::noipprefix = 'noipg-';
 $General::adminmanualurl = 'http://wiki.ipfire.org';
 
 require "${General::swroot}/network-functions.pl";
+
+# Function to remove duplicates from an array
+sub uniq { my %seen; grep !$seen{$_}++, @_ }
 
 #
 # log ("message") use default 'ipcop' tag
@@ -149,6 +151,10 @@ sub readhash
 	while (<FILE>)
 	{
 		chop;
+
+		# Skip comments.
+		next if ($_ =~ /^#/);
+
 		($var, $val) = split /=/, $_, 2;
 		if ($var)
 		{
@@ -235,7 +241,13 @@ sub writehashpart
 sub age {
 	my ($dev, $ino, $mode, $nlink, $uid, $gid, $rdev, $size,
 		$atime, $mtime, $ctime, $blksize, $blocks) = stat $_[0];
-	my $totalsecs = time() - $mtime;
+	my $t = time() - $mtime;
+
+	return &format_time($t);
+}
+
+sub format_time($) {
+	my $totalsecs = shift;
 	my @s = ();
 
 	my $secs = $totalsecs % 60;
@@ -465,6 +477,7 @@ sub checksubnets
 	my $ccdname=$_[0];
 	my $ccdnet=$_[1];
 	my $ownnet=$_[2];
+	my $checktype=$_[3];
 	my $errormessage;
 	my ($ip,$cidr)=split(/\//,$ccdnet);
 	$cidr=&iporsubtocidr($cidr);
@@ -515,13 +528,15 @@ sub checksubnets
 	if($ownnet ne 'ipsec'){
 		&General::readhasharray("${General::swroot}/vpn/config", \%ipsecconf);
 		foreach my $key (keys %ipsecconf){
-			if ($ipsecconf{$key}[11] ne ''){
-				my ($ipsecip,$ipsecsub) = split (/\//, $ipsecconf{$key}[11]);
-				$ipsecsub=&iporsubtodec($ipsecsub);
-				if($ipsecconf{$key}[1] ne $ccdname){
-					if ( &IpInSubnet ($ip,$ipsecip,$ipsecsub) ){
-						$errormessage=$Lang::tr{'ccd err isipsecnet'}." Name:  $ipsecconf{$key}[1]";
-						return $errormessage;
+			if ($ipsecconf{$key}[11] ne '' && $ipsecconf{$key}[36] eq ""){
+				foreach my $ipsecsubitem (split(/\|/, $ipsecconf{$key}[11])) {
+					my ($ipsecip,$ipsecsub) = split (/\//, $ipsecconf{$key}[11]);
+					$ipsecsub=&iporsubtodec($ipsecsub);
+					if($ipsecconf{$key}[1] ne $ccdname){
+						if ( &IpInSubnet ($ip,$ipsecip,$ipsecsub) ){
+							$errormessage=$Lang::tr{'ccd err isipsecnet'}." Name:  $ipsecconf{$key}[1]";
+							return $errormessage;
+						}
 					}
 				}
 			}
@@ -538,16 +553,17 @@ sub checksubnets
 			return $errormessage;
 		}
 	}
-
-	#check if we use one of ipfire's networks (green,orange,blue)
-	&readhash("${General::swroot}/ethernet/settings", \%ownnet);
-	if (($ownnet{'GREEN_NETADDRESS'}  	ne '' && $ownnet{'GREEN_NETADDRESS'} 	ne '0.0.0.0') && &IpInSubnet($ip,$ownnet{'GREEN_NETADDRESS'},&iporsubtodec($ownnet{'GREEN_NETMASK'}))){ $errormessage=$Lang::tr{'ccd err green'};return $errormessage;}
-	if (($ownnet{'ORANGE_NETADDRESS'}	ne '' && $ownnet{'ORANGE_NETADDRESS'} 	ne '0.0.0.0') && &IpInSubnet($ip,$ownnet{'ORANGE_NETADDRESS'},&iporsubtodec($ownnet{'ORANGE_NETMASK'}))){ $errormessage=$Lang::tr{'ccd err orange'};return $errormessage;}
-	if (($ownnet{'BLUE_NETADDRESS'} 	ne '' && $ownnet{'BLUE_NETADDRESS'} 	ne '0.0.0.0') && &IpInSubnet($ip,$ownnet{'BLUE_NETADDRESS'},&iporsubtodec($ownnet{'BLUE_NETMASK'}))){ $errormessage=$Lang::tr{'ccd err blue'};return $errormessage;}
-	if (($ownnet{'RED_NETADDRESS'} 		ne '' && $ownnet{'RED_NETADDRESS'} 		ne '0.0.0.0') && &IpInSubnet($ip,$ownnet{'RED_NETADDRESS'},&iporsubtodec($ownnet{'RED_NETMASK'}))){ $errormessage=$Lang::tr{'ccd err red'};return $errormessage;}
+	
+	#call check_net_internal
+	if ($checktype eq "exact")
+	{
+		&General::check_net_internal_exact($ccdnet);
+	}else{
+		&General::check_net_internal_range($ccdnet);
+	}
 }
 
-sub check_net_internal{
+sub check_net_internal_range{
 	my $network=shift;
 	my ($ip,$cidr)=split(/\//,$network);
 	my %ownnet=();
@@ -559,6 +575,20 @@ sub check_net_internal{
 	if (($ownnet{'ORANGE_NETADDRESS'}	ne '' && $ownnet{'ORANGE_NETADDRESS'} 	ne '0.0.0.0') && &IpInSubnet($ip,$ownnet{'ORANGE_NETADDRESS'},&iporsubtodec($ownnet{'ORANGE_NETMASK'}))){ $errormessage=$Lang::tr{'ccd err orange'};return $errormessage;}
 	if (($ownnet{'BLUE_NETADDRESS'} 	ne '' && $ownnet{'BLUE_NETADDRESS'} 	ne '0.0.0.0') && &IpInSubnet($ip,$ownnet{'BLUE_NETADDRESS'},&iporsubtodec($ownnet{'BLUE_NETMASK'}))){ $errormessage=$Lang::tr{'ccd err blue'};return $errormessage;}
 	if (($ownnet{'RED_NETADDRESS'} 		ne '' && $ownnet{'RED_NETADDRESS'} 		ne '0.0.0.0') && &IpInSubnet($ip,$ownnet{'RED_NETADDRESS'},&iporsubtodec($ownnet{'RED_NETMASK'}))){ $errormessage=$Lang::tr{'ccd err red'};return $errormessage;}
+}
+
+sub check_net_internal_exact{
+	my $network=shift;
+	my ($ip,$cidr)=split(/\//,$network);
+	my %ownnet=();
+	my $errormessage;
+	$cidr=&iporsubtocidr($cidr);
+	#check if we use one of ipfire's networks (green,orange,blue)
+	&readhash("${General::swroot}/ethernet/settings", \%ownnet);
+	if (($ownnet{'GREEN_NETADDRESS'}  	ne '' && $ownnet{'GREEN_NETADDRESS'} 	ne '0.0.0.0') && &Network::network_equal("$ownnet{'GREEN_NETADDRESS'}/$ownnet{'GREEN_NETMASK'}", $network)){ $errormessage=$Lang::tr{'ccd err green'};return $errormessage;}
+	if (($ownnet{'ORANGE_NETADDRESS'}	ne '' && $ownnet{'ORANGE_NETADDRESS'} 	ne '0.0.0.0') && &Network::network_equal("$ownnet{'ORANGE_NETADDRESS'}/$ownnet{'ORANGE_NETMASK'}", $network)){ $errormessage=$Lang::tr{'ccd err orange'};return $errormessage;}
+	if (($ownnet{'BLUE_NETADDRESS'} 	ne '' && $ownnet{'BLUE_NETADDRESS'} 	ne '0.0.0.0') && &Network::network_equal("$ownnet{'BLUE_NETADDRESS'}/$ownnet{'BLUE_NETMASK'}", $network)){ $errormessage=$Lang::tr{'ccd err blue'};return $errormessage;}
+	if (($ownnet{'RED_NETADDRESS'} 		ne '' && $ownnet{'RED_NETADDRESS'} 		ne '0.0.0.0') && &Network::network_equal("$ownnet{'RED_NETADDRESS'}/$ownnet{'RED_NETMASK'}", $network)){ $errormessage=$Lang::tr{'ccd err red'};return $errormessage;}
 }
 
 sub validport
@@ -633,15 +663,10 @@ sub validdomainname
 		# Each part should be no more than 63 characters in length
 		if (length ($part) < 1 || length ($part) > 63) {
 			return 0;}
-		# Only valid characters are a-z, A-Z, 0-9 and -
-		if ($part !~ /^[a-zA-Z0-9-]*$/) {
-			return 0;}
-		# First character can only be a letter or a digit
-		if (substr ($part, 0, 1) !~ /^[a-zA-Z0-9]*$/) {
-			return 0;}
-		# Last character can only be a letter or a digit
-		if (substr ($part, -1, 1) !~ /^[a-zA-Z0-9]*$/) {
-			return 0;}
+		# Only valid characters are a-z, A-Z, 0-9, _ and -
+		if ($part !~ /^[a-zA-Z0-9_-]*$/) {
+			return 0;
+		}
 	}
 	return 1;
 }
@@ -761,7 +786,7 @@ sub validemail {
     return 0 if ( substr($parts[1],-1,1) eq '.' );
 
     #check first addresspart (before '@' sign)
-    return 0 if  ( $parts[0] !~ m/^[a-zA-Z0-9\.!\-\+#]+$/ );
+    return 0 if  ( $parts[0] !~ m/^[a-zA-Z0-9\.!\-\_\+#]+$/ );
 
     #check second addresspart (after '@' sign)
     return 0 if  ( $parts[1] !~ m/^[a-zA-Z0-9\.\-]+$/ );
@@ -1133,6 +1158,153 @@ sub get_red_interface() {
 	chomp $interface;
 
 	return $interface;
+}
+
+sub dnssec_status() {
+	my $path = "${General::swroot}/red/dnssec-status";
+
+	open(STATUS, $path) or return 0;
+	my $status = <STATUS>;
+	close(STATUS);
+
+	chomp($status);
+
+	return $status;
+}
+sub number_cpu_cores() {
+	open my $cpuinfo, "/proc/cpuinfo" or die "Can't open cpuinfo: $!\n";
+	my $cores = scalar (map /^processor/, <$cpuinfo>);
+	close $cpuinfo;
+
+	return $cores;
+}
+
+# Tiny function to grab a single IP-address from a given file.
+sub grab_address_from_file($) {
+	my ($file) = @_;
+
+	my $address;
+
+	# Check if the given file exists.
+	if(-f $file) {
+		# Open the file for reading.
+		open(FILE, $file) or die "Could not read from $file. $!\n";
+
+		# Read the address from the file.
+		$address = <FILE>;
+
+		# Close filehandle.
+		close(FILE);
+
+		# Remove newlines.
+		chomp($address);
+
+		# Check if the obtained address is valid.
+		if (&validip($address)) {
+			# Return the address.
+			return $address;
+		}
+	}
+
+	# Return nothing.
+	return;
+}
+
+# Function to get all configured and enabled nameservers.
+sub get_nameservers () {
+	my %settings;
+	my %servers;
+
+	my @nameservers;
+
+	# Read DNS configuration.
+	&readhash("$General::swroot/dns/settings", \%settings);
+
+	# Read configured DNS servers.
+	&readhasharray("$General::swroot/dns/servers", \%servers);
+
+	# Check if the ISP assigned server should be used.
+	if ($settings{'USE_ISP_NAMESERVERS'} eq "on") {
+		# Assign ISP nameserver files.
+		my @ISP_nameserver_files = ( "/var/run/dns1", "/var/run/dns2" );
+
+		# Loop through the array of ISP assigned DNS servers.
+		foreach my $file (@ISP_nameserver_files) {
+			# Grab the IP address.
+			my $address = &grab_address_from_file($file);
+
+			# Check if an address has been grabbed.
+			if ($address) {
+				# Add the address to the array of nameservers.
+				push(@nameservers, $address);
+			}
+		}
+	}
+
+	# Check if DNS servers are configured.
+	if (%servers) {
+		# Loop through the hash of configured DNS servers.
+		foreach my $id (keys %servers) {
+			my $address = $servers{$id}[0];
+			my $status = $servers{$id}[2];
+
+			# Check if the current processed server is enabled.
+			if ($status eq "enabled") {
+				# Add the address to the array of nameservers.
+				push(@nameservers, $address);
+			}
+		}
+	}
+
+	# Return the array.
+	return &uniq(@nameservers);
+}
+
+# Function to format a string containing the amount of bytes to
+# something human-readable. 
+sub formatBytes {
+	# Private array which contains the units.
+	my @units = qw(B KB MB GB TB PB);
+
+	my $bytes = shift;
+	my $unit;
+
+	# Loop through the array of units.
+	foreach my $element (@units) {
+		# Assign current processed element to unit.
+		$unit = $element;
+
+		# Break loop if the bytes are less than the next unit.
+		last if $bytes < 1024;
+
+		# Divide bytes amount with 1024.
+        	$bytes /= 1024;
+    	}
+
+	# Return the divided and rounded bytes count and the unit.
+	return sprintf("%.2f %s", $bytes, $unit);
+}
+
+# Cloud Stuff
+
+sub running_in_cloud() {
+	return &running_on_ec2() || &running_on_gcp();
+}
+
+sub running_on_ec2() {
+	if (-e "/var/run/aws-instance-id") {
+		return 1;
+	}
+
+	return 0;
+}
+
+sub running_on_gcp() {
+	if (-e "/var/run/gcp-instance-id") {
+		return 1;
+	}
+
+	return 0;
 }
 
 1;

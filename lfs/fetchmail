@@ -1,7 +1,7 @@
 ###############################################################################
 #                                                                             #
 # IPFire.org - A linux based firewall                                         #
-# Copyright (C) 2007-2013  IPFire Team <info@ipfire.org>                      #
+# Copyright (C) 2007-2018  IPFire Team  <info@ipfire.org>                     #
 #                                                                             #
 # This program is free software: you can redistribute it and/or modify        #
 # it under the terms of the GNU General Public License as published by        #
@@ -32,9 +32,9 @@ DL_FROM    = $(URL_IPFIRE)
 DIR_APP    = $(DIR_SRC)/$(THISAPP)
 TARGET     = $(DIR_INFO)/$(THISAPP)
 PROG       = fetchmail
-PAK_VER    = 7
+PAK_VER    = 9
 
-DEPS       = ""
+DEPS       =
 
 ###############################################################################
 # Top-level Rules
@@ -77,6 +77,8 @@ $(subst %,%_MD5,$(objects)) :
 $(TARGET) : $(patsubst %,$(DIR_DL)/%,$(objects))
 	@$(PREBUILD)
 	@rm -rf $(DIR_APP) && cd $(DIR_SRC) && tar Jxf $(DIR_DL)/$(DL_FILE)
+	cd $(DIR_APP) && patch -Np1 < $(DIR_SRC)/src/patches/fetchmail-6.3.26-permit-build-without-ssl3.patch
+
 	cd $(DIR_APP) && ./configure \
 		--prefix=/usr \
 		--with-ssl \
@@ -95,6 +97,10 @@ $(TARGET) : $(patsubst %,$(DIR_DL)/%,$(objects))
 
 	install -v -m 644 $(DIR_SRC)/config/backup/includes/fetchmail \
 		/var/ipfire/backup/addons/includes/fetchmail
+
+	#install initscripts
+	$(call INSTALL_INITSCRIPT,fetchmail)
+
 
 	@rm -rf $(DIR_APP)
 	@$(POSTBUILD)

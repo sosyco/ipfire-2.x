@@ -1,0 +1,122 @@
+#!/bin/sh
+########################################################################
+# Begin $rc_base/init.d/partresize
+#
+# Description : Resize the root partition to the drivesize
+#		and setup some platform or hardware options in
+#		flashimage
+#
+# Authors     : Arne Fitzenreiter - arne_f@ipfire.org
+#
+# Version     : 1.04
+#
+# Notes       :
+#
+########################################################################
+
+. /etc/sysconfig/rc
+. ${rc_functions}
+
+case "${1}" in
+	start)
+		if [ -e "/.partresize" ]; then
+
+			boot_mesg "Mounting root file system in read/write mode ..."
+			mount -o remount,rw / > /dev/null
+			evaluate_retval
+
+			boot_mesg "Create /etc/mtab..."
+			> /etc/mtab
+			mount -f / || failed=1
+			(exit ${failed})
+			evaluate_retval
+
+			# check if serial console enabled
+			scon="off";
+			if [ ! "$(grep "console=ttyS0" /proc/cmdline)" == "" ]; then
+				scon="on";
+			fi
+			if [ -e /sys/class/dmi/id/product_name ]; then
+				IFS= read -r DMI_PRODUCT_NAME < /sys/class/dmi/id/product_name;
+				case ${DMI_PRODUCT_NAME} in
+					APU|apu[1-4]|PC\ Engines\ apu[1-4] )
+							scon="on";
+						;;
+				esac
+			fi
+
+			# Enable the serial console on all systems on Azure and Google Compute Platform
+			if running_on_azure || running_on_gcp; then
+				scon="on"
+			fi
+
+			# Install AP6112 wlan config on NanoPi R1
+			case "$(< /proc/device-tree/model )" in
+				"FriendlyElec NanoPi-R1")
+					cp -f   /lib/firmware/brcm/brcmfmac43430-sdio.AP6212.txt \
+						/lib/firmware/brcm/brcmfmac43430-sdio.txt
+					cp -f   /lib/firmware/brcm/brcmfmac43430a0-sdio.ONDA-V80_PLUS.txt \
+						/lib/firmware/brcm/brcmfmac43430a0-sdio.txt
+				;;
+			esac 2>/dev/null
+
+			mount /boot > /dev/null
+			if [ -e /boot/grub/grub.cfg ]; then
+				# swtich permanent to serial console if it was selected on first boot
+				if [ "${scon}" = "on" ]; then
+					# Enable also serial console on GRUB
+					echo "GRUB_TERMINAL=\"serial console\"" >> /etc/default/grub
+					echo "GRUB_SERIAL_COMMAND=\"serial --unit=0 --speed=115200\"" >> /etc/default/grub
+					sed -i -e "s|panic=10|& console=ttyS0,115200n8|g" /etc/default/grub
+				fi
+
+				# Re-generate GRUB configuration
+				/usr/sbin/grub-mkconfig -o /boot/grub/grub.cfg
+			fi
+			umount /boot > /dev/null
+
+			# Detect device
+			mount | while read -r dev tmp1 mountpoint tmp2; do
+				[ "${dev}" = "rootfs" ] && continue
+
+				if [ "${mountpoint}" = "/" ]; then
+					# Find root partition number
+					part_num="${dev: -1}"
+
+					# Find path to the root device
+					root_dev="${dev::-1}"
+					if [ ! -b "${dev::-1}" -a "${root_dev: -1}" = "p" ]; then
+						root_dev="${dev::-2}"
+					fi
+
+					boot_mesg "Growing root partition to maximum size..."
+					echo -e ',+' | sfdisk --no-reread -f -N${part_num} "${root_dev}" 2>/dev/null
+
+					# Update c,h,s values of the boot partition...
+					if [ ${part_num} -ne 1 -a -b "${root_dev}1" ]; then
+						echo -e ',' | sfdisk --no-reread -f -N1 ${DRV} &> /dev/null
+					fi
+
+					# The filesystem should be resized after
+					# this operation
+					touch /.resizefs
+
+					# Remove marker
+					rm -f /.partresize
+
+					# Reboot
+					boot_mesg "Rebooting system..."
+					mount -o remount,ro / &>/dev/null
+					sleep 15
+					reboot -f
+				fi
+			done
+		fi
+		;;
+	*)
+		echo "Usage: ${0} {start}"
+		exit 1
+		;;
+esac
+
+# End $rc_base/init.d/partresize

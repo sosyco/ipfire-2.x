@@ -1,7 +1,7 @@
 ###############################################################################
 #                                                                             #
 # IPFire.org - A linux based firewall                                         #
-# Copyright (C) 2007-2015  IPFire Team <info@ipfire.org>                      #
+# Copyright (C) 2007-2020  IPFire Team  <info@ipfire.org>                     #
 #                                                                             #
 # This program is free software: you can redistribute it and/or modify        #
 # it under the terms of the GNU General Public License as published by        #
@@ -24,11 +24,8 @@
 
 include Config
 
-VER         = 3.14.57
-RPI_PATCHES = 3.14.57-grsec-ipfire1
-A7M_PATCHES = 3.14.57-grsec-ipfire1
-GRS_PATCHES = grsecurity-3.1ipfire-3.14.57-v1.patch.xz
-
+VER         = 4.14.198
+ARM_PATCHES = 4.14.198-ipfire0
 
 THISAPP    = linux-$(VER)
 DL_FILE    = linux-$(VER).tar.xz
@@ -37,35 +34,39 @@ DIR_APP    = $(DIR_SRC)/$(THISAPP)
 CFLAGS     =
 CXXFLAGS   =
 
-PAK_VER    = 64
-DEPS	   = ""
+HEADERS_ARCH  = $(BUILD_PLATFORM)
+KERNEL_ARCH   = $(BUILD_ARCH)
+KERNEL_TARGET = bzImage
 
-KERNEL_ARCH = $(MACHINE)
-
-ifeq "$(MACHINE)" "i586"
+ifeq "$(BUILD_ARCH)" "i586"
 	KERNEL_ARCH = i386
+endif
+
+ifeq "$(BUILD_ARCH)" "aarch64"
+	HEADERS_ARCH = arm64
+	KERNEL_ARCH  = arm64
+	KERNEL_TARGET = Image
+endif
+
+ifeq "$(BUILD_ARCH)" "armv5tel"
+	KERNEL_ARCH  = arm
+	KERNEL_TARGET = zImage
 endif
 
 VERSUFIX=ipfire$(KCFG)
 
-ifeq "$(TOOLS)" "1"
+ifeq "$(TOOLCHAIN)" "1"
 	TARGET = $(DIR_INFO)/linux-$(VER)-$(VERSUFIX)-tools
-	HEADERS_PREFIX = /tools
+	HEADERS_PREFIX = $(TOOLS_DIR)
 else
 	TARGET = $(DIR_INFO)/linux-$(VER)-$(VERSUFIX)
 	HEADERS_PREFIX = /usr
 endif
 
-ifeq "$(MACHINE_TYPE)" "arm"
-	HEADERS_ARCH=arm
-else
-	HEADERS_ARCH=x86
-endif
-
 ifeq "$(KCFG)" ""
 LASTKERNEL=1
 endif
-ifeq "$(KCFG)" "-kirkwood"
+ifeq "$(KCFG)" "-multi"
 LASTKERNEL=1
 endif
 
@@ -73,20 +74,13 @@ endif
 # Top-level Rules
 ###############################################################################
 objects =$(DL_FILE) \
-	rpi-patches-$(RPI_PATCHES).patch.xz \
-	arm7-multi-patches-$(A7M_PATCHES).patch.xz \
-	$(GRS_PATCHES)
-
+	arm-multi-patches-$(ARM_PATCHES).patch.xz
 
 $(DL_FILE)					= $(URL_IPFIRE)/$(DL_FILE)
-rpi-patches-$(RPI_PATCHES).patch.xz		= $(URL_IPFIRE)/rpi-patches-$(RPI_PATCHES).patch.xz
-arm7-multi-patches-$(A7M_PATCHES).patch.xz	= $(URL_IPFIRE)/arm7-multi-patches-$(A7M_PATCHES).patch.xz
-$(GRS_PATCHES)					= $(URL_IPFIRE)/$(GRS_PATCHES)
+arm-multi-patches-$(ARM_PATCHES).patch.xz	= $(URL_IPFIRE)/arm-multi-patches-$(ARM_PATCHES).patch.xz
 
-$(DL_FILE)_MD5					= b7e254c83a0324852c8ccc4ed1b5377d
-rpi-patches-$(RPI_PATCHES).patch.xz_MD5		= 4ab53e184441c895adf318a1c2874d43
-arm7-multi-patches-$(A7M_PATCHES).patch.xz_MD5	= f29bd5c156384b0a4bb7c6e2c973ea06
-$(GRS_PATCHES)_MD5				= de603c5cb2e38ee308f1647ad3bd24cf
+$(DL_FILE)_MD5					= 9bf8f170f93283549cba55df5247b7b8
+arm-multi-patches-$(ARM_PATCHES).patch.xz_MD5	= 84b7afe9148e02568777ae0338da3844
 
 install : $(TARGET)
 
@@ -121,81 +115,47 @@ $(TARGET) : $(patsubst %,$(DIR_DL)/%,$(objects))
 
 	ln -svf linux-$(VER) $(DIR_SRC)/linux
 
-	# Linux Intermediate Queueing Device
-	cd $(DIR_APP) && patch -Np1 < $(DIR_SRC)/src/patches/linux-3.14.22-imq.patch
-
 	# Layer7-patch
-	cd $(DIR_APP) && patch -Np1 < $(DIR_SRC)/src/patches/linux-3.14-layer7-filter.patch
-
-ifneq "$(KCFG)" "-headers"
-	# Grsecurity-patches
-	cd $(DIR_APP) && xz -c -d $(DIR_DL)/$(GRS_PATCHES) | patch -Np1
-	cd $(DIR_APP) && rm localversion-grsec
-	cd $(DIR_APP) && patch -Np1 < $(DIR_SRC)/src/patches/linux-3.7-disable-compat_vdso.patch
-endif
+	cd $(DIR_APP) && patch -Np1 < $(DIR_SRC)/src/patches/linux/linux-4.14-layer7.patch
 
 	# DVB Patches
-	cd $(DIR_APP) && patch -Np1 < $(DIR_SRC)/src/patches/linux-3.14.22-dvbsky.patch
 	cd $(DIR_APP) && patch -Np2 < $(DIR_SRC)/src/patches/v4l-dvb_fix_tua6034_pll.patch
 
 	# Wlan Patches
-	cd $(DIR_APP) && patch -Np1 < $(DIR_SRC)/src/patches/compat-drivers-3.8.3-ath_ignore_eeprom_regdomain.patch
-	cd $(DIR_APP) && patch -Np1 < $(DIR_SRC)/src/patches/linux-3.14.22-iwlwifi-noibss_only_on_radar_chan.patch
-	cd $(DIR_APP) && patch -Np1 < $(DIR_SRC)/src/patches/linux-3.10.37-rt2800usb_add_dlink_dwa137_usbid.patch
-	cd $(DIR_APP) && patch -Np1 < $(DIR_SRC)/src/patches/linux-3.10.55-rt2800usb-change_queue_warn_to_debug.patch
-	cd $(DIR_APP) && patch -Np1 < $(DIR_SRC)/src/patches/linux-3.14.25_rt2x00_fix_bss_bcn_num.patch
-	cd $(DIR_APP) && patch -Np1 < $(DIR_SRC)/src/patches/linux-3.14.25-rt5592_no_special_txop_init.patch
-	cd $(DIR_APP) && patch -Np1 < $(DIR_SRC)/src/patches/linux-3.10.39-add_libertas_uap.patch
-
-	# mISDN Patches
-	cd $(DIR_APP) && patch -Np1 < $(DIR_SRC)/src/patches/mISDN_hfc-s_add_id.patch
-	cd $(DIR_APP) && patch -Np1 < $(DIR_SRC)/src/patches/mISDN-hfcusb-reportl1down.patch
+	cd $(DIR_APP) && patch -Np1 < $(DIR_SRC)/src/patches/linux/linux-4.14_ath_user_regd.patch
+	cd $(DIR_APP) && patch -Np1 < $(DIR_SRC)/src/patches/linux/linux-4.9.8-iwlwifi-noibss_only_on_radar_chan.patch
 
 	# Add LED trigger
-	cd $(DIR_APP) && patch -Np1 < $(DIR_SRC)/src/patches/linux-3.14.22-ledtrig_netdev.patch
+	cd $(DIR_APP) && patch -Np1 < $(DIR_SRC)/src/patches/linux/linux-4.9.16-ledtrig_netdev.patch
+
+	# Fix igb and e1000e crash
+	cd $(DIR_APP) && patch -Np1 < $(DIR_SRC)/src/patches/linux/linux-4.14.1-igb-e1000e_fix_lock_at_update_stats.patch
 
 	# cs5535audio spams syslog if no ac97 was present (geos router)
-	cd $(DIR_APP) && patch -Np1 < $(DIR_SRC)/src/patches/linux-3.10.30_cs5535audio_fix_logspam_on_geos.patch
+	cd $(DIR_APP) && patch -Np1 < $(DIR_SRC)/src/patches/linux/linux-4.9.8_cs5535audio_fix_logspam_on_geos.patch
 
 	# Add PC Engines APU led support
-	cd $(DIR_APP) && patch -Np1 < $(DIR_SRC)/src/patches/linux-3.14-apu_leds.patch
+	cd $(DIR_APP) && patch -Np1 < $(DIR_SRC)/src/patches/linux/linux-4.14-apu_leds.patch
 
 	# Fix uevent PHYSDEVDRIVER
-	cd $(DIR_APP) && patch -Np1 < $(DIR_SRC)/src/patches/linux-3.2.33_ipg-fix-driver-name.patch
-	cd $(DIR_APP) && patch -Np1 < $(DIR_SRC)/src/patches/linux-2.6.32.27_mcs7830-fix-driver-name.patch
+	cd $(DIR_APP) && patch -Np1 < $(DIR_SRC)/src/patches/linux/linux-2.6.32.27_mcs7830-fix-driver-name.patch
 
-	# r8169 L23 patch
-	cd $(DIR_APP) && patch -Np1 < $(DIR_SRC)/src/patches/linux-3.14.32-r8169_disable_L23.patch
+	# Active try to add entropy if the kernel wait for it
+	cd $(DIR_APP) && patch -Np1 < $(DIR_SRC)/src/patches/linux/linux-random_try_to_actively_add_entropy.patch
+	cd $(DIR_APP) && patch -Np1 < $(DIR_SRC)/src/patches/linux/linux-4.14.x-add_timer_setup_on_stack.patch
 
-	# update the queued trim blacklist from kernel 4.2rc1
-	cd $(DIR_APP) && patch -Np1 < $(DIR_SRC)/src/patches/linux-3.14.43_new_qtrim_blacklist.patch
-
-	# HyperV 2008 patch
-	cd $(DIR_APP) && patch -Np1 < $(DIR_SRC)/src/patches/linux-3.14.x-hyperv-2008-fix.patch
-
-	# fix empty symbol crc's
-	cd $(DIR_APP) && patch -Np1 < $(DIR_SRC)/src/patches/linux-genksyms_fix_typeof_handling.patch
-
-ifeq "$(KCFG)" "-kirkwood"
-	cd $(DIR_APP) && patch -Np1 < $(DIR_SRC)/src/patches/linux-3.10.10-mv_cesa_disable_failing_hmac_sha1.patch
-	cd $(DIR_APP) && patch -Np1 < $(DIR_SRC)/src/patches/linux-3.14.22-kirkwood_legacy_boot.patch
-endif
+	# Patch CVE-2020-14386
+	cd $(DIR_APP) && patch -Np1 < $(DIR_SRC)/src/patches/linux/linux-4.14_cve-2020-14386_net_packet_fix_overflow_in_tpacket_rcv.patch
 
 ifeq "$(KCFG)" "-multi"
-	cd $(DIR_APP) && patch -Np1 < $(DIR_SRC)/src/patches/linux-3.10-smsc95xx-add_mac_addr_param.patch
-
-	# Apply Arm7-multiarch kernel patches.
-	cd $(DIR_APP) && xzcat $(DIR_DL)/arm7-multi-patches-$(A7M_PATCHES).patch.xz | patch -Np1
-
-	# Install switch api userspace header
-	cd $(DIR_APP) && install -v -m644 include/uapi/linux/switch.h /usr/include/linux/
-
+	# Apply Arm-multiarch kernel patches.
+	cd $(DIR_APP) && xzcat $(DIR_DL)/arm-multi-patches-$(ARM_PATCHES).patch.xz | patch -Np1
 endif
-
-ifeq "$(KCFG)" "-rpi"
-	# Apply Raspberry Pi kernel patches.
-	cd $(DIR_APP) && xzcat $(DIR_DL)/rpi-patches-$(RPI_PATCHES).patch.xz | patch -Np1
+ifeq "$(BUILD_ARCH)" "aarch64"
+	# Apply Arm-multiarch kernel patches.
+	cd $(DIR_APP) && xzcat $(DIR_DL)/arm-multi-patches-$(ARM_PATCHES).patch.xz | patch -Np1
 endif
+	cd $(DIR_APP) && patch -Np1 < $(DIR_SRC)/src/patches/linux/linux-3.14.79-amba-fix.patch
 
 ifeq "$(KCFG)" "-headers"
 	# Install the header files
@@ -210,66 +170,94 @@ else
 		drivers/video/logo/logo_linux_clut224.ppm
 
 	# Cleanup kernel source
-	cp $(DIR_SRC)/config/kernel/kernel.config.$(MACHINE)-$(VERSUFIX) $(DIR_APP)/.config
+	cp $(DIR_SRC)/config/kernel/kernel.config.$(BUILD_ARCH)-$(VERSUFIX) $(DIR_APP)/.config
 	cd $(DIR_APP) && make oldconfig
 	cd $(DIR_APP) && make clean
 	cd $(DIR_APP) && sed -i -e 's/EXTRAVERSION\ =.*/EXTRAVERSION\ =\ -$(VERSUFIX)/' Makefile
 
-ifeq "$(KCFG)" "-kirkwood"
-	cd $(DIR_APP) && make $(MAKETUNING) uImage modules
-	cd $(DIR_APP) && cp -v arch/arm/boot/uImage /boot/vmlinuz-$(VER)-$(VERSUFIX)
-	cd $(DIR_APP) && cp -v arch/arm/boot/uImage /boot/uImage-$(VERSUFIX)
-else
-ifeq "$(KCFG)" "-multi"
-	cd $(DIR_APP) && make $(MAKETUNING) zImage modules
-	cd $(DIR_APP) && cp -v arch/arm/boot/zImage /boot/vmlinuz-$(VER)-$(VERSUFIX)
-	cd $(DIR_APP) && cp -v arch/arm/boot/zImage /boot/zImage-$(VERSUFIX)
-else
-ifeq "$(KCFG)" "-rpi"
-	cd $(DIR_APP) && make $(MAKETUNING) zImage modules
-	cd $(DIR_APP) && cp -v arch/arm/boot/zImage /boot/vmlinuz-$(VER)-$(VERSUFIX)
-	cd $(DIR_APP) && cp -v arch/arm/boot/zImage /boot/kernel.img
-else
-	cd $(DIR_APP) && make $(MAKETUNING) bzImage modules
-	cd $(DIR_APP) && cp -v arch/$(KERNEL_ARCH)/boot/bzImage /boot/vmlinuz-$(VER)-$(VERSUFIX)
-endif
-endif
-endif
+	# Copy Module signing key configuration
+	cp -f $(DIR_SRC)/config/kernel/x509.genkey $(DIR_APP)/certs/x509.genkey
 
+	# Remove modules folder if exists
+	rm -rf /lib/modules/$(VER)-$(VERSUFIX)
+
+	# Build the kernel
+	cd $(DIR_APP) && make $(MAKETUNING) $(KERNEL_TARGET) modules
+
+	# Install the kernel
+	cd $(DIR_APP) && cp -v arch/$(KERNEL_ARCH)/boot/$(KERNEL_TARGET) /boot/vmlinuz-$(VER)-$(VERSUFIX)
 	cd $(DIR_APP) && cp -v System.map /boot/System.map-$(VER)-$(VERSUFIX)
 	cd $(DIR_APP) && cp -v .config /boot/config-$(VER)-$(VERSUFIX)
 	cd $(DIR_APP) && make $(MAKETUNING) modules_install
-	cd $(DIR_APP) && make $(MAKETUNING) firmware_install
 
-ifeq "$(MACHINE_TYPE)" "arm"
+ifeq "$(BUILD_PLATFORM)" "arm"
 	cd $(DIR_APP) && make $(MAKETUNING) dtbs
-	cd $(DIR_APP) && for f in $$(find arch/arm/boot/dts/ -name *.dtb); do \
-				mkdir -p /boot/dtb-$(VER)-$(VERSUFIX) ; \
-				install -m 644 $$f /boot/dtb-$(VER)-$(VERSUFIX)/ ; \
+	mkdir -p /boot/dtb-$(VER)-$(VERSUFIX)
+	cd $(DIR_APP)/arch/$(KERNEL_ARCH)/boot/dts && for f in $$(find -name "*.dtb"); do \
+				cp -v --parents $$f /boot/dtb-$(VER)-$(VERSUFIX)/ ; \
+				chmod 644 /boot/dtb-$(VER)-$(VERSUFIX)/$$f ; \
 			done
 endif
+
+	# Recreate source and build links
+	rm -rf /lib/modules/$(VER)-$(VERSUFIX)/{build,source}
+	mkdir -p /lib/modules/$(VER)-$(VERSUFIX)/build
+	ln -sf build /lib/modules/$(VER)-$(VERSUFIX)/source
+
+	# Create dirs for extra modules
+	mkdir -p /lib/modules/$(VER)-$(VERSUFIX)/extra
+
+	cd $(DIR_APP) && cp --parents $$(find -type f -name "Makefile*" -o -name "Kconfig*") \
+		/lib/modules/$(VER)-$(VERSUFIX)/build
+	cd $(DIR_APP) && cp Module.symvers System.map /lib/modules/$(VER)-$(VERSUFIX)/build
+	rm -rf /lib/modules/$(VER)-$(VERSUFIX)/build/{Documentation,scripts,include}
+
+	cd $(DIR_APP) && cp .config /lib/modules/$(VER)-$(VERSUFIX)/build
+	cd $(DIR_APP) && cp -a scripts /lib/modules/$(VER)-$(VERSUFIX)/build
+	find /lib/modules/$(VER)-$(VERSUFIX)/build/scripts -name "*.o" -exec rm -vf {} \;
+
+	cd $(DIR_APP) && cp -a --parents arch/$(HEADERS_ARCH)/include /lib/modules/$(VER)-$(VERSUFIX)/build
+	cd $(DIR_APP) && cp -a include /lib/modules/$(VER)-$(VERSUFIX)/build/include
+
+	# Copy module signing key for off tree modules
+	cd $(DIR_APP) && cp -f certs/signing_key.* /lib/modules/$(VER)-$(VERSUFIX)/build/certs/
+
+	# Install objtool
+	cd $(DIR_APP) && cp -a tools/objtool/objtool \
+		/lib/modules/$(VER)-$(VERSUFIX)/build/tools/objtool/ || :
+	cd $(DIR_APP) && cp -a --parents tools/build/{Build,Build.include,fixdep.c} \
+		tools/scripts/utilities.mak /lib/modules/$(VER)-$(VERSUFIX)/build
+
+	# Make sure we can build external modules
+	touch -r /lib/modules/$(VER)-$(VERSUFIX)/build/Makefile \
+		/lib/modules/$(VER)-$(VERSUFIX)/build/include/generated/uapi/linux/version.h
+	touch -r /lib/modules/$(VER)-$(VERSUFIX)/build/.config \
+		/lib/modules/$(VER)-$(VERSUFIX)/build/autoconf.h
+	cp /lib/modules/$(VER)-$(VERSUFIX)/build/.config \
+		/lib/modules/$(VER)-$(VERSUFIX)/build/include/config/auto.conf
+
+	# Fix permissions
+	find /lib/modules/$(VER)-$(VERSUFIX) -name "modules.order" \
+		-exec chmod 644 {} \;
+
+	find /lib/modules/$(VER)-$(VERSUFIX) -name ".*.cmd" -exec rm -f {} \;
 
 ifeq "$(LASTKERNEL)" "1"
 	# Only do this once
 	cd $(DIR_APP) && install -m 755 usr/gen_init_cpio /sbin/
 
-	# Blacklist matroxfb_base
-	echo "blacklist matroxfb_base" >> /etc/modprobe.d/framebuffer.conf
+	# disable drm by install drm to /bin/false because i915 ignore blacklisting
+	echo install drm /bin/false > /etc/modprobe.d/framebuffer.conf
+
 	# Blacklist old framebuffer modules
-	for f in $$(find /lib/modules/$(VER)-$(VERSUFIX)/kernel/drivers/video -name *fb.ko); do \
+	for f in $$(find /lib/modules/$(VER)-$(VERSUFIX)/kernel/drivers/video/fbdev/ -name *.ko.xz); do \
 		echo "blacklist $$(basename $$f)" >> /etc/modprobe.d/framebuffer.conf ; \
 	done
 	# Blacklist new drm framebuffer modules
-	for f in $$(ls -1 /lib/modules/$(VER)-$(VERSUFIX)/kernel/drivers/gpu/drm/*/*.ko); do \
+	for f in $$(find /lib/modules/$(VER)-$(VERSUFIX)/kernel/drivers/gpu/drm -name *.ko.xz); do \
 		echo "blacklist $$(basename $$f)" >> /etc/modprobe.d/framebuffer.conf ; \
-	done
-	sed -i -e "s|.ko||g" /etc/modprobe.d/framebuffer.conf
-
-	# Blacklist isdn modules
-	for f in $$(find /lib/modules/$(VER)-$(VERSUFIX)/kernel/drivers/isdn -name *.ko); do \
-		echo "blacklist $$(basename $$f)" >> /etc/modprobe.d/isdn.conf ; \
-	done
-	sed -i -e "s|.ko||g" /etc/modprobe.d/isdn.conf
+	done	
+	sed -i -e "s|.ko.xz||g" /etc/modprobe.d/framebuffer.conf
 
 	# Disable ipv6 at runtime
 	echo "options ipv6 disable_ipv6=1" > /etc/modprobe.d/ipv6.conf
@@ -280,5 +268,5 @@ endif
 	-rm -f /usr/src/log/*-kmod-$(VER)-$(VERSUFIX)
 	-rm -f /usr/src/log/linux-initrd-$(VER)-$(VERSUFIX)
 
-	@rm -rf $(DIR_SRC)/patch-o-matic* $(DIR_SRC)/iptables* $(DIR_SRC)/squashfs* $(DIR_SRC)/netfilter-layer7-*
+	@rm -rf $(DIR_APP) $(DIR_SRC)/linux
 	@$(POSTBUILD)

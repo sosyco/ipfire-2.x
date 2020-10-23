@@ -1,7 +1,7 @@
 ###############################################################################
 #                                                                             #
 # IPFire.org - A linux based firewall                                         #
-# Copyright (C) 2007  Michael Tremer & Christian Schmidt                      #
+# Copyright (C) 2007-2018  IPFire Team  <info@ipfire.org>                     #
 #                                                                             #
 # This program is free software: you can redistribute it and/or modify        #
 # it under the terms of the GNU General Public License as published by        #
@@ -24,7 +24,7 @@
 
 include Config
 
-VER        = 1_55_0
+VER        = 1_71_0
 
 THISAPP    = boost_$(VER)
 DL_FILE    = $(THISAPP).tar.gz
@@ -32,23 +32,32 @@ DL_FROM    = $(URL_IPFIRE)
 DIR_APP    = $(DIR_SRC)/$(THISAPP)
 TARGET     = $(DIR_INFO)/$(THISAPP)
 
-CFLAGS    += -fno-strict-aliasing
-CXXFLAGS  += -fno-strict-aliasing
+CFLAGS    += -O3 -fno-strict-aliasing
+CXXFLAGS  += -O3 -fno-strict-aliasing
+
+# The compiler uses a lot of memory to compile boost, hence we reduce
+# the total number of processes a little bit to be able to build on
+# smaller machines
+MAX_PARALLELISM = $(shell echo $$(( $(SYSTEM_MEMORY) / 512)))
 
 CONFIGURE_OPTIONS = \
 	--prefix=/usr \
 	--layout=tagged \
-	--without-mpi \
+	--without-chrono \
+	--without-context \
+	--without-coroutine \
+	--without-date_time \
+	--without-fiber \
 	--without-graph_parallel \
+	--without-mpi \
+	--without-program_options \
 	--build-dir=serial \
-	cflags="$(CFLAGS)" \
-	cxxflags="$(CXXFLAGS)" \
 	variant=release \
 	threading=single,multi \
 	debug-symbols=off \
-	pch=off
-
-MAKETUNING = -j2
+	pch=off \
+	cflags="$(CFLAGS)" \
+	cxxflags="$(CXXFLAGS)"
 
 ###############################################################################
 # Top-level Rules
@@ -58,7 +67,7 @@ objects = $(DL_FILE)
 
 $(DL_FILE) = $(DL_FROM)/$(DL_FILE)
 
-$(DL_FILE)_MD5 = 93780777cfbf999a600f62883bd54b17
+$(DL_FILE)_MD5 = 5f521b41b79bf8616582c4a8a2c10177
 
 install : $(TARGET)
 
@@ -91,7 +100,7 @@ $(TARGET) : $(patsubst %,$(DIR_DL)/%,$(objects))
 
 	cd $(DIR_APP) && ./bootstrap.sh --with-toolset=gcc
 	cd $(DIR_APP) && ./b2 -d+2 -q $(MAKETUNING) $(CONFIGURE_OPTIONS) stage
-	cd $(DIR_APP) && ./b2 $(MAKETUNING) $(CONFIGURE_OPTIONS) install
+	cd $(DIR_APP) && ./b2 $(CONFIGURE_OPTIONS) install
 
 	@rm -rf $(DIR_APP)
 	@$(POSTBUILD)

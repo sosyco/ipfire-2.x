@@ -1,7 +1,7 @@
 ###############################################################################
 #                                                                             #
 # IPFire.org - A linux based firewall                                         #
-# Copyright (C) 2007-2015   IPFire Team  <info@ipfire.org>                    #
+# Copyright (C) 2007-2018  IPFire Team  <info@ipfire.org>                     #
 #                                                                             #
 # This program is free software: you can redistribute it and/or modify        #
 # it under the terms of the GNU General Public License as published by        #
@@ -55,6 +55,11 @@ $(TARGET) : $(patsubst %,$(DIR_DL)/%,$(objects))
 	mkdir -p /var/updatecache/{download,metadata}
 	cp -aR $(DIR_SRC)/html/* /srv/web/ipfire
 
+	# Add base64 encoded background image to Squid content access page
+	basedata="$$( base64 $(DIR_SRC)/html/html/images/background.gif | tr -d '\n' )"; \
+		sed -i "s|IMAGEDATAPLACEHOLDER|$${basedata}|g" \
+		/srv/web/ipfire/html/redirect-templates/legacy/template.html
+
 	# Change CONFIG_ROOT in cgi-scripts
 	for i in /srv/web/ipfire/cgi-bin/{*,logs.cgi/*,vpn.cgi/*}; do \
 	    if [ -f $$i ]; then \
@@ -64,9 +69,28 @@ $(TARGET) : $(patsubst %,$(DIR_DL)/%,$(objects))
 	chown -R root:root /srv/web/ipfire
 	chmod -R 755 /srv/web/ipfire/cgi-bin
 	chmod -R 644 /srv/web/ipfire/html
-	chmod 755 /srv/web/ipfire/html /srv/web/ipfire/html/{index.cgi,redirect.cgi,dial.cgi,images,include,themes,themes/*,themes/*/*}
+	chmod 755 /srv/web/ipfire/html /srv/web/ipfire/html/{index.cgi,redirect.cgi,images,include,themes,themes/*,themes/*/*}
 	ln -svf ipfire /srv/web/ipfire/html/themes/ipfire-rounded
 
 	# Reset permissions of redirect templates and theme directories
-	find /srv/web/ipfire/html/{redirect-templates,themes} -type d | xargs chmod -v 755
+	find /srv/web/ipfire/html/{captive,redirect-templates,themes} -type d | xargs chmod -v 755
+
+	# Captive Portal CSS
+	ln -svf --relative /usr/share/bootstrap/css/bootstrap-grid.min.css \
+		/srv/web/ipfire/html/captive/assets/bootstrap-grid.min.css
+	ln -svf --relative /usr/share/bootstrap/css/bootstrap-grid.min.css.map \
+		/srv/web/ipfire/html/captive/assets/bootstrap-grid.min.css.map
+	ln -svf --relative /usr/share/bootstrap/css/bootstrap-reboot.min.css \
+		/srv/web/ipfire/html/captive/assets/bootstrap-reboot.min.css
+	ln -svf --relative /usr/share/bootstrap/css/bootstrap-reboot.min.css.map \
+		/srv/web/ipfire/html/captive/assets/bootstrap-reboot.min.css.map
+
+	# Captive Portal Fonts
+	ln -svf --relative /usr/share/fonts/Ubuntu-L.ttf \
+		/srv/web/ipfire/html/captive/assets/Ubuntu-L.ttf
+	ln -svf --relative /usr/share/fonts/Ubuntu-M.ttf \
+		/srv/web/ipfire/html/captive/assets/Ubuntu-M.ttf
+	ln -svf --relative /usr/share/fonts/Ubuntu-R.ttf \
+		/srv/web/ipfire/html/captive/assets/Ubuntu-R.ttf
+
 	@$(POSTBUILD)

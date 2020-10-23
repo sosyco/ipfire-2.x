@@ -3,9 +3,20 @@
 			        'title' => "$Lang::tr{'net config'}",
 			        'enabled' => 0,
 			        };
-    $subnetwork->{'20.proxy'} = {'caption' => 'Webproxy',
+	$subnetwork->{'11.zoneconf'} = {'caption' => "$Lang::tr{'zoneconf title'}",
+			        'uri' => '/cgi-bin/zoneconf.cgi',
+			        'title' => "$Lang::tr{'zoneconf title'}",
+			        'enabled' => 1,
+			        };
+    $subnetwork->{'12.dns'} = {
+                                  'caption' => $Lang::tr{'dns title'},
+                                  'uri' => '/cgi-bin/dns.cgi',
+                                  'title' => "$Lang::tr{'dns title'}",
+                                  'enabled' => 1,
+                                  };
+    $subnetwork->{'20.proxy'} = {'caption' => "$Lang::tr{'web proxy'}",
 			        'uri' => '/cgi-bin/proxy.cgi',
-			        'title' => "Webproxy",
+			        'title' => "$Lang::tr{'web proxy'}",
 			        'enabled' => 1,
 			        };
     $subnetwork->{'21.urlfilter'} = {'caption' => $Lang::tr{'url filter'},
@@ -23,6 +34,11 @@
 				 'title' => "$Lang::tr{'dhcp server'}",
 				 'enabled' => 1,
 				 };
+	$subnetwork->{'32.captive'} = {'caption' => $Lang::tr{'Captive'},
+			        'uri' => '/cgi-bin/captive.cgi',
+			        'title' => $Lang::tr{'Captive'},
+			        'enabled' => 1,
+			        };
     $subnetwork->{'40.scheduler'} = {
 				 'caption' => $Lang::tr{'connscheduler'},
 				 'uri' => '/cgi-bin/connscheduler.cgi',
@@ -35,12 +51,6 @@
 				 'title' => "$Lang::tr{'edit hosts'}",
 				 'enabled' => 1,
 				 };
-    $subnetwork->{'51.dnsmenu'} = {
-                                  'caption' => $Lang::tr{'dns menu'},
-                                  'uri' => '/cgi-bin/dns.cgi',
-                                  'title' => "$Lang::tr{'dns menu'}",
-                                  'enabled' => `grep "RED_TYPE=DHCP" /var/ipfire/ethernet/settings`,
-                                  };
     $subnetwork->{'52.dnsforward'} = {
                                   'caption' => $Lang::tr{'dnsforward'},
                                   'uri' => '/cgi-bin/dnsforward.cgi',

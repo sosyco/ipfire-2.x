@@ -23,7 +23,7 @@
 #include <libintl.h>
 #define _(x) dgettext("installer", x)
 
-#define INST_FILECOUNT 21000
+#define INST_FILECOUNT 28000
 #define LICENSE_FILE	"/cdrom/COPYING"
 #define SOURCE_TEMPFILE "/tmp/downloads/image.iso"
 
@@ -195,7 +195,7 @@ int write_lang_configs(char* lang) {
 
 	/* default stuff for main/settings. */
 	replacekeyvalue(kv, "LANGUAGE", lang);
-	replacekeyvalue(kv, "HOSTNAME", SNAME);
+	replacekeyvalue(kv, "HOSTNAME", DISTRO_SNAME);
 	replacekeyvalue(kv, "THEME", "ipfire");
 	writekeyvalues(kv, "/harddisk" CONFIG_ROOT "/main/settings");
 	freekeyvalues(kv);
@@ -369,7 +369,7 @@ int main(int argc, char *argv[]) {
 	FILE *copying;
 
 	setlocale(LC_ALL, "");
-	sethostname(SNAME, 10);
+	sethostname(DISTRO_SNAME, 10);
 
 	/* Log file/terminal stuff. */
 	FILE* flog = NULL;
@@ -383,7 +383,9 @@ int main(int argc, char *argv[]) {
 	}
 
 	fprintf(flog, "Install program started.\n");
-		
+	if (hw->efi)
+		fprintf(flog, "EFI mode enabled\n");
+
 	newtInit();
 	newtCls();
 
@@ -398,7 +400,7 @@ int main(int argc, char *argv[]) {
 	if (roottext)
 		newtDrawRootText(0, 0, roottext);
 
-	snprintf(title, sizeof(title), "%s - %s", NAME, SLOGAN);
+	snprintf(title, sizeof(title), "%s - %s", DISTRO_NAME, DISTRO_SLOGAN);
 
 	// Parse parameters from the kernel command line
 	parse_command_line(&config);
@@ -448,7 +450,7 @@ int main(int argc, char *argv[]) {
 	if (!config.unattended) {
 		snprintf(message, sizeof(message),
 			_("Welcome to the %s installation program.\n\n"
-			"Selecting Cancel on any of the following screens will reboot the computer."), NAME);
+			"Selecting Cancel on any of the following screens will reboot the computer."), DISTRO_NAME);
 		newtWinMessage(title, _("Start installation"), message);
 	}
 
@@ -673,7 +675,8 @@ int main(int argc, char *argv[]) {
 
 	hw_free_disks(disks);
 
-	struct hw_destination* destination = hw_make_destination(part_type, selected_disks, config.disable_swap);
+	struct hw_destination* destination = hw_make_destination(hw, part_type,
+		selected_disks, config.disable_swap);
 
 	if (!destination) {
 		errorbox(_("Your harddisk is too small."));
@@ -683,9 +686,9 @@ int main(int argc, char *argv[]) {
 	fprintf(flog, "Destination drive: %s\n", destination->path);
 	fprintf(flog, "  bootldr: %s (%lluMB)\n", destination->part_bootldr, BYTES2MB(destination->size_bootldr));
 	fprintf(flog, "  boot   : %s (%lluMB)\n", destination->part_boot, BYTES2MB(destination->size_boot));
+	fprintf(flog, "  ESP    : %s (%lluMB)\n", destination->part_boot_efi, BYTES2MB(destination->size_boot_efi));
 	fprintf(flog, "  swap   : %s (%lluMB)\n", destination->part_swap, BYTES2MB(destination->size_swap));
 	fprintf(flog, "  root   : %s (%lluMB)\n", destination->part_root, BYTES2MB(destination->size_root));
-	fprintf(flog, "  data   : %s (%lluMB)\n", destination->part_data, BYTES2MB(destination->size_data));
 	fprintf(flog, "Memory   : %lluMB\n", BYTES2MB(hw_memory()));
 
 	// Warn the user if there is not enough space to create a swap partition
@@ -778,7 +781,7 @@ int main(int argc, char *argv[]) {
 
 	// Extract files...
 	snprintf(commandstring, STRING_SIZE,
-		"/bin/tar -C /harddisk  -xvf /cdrom/distro.img --lzma 2>/dev/null");
+		"/bin/tar -C /harddisk -xvf /cdrom/distro.img --xz 2>/dev/null");
 
 	if (runcommandwithprogress(60, 4, title, commandstring, INST_FILECOUNT,
 			_("Installing the system..."), logfile)) {
@@ -803,6 +806,13 @@ int main(int argc, char *argv[]) {
 		goto EXIT;
 	}
 
+	/* trigger udev to add disk-by-uuid entries */
+	snprintf(commandstring, STRING_SIZE, "/usr/sbin/chroot /harddisk /sbin/udevadm trigger");
+	if (runcommandwithstatus(commandstring, title, _("Trigger udev to redetect partitions..."), logfile)) {
+		errorbox(_("Error triggering udev to redetect partitions."));
+		goto EXIT;
+	}
+
 	// Installing bootloader...
 	statuswindow(60, 4, title, _("Installing the bootloader..."));
 
@@ -820,15 +830,6 @@ int main(int argc, char *argv[]) {
 		fclose(f);
 
 		replace(DESTINATION_MOUNT_PATH "/etc/default/grub", "panic=10", "panic=10 console=ttyS0,115200n8");
-
-		/* inittab */
-		replace("/harddisk/etc/inittab", "1:2345:respawn:", "#1:2345:respawn:");
-		replace("/harddisk/etc/inittab", "2:2345:respawn:", "#2:2345:respawn:");
-		replace("/harddisk/etc/inittab", "3:2345:respawn:", "#3:2345:respawn:");
-		replace("/harddisk/etc/inittab", "4:2345:respawn:", "#4:2345:respawn:");
-		replace("/harddisk/etc/inittab", "5:2345:respawn:", "#5:2345:respawn:");
-		replace("/harddisk/etc/inittab", "6:2345:respawn:", "#6:2345:respawn:");
-		replace("/harddisk/etc/inittab", "#7:2345:respawn:", "7:2345:respawn:");
 	}
 
 	/* novga */
@@ -844,7 +845,7 @@ int main(int argc, char *argv[]) {
 		fclose(f);
 	}
 
-	rc = hw_install_bootloader(destination, logfile);
+	rc = hw_install_bootloader(hw, destination, logfile);
 	if (rc) {
 		errorbox(_("Unable to install the bootloader."));
 		goto EXIT;
@@ -933,7 +934,7 @@ int main(int argc, char *argv[]) {
 			"Please remove any installation mediums from this system and hit the reboot button. "
 			"Once the system has restarted you will be asked to setup networking and system passwords. "
 			"After that, you should point your web browser at https://%s:444 (or what ever you name "
-			"your %s) for the web configuration console."), NAME, SNAME, NAME);
+			"your %s) for the web configuration console."), DISTRO_NAME, DISTRO_SNAME, DISTRO_NAME);
 		newtWinMessage(_("Congratulations!"), _("Reboot"), message);
 	}
 

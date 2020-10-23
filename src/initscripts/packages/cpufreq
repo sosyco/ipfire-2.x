@@ -1,0 +1,73 @@
+#!/bin/sh
+########################################################################
+# Begin $rc_base/init.d/cpufreq
+#
+# Description : Initalisize and startup cpufreq and set a governor
+#
+# Authors     : Arne Fitzenreiter - arne_f@ipfire.org
+#
+# Version     : 01.01
+#
+# Notes       :
+#
+########################################################################
+
+. /etc/sysconfig/rc
+. ${rc_functions}
+
+case "${1}" in
+	start)
+		boot_mesg -n "Starting cpufreq... "
+
+		# try cpufreq hardware depend modules
+		for i in $(find /lib/modules/$(uname -r)/kernel/drivers/cpufreq \
+		           ! -name speedstep-lib.ko.xz ! -name p4-clockmod.ko.xz ! -name "cpufreq_*" ! -name mperf.ko.xz | sort -d -r); do
+			module=$(basename $i | cut -d. -f1);
+			modprobe $module > /dev/null 2>&1;
+			if [ ${?} = 0 ]; then
+			    boot_mesg -n "$SUCCESS$module$NORMAL "
+			fi
+		done
+		boot_mesg ""
+
+		# load cqufreq governors
+		modprobe cpufreq_conservative
+		modprobe cpufreq_ondemand
+		modprobe cpufreq_powersave
+		modprobe cpufreq_userspace
+
+		driver=`cat /sys/devices/system/cpu/cpu0/cpufreq/scaling_driver 2>/dev/null`
+
+		case "$driver" in
+		    intel_pstate)
+			# pstate use internal gov so skip this setting
+			echo_ok;
+			;;
+		    *)
+			CPUCOUNT=`ls /sys/devices/system/cpu/cpu*/cpufreq/affected_cpus 2> /dev/null | wc -l `;
+			let CPUCOUNT-=1
+			# Set the governor to ondemand to test if it works 
+			cpufreq-set -g ondemand
+			if [ ${?} = 0 ]; then
+				# Set the governor to ondemand for all cpus 
+				for i in `seq 0 $CPUCOUNT`;
+				do
+					cpufreq-set -c $i -g ondemand
+				done
+				echo_ok;
+			else
+				echo_failure;
+			fi
+			;;
+		    esac
+		exit 0;
+		;;
+	*)
+		echo "Usage: ${0} {start}"
+		exit 1
+		;;
+esac
+
+# End $rc_base/init.d/cpufreq
+
+

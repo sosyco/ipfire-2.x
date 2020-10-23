@@ -1,7 +1,7 @@
 ###############################################################################
 #                                                                             #
 # IPFire.org - A linux based firewall                                         #
-# Copyright (C) 2009  Michael Tremer & Christian Schmidt                      #
+# Copyright (C) 2007-2018  IPFire Team  <info@ipfire.org>                     #
 #                                                                             #
 # This program is free software: you can redistribute it and/or modify        #
 # it under the terms of the GNU General Public License as published by        #
@@ -24,7 +24,7 @@
 
 include Config
 
-VER        = 2.7.2
+VER        = 2.7.4
 
 THISAPP    = nut-$(VER)
 DL_FILE    = $(THISAPP).tar.gz
@@ -32,9 +32,9 @@ DL_FROM    = $(URL_IPFIRE)
 DIR_APP    = $(DIR_SRC)/$(THISAPP)
 TARGET     = $(DIR_INFO)/$(THISAPP)
 PROG       = nut
-PAK_VER    = 5
+PAK_VER    = 7
 
-DEPS       = ""
+DEPS       =
 
 ###############################################################################
 # Top-level Rules
@@ -44,7 +44,7 @@ objects = $(DL_FILE)
 
 $(DL_FILE) = $(DL_FROM)/$(DL_FILE)
 
-$(DL_FILE)_MD5 = c3568b42e058cfc385b46d25140dced4
+$(DL_FILE)_MD5 = 3ba53656933d7471f95140b32a5b8d5c
 
 install : $(TARGET)
 
@@ -80,10 +80,14 @@ $(TARGET) : $(patsubst %,$(DIR_DL)/%,$(objects))
 	cd $(DIR_APP) && ./configure --prefix=/usr --sysconfdir=/etc/nut \
 			--with-usb --with-user=root --with-group=nut \
 			--with-wrap=no --with-udev-dir=/etc/udev
-	cd $(DIR_APP) && make
+	cd $(DIR_APP) && make #$(MAKETUNING)
 	cd $(DIR_APP) && make install
 #	sed -i -e "s|ATTR{|SYSFS{|g" /etc/udev/rules.d/52-nut-usbups.rules
-	-mkdir -p /var/state/ups
+	mkdir -p /var/state/ups
+
+	#install initscripts
+	$(call INSTALL_INITSCRIPT,nut)
+
 	install -v -m 644 $(DIR_SRC)/config/backup/includes/nut \
 			 /var/ipfire/backup/addons/includes/nut
 	@rm -rf $(DIR_APP)

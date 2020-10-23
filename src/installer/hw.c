@@ -37,6 +37,7 @@
 #include <sys/stat.h>
 #include <sys/swap.h>
 #include <sys/sysinfo.h>
+#include <sys/utsname.h>
 #include <unistd.h>
 
 #include <linux/fs.h>
@@ -61,7 +62,7 @@ static int system_chroot(const char* output, const char* path, const char* cmd) 
 }
 
 struct hw* hw_init() {
-	struct hw* hw = malloc(sizeof(*hw));
+	struct hw* hw = calloc(1, sizeof(*hw));
 	assert(hw);
 
 	// Initialize libudev
@@ -70,6 +71,16 @@ struct hw* hw_init() {
 		fprintf(stderr, "Could not create udev instance\n");
 		exit(1);
 	}
+
+	// What architecture are we running on?
+	struct utsname uname_data;
+	int ret = uname(&uname_data);
+	if (ret == 0)
+		snprintf(hw->arch, sizeof(hw->arch), "%s", uname_data.machine);
+
+	// Should we install in EFI mode?
+	if ((strcmp(hw->arch, "x86_64") == 0) || (strcmp(hw->arch, "aarch64") == 0))
+		hw->efi = 1;
 
 	return hw;
 }
@@ -165,7 +176,7 @@ static int hw_test_source_medium(const char* path) {
 	// Umount the test device.
 	hw_umount(SOURCE_MOUNT_PATH);
 
-	return (ret == 0);
+	return ret;
 }
 
 char* hw_find_source_medium(struct hw* hw) {
@@ -420,23 +431,8 @@ static unsigned long long hw_swap_size(struct hw_destination* dest) {
 	return swap_size;
 }
 
-static unsigned long long hw_root_size(struct hw_destination* dest) {
-	unsigned long long root_size;
-
-	if (dest->size < MB2BYTES(2048))
-		root_size = MB2BYTES(1024);
-
-	else if (dest->size >= MB2BYTES(2048) && dest->size <= MB2BYTES(3072))
-		root_size = MB2BYTES(1536);
-
-	else
-		root_size = MB2BYTES(2048);
-
-	return root_size;
-}
-
 static unsigned long long hw_boot_size(struct hw_destination* dest) {
-	return MB2BYTES(64);
+	return MB2BYTES(128);
 }
 
 static int hw_device_has_p_suffix(const struct hw_destination* dest) {
@@ -453,7 +449,7 @@ static int hw_device_has_p_suffix(const struct hw_destination* dest) {
 	return 0;
 }
 
-static int hw_calculate_partition_table(struct hw_destination* dest, int disable_swap) {
+static int hw_calculate_partition_table(struct hw* hw, struct hw_destination* dest, int disable_swap) {
 	char path[DEV_SIZE];
 	int part_idx = 1;
 
@@ -479,6 +475,10 @@ static int hw_calculate_partition_table(struct hw_destination* dest, int disable
 
 	// Add some more space for partition tables, etc.
 	dest->size -= MB2BYTES(1);
+
+	// The disk has to have at least 2GB
+	if (dest->size <= MB2BYTES(2048))
+		return -1;
 
 	// Determine partition table
 	dest->part_table = HW_PART_TABLE_MSDOS;
@@ -506,7 +506,20 @@ static int hw_calculate_partition_table(struct hw_destination* dest, int disable
 	}
 
 	dest->size_boot = hw_boot_size(dest);
-	dest->size_root = hw_root_size(dest);
+
+	// Create an EFI partition when running in EFI mode
+	if (hw->efi)
+		dest->size_boot_efi = MB2BYTES(32);
+	else
+		dest->size_boot_efi = 0;
+
+	// Determine the size of the data partition.
+	unsigned long long space_left = dest->size - \
+		(dest->size_bootldr + dest->size_boot + dest->size_boot_efi);
+
+	// If we have less than 2GB left, we disable swap
+	if (space_left <= MB2BYTES(2048))
+		disable_swap = 1;
 
 	// Should we use swap?
 	if (disable_swap)
@@ -514,21 +527,11 @@ static int hw_calculate_partition_table(struct hw_destination* dest, int disable
 	else
 		dest->size_swap = hw_swap_size(dest);
 
-	// Determine the size of the data partition.
-	unsigned long long used_space = dest->size_bootldr + dest->size_boot
-		+ dest->size_swap + dest->size_root;
+	// Subtract swap
+	space_left -= dest->size_swap;
 
-	// Disk is way too small
-	if (used_space >= dest->size)
-		return -1;
-
-	dest->size_data = dest->size - used_space;
-
-	// If it gets too small, we remove the swap space.
-	if (dest->size_data <= MB2BYTES(256)) {
-		dest->size_data += dest->size_swap;
-		dest->size_swap = 0;
-	}
+	// Root is getting what ever is left
+	dest->size_root = space_left;
 
 	// Set partition names
 	if (dest->size_boot > 0) {
@@ -538,6 +541,16 @@ static int hw_calculate_partition_table(struct hw_destination* dest, int disable
 		snprintf(dest->part_boot, sizeof(dest->part_boot), "%s%d", path, part_idx++);
 	} else
 		*dest->part_boot = '\0';
+
+	if (dest->size_boot_efi > 0) {
+		dest->part_boot_efi_idx = part_idx;
+
+		snprintf(dest->part_boot_efi, sizeof(dest->part_boot_efi),
+			"%s%d", path, part_idx++);
+	} else {
+		*dest->part_boot_efi = '\0';
+		dest->part_boot_efi_idx = 0;
+	}
 
 	if (dest->size_swap > 0)
 		snprintf(dest->part_swap, sizeof(dest->part_swap), "%s%d", path, part_idx++);
@@ -550,15 +563,10 @@ static int hw_calculate_partition_table(struct hw_destination* dest, int disable
 
 	snprintf(dest->part_root, sizeof(dest->part_root), "%s%d", path, part_idx++);
 
-	if (dest->size_data > 0)
-		snprintf(dest->part_data, sizeof(dest->part_data), "%s%d", path, part_idx++);
-	else
-		*dest->part_data = '\0';
-
 	return 0;
 }
 
-struct hw_destination* hw_make_destination(int part_type, struct hw_disk** disks, int disable_swap) {
+struct hw_destination* hw_make_destination(struct hw* hw, int part_type, struct hw_disk** disks, int disable_swap) {
 	struct hw_destination* dest = malloc(sizeof(*dest));
 
 	if (part_type == HW_PART_TYPE_NORMAL) {
@@ -578,7 +586,7 @@ struct hw_destination* hw_make_destination(int part_type, struct hw_disk** disks
 	// Is this a RAID device?
 	dest->is_raid = (part_type > HW_PART_TYPE_NORMAL);
 
-	int r = hw_calculate_partition_table(dest, disable_swap);
+	int r = hw_calculate_partition_table(hw, dest, disable_swap);
 	if (r)
 		return NULL;
 
@@ -666,6 +674,14 @@ int hw_create_partitions(struct hw_destination* dest, const char* output) {
 		part_start += dest->size_boot;
 	}
 
+	if (*dest->part_boot_efi) {
+		asprintf(&cmd, "%s mkpart %s fat32 %lluB %lluB", cmd,
+			(dest->part_table == HW_PART_TABLE_GPT) ? "ESP" : "primary",
+			part_start, part_start + dest->size_boot_efi - 1);
+
+		part_start += dest->size_boot_efi;
+	}
+
 	if (*dest->part_swap) {
 		asprintf(&cmd, "%s mkpart %s linux-swap %lluB %lluB", cmd,
 			(dest->part_table == HW_PART_TABLE_GPT) ? "SWAP" : "primary",
@@ -682,22 +698,16 @@ int hw_create_partitions(struct hw_destination* dest, const char* output) {
 		part_start += dest->size_root;
 	}
 
-	if (*dest->part_data) {
-		asprintf(&cmd, "%s mkpart %s ext2 %lluB %lluB", cmd,
-			(dest->part_table == HW_PART_TABLE_GPT) ? "DATA" : "primary",
-			part_start, part_start + dest->size_data - 1);
-
-		part_start += dest->size_data;
-	}
-
 	if (dest->part_boot_idx > 0)
 		asprintf(&cmd, "%s set %d boot on", cmd, dest->part_boot_idx);
+
+	if (dest->part_boot_efi_idx > 0)
+		asprintf(&cmd, "%s set %d esp on", cmd, dest->part_boot_efi_idx);
 
 	if (dest->part_table == HW_PART_TABLE_GPT) {
 		if (*dest->part_bootldr) {
 			asprintf(&cmd, "%s set %d bios_grub on", cmd, dest->part_boot_idx);
 		}
-		asprintf(&cmd, "%s disk_set pmbr_boot on", cmd);
 	}
 
 	r = mysystem(output, cmd);
@@ -715,13 +725,13 @@ int hw_create_partitions(struct hw_destination* dest, const char* output) {
 			if (*dest->part_boot && (try_open(dest->part_boot) != 0))
 				continue;
 
+			if (*dest->part_boot_efi && (try_open(dest->part_boot_efi) != 0))
+				continue;
+
 			if (*dest->part_swap && (try_open(dest->part_swap) != 0))
 				continue;
 
 			if (*dest->part_root && (try_open(dest->part_root) != 0))
-				continue;
-
-			if (*dest->part_data && (try_open(dest->part_data) != 0))
 				continue;
 
 			// All partitions do exist, exiting the loop.
@@ -747,15 +757,19 @@ static int hw_format_filesystem(const char* path, int fs, const char* output) {
 
 	// EXT4
 	} else if (fs == HW_FS_EXT4) {
-		snprintf(cmd, sizeof(cmd), "/sbin/mke2fs -T ext4 %s", path);
+		snprintf(cmd, sizeof(cmd), "/sbin/mke2fs -FF -T ext4 %s", path);
 
 	// EXT4 w/o journal
 	} else if (fs == HW_FS_EXT4_WO_JOURNAL) {
-		snprintf(cmd, sizeof(cmd), "/sbin/mke2fs -T ext4 -O ^has_journal %s", path);
+		snprintf(cmd, sizeof(cmd), "/sbin/mke2fs -FF -T ext4 -O ^has_journal %s", path);
 
 	// XFS
 	} else if (fs == HW_FS_XFS) {
 		snprintf(cmd, sizeof(cmd), "/sbin/mkfs.xfs -f %s", path);
+
+	// FAT32
+	} else if (fs == HW_FS_FAT32) {
+		snprintf(cmd, sizeof(cmd), "/sbin/mkfs.vfat %s", path);
 	}
 
 	assert(*cmd);
@@ -775,6 +789,13 @@ int hw_create_filesystems(struct hw_destination* dest, const char* output) {
 			return r;
 	}
 
+	// ESP
+	if (*dest->part_boot_efi) {
+		r = hw_format_filesystem(dest->part_boot_efi, HW_FS_FAT32, output);
+		if (r)
+			return r;
+	}
+
 	// swap
 	if (*dest->part_swap) {
 		r = hw_format_filesystem(dest->part_swap, HW_FS_SWAP, output);
@@ -786,13 +807,6 @@ int hw_create_filesystems(struct hw_destination* dest, const char* output) {
 	r = hw_format_filesystem(dest->part_root, dest->filesystem, output);
 	if (r)
 		return r;
-
-	// data
-	if (*dest->part_data) {
-		r = hw_format_filesystem(dest->part_data, dest->filesystem, output);
-		if (r)
-			return r;
-	}
 
 	return 0;
 }
@@ -817,6 +831,10 @@ int hw_mount_filesystems(struct hw_destination* dest, const char* prefix) {
 			filesystem = "xfs";
 			break;
 
+		case HW_FS_FAT32:
+			filesystem = "vfat";
+			break;
+
 		default:
 			assert(0);
 	}
@@ -839,12 +857,12 @@ int hw_mount_filesystems(struct hw_destination* dest, const char* prefix) {
 		}
 	}
 
-	// data
-	if (*dest->part_data) {
-		snprintf(target, sizeof(target), "%s%s", prefix, HW_PATH_DATA);
+	// ESP
+	if (*dest->part_boot_efi) {
+		snprintf(target, sizeof(target), "%s%s", prefix, HW_PATH_BOOT_EFI);
 		mkdir(target, S_IRWXU|S_IRWXG|S_IRWXO);
 
-		r = hw_mount(dest->part_data, target, filesystem, 0);
+		r = hw_mount(dest->part_boot_efi, target, "vfat", 0);
 		if (r) {
 			hw_umount_filesystems(dest, prefix);
 
@@ -888,17 +906,17 @@ int hw_umount_filesystems(struct hw_destination* dest, const char* prefix) {
 	// Write all buffers to disk before umounting
 	hw_sync();
 
-	// boot
-	if (*dest->part_boot) {
-		snprintf(target, sizeof(target), "%s%s", prefix, HW_PATH_BOOT);
+	// ESP
+	if (*dest->part_boot_efi) {
+		snprintf(target, sizeof(target), "%s%s", prefix, HW_PATH_BOOT_EFI);
 		r = hw_umount(target);
 		if (r)
 			return -1;
 	}
 
-	// data
-	if (*dest->part_data) {
-		snprintf(target, sizeof(target), "%s%s", prefix, HW_PATH_DATA);
+	// boot
+	if (*dest->part_boot) {
+		snprintf(target, sizeof(target), "%s%s", prefix, HW_PATH_BOOT);
 		r = hw_umount(target);
 		if (r)
 			return -1;
@@ -1010,35 +1028,17 @@ int hw_stop_all_raid_arrays(const char* output) {
 	return mysystem(output, "/sbin/mdadm --stop --scan --verbose");
 }
 
-int hw_install_bootloader(struct hw_destination* dest, const char* output) {
+int hw_install_bootloader(struct hw* hw, struct hw_destination* dest, const char* output) {
 	char cmd[STRING_SIZE];
-	int r;
 
-	// Generate configuration file
-	snprintf(cmd, sizeof(cmd), "/usr/sbin/grub-mkconfig -o /boot/grub/grub.cfg");
-	r = system_chroot(output, DESTINATION_MOUNT_PATH, cmd);
+	snprintf(cmd, sizeof(cmd), "/usr/bin/install-bootloader %s", dest->path);
+	int r = system_chroot(output, DESTINATION_MOUNT_PATH, cmd);
 	if (r)
 		return r;
 
-	char cmd_grub[STRING_SIZE];
-	snprintf(cmd_grub, sizeof(cmd_grub), "/usr/sbin/grub-install --no-floppy --recheck");
-
-	if (dest->is_raid) {
-		snprintf(cmd, sizeof(cmd), "%s %s", cmd_grub, dest->disk1->path);
-		r = system_chroot(output, DESTINATION_MOUNT_PATH, cmd);
-		if (r)
-			return r;
-
-		snprintf(cmd, sizeof(cmd), "%s %s", cmd_grub, dest->disk2->path);
-		r = system_chroot(output, DESTINATION_MOUNT_PATH, cmd);
-	} else {
-		snprintf(cmd, sizeof(cmd), "%s %s", cmd_grub, dest->path);
-		r = system_chroot(output, DESTINATION_MOUNT_PATH, cmd);
-	}
-
 	hw_sync();
 
-	return r;
+	return 0;
 }
 
 static char* hw_get_uuid(const char* dev) {
@@ -1079,6 +1079,17 @@ int hw_write_fstab(struct hw_destination* dest) {
 		}
 	}
 
+	// ESP
+	if (*dest->part_boot_efi) {
+		uuid = hw_get_uuid(dest->part_boot_efi);
+
+		if (uuid) {
+			fprintf(f, FSTAB_FMT, uuid, "/boot/efi", "auto", "defaults", 1, 2);
+			free(uuid);
+		}
+	}
+
+
 	// swap
 	if (*dest->part_swap) {
 		uuid = hw_get_uuid(dest->part_swap);
@@ -1094,16 +1105,6 @@ int hw_write_fstab(struct hw_destination* dest) {
 	if (uuid) {
 		fprintf(f, FSTAB_FMT, uuid, "/", "auto", "defaults", 1, 1);
 		free(uuid);
-	}
-
-	// data
-	if (*dest->part_data) {
-		uuid = hw_get_uuid(dest->part_data);
-
-		if (uuid) {
-			fprintf(f, FSTAB_FMT, uuid, "/var", "auto", "defaults", 1, 1);
-			free(uuid);
-		}
 	}
 
 	fclose(f);

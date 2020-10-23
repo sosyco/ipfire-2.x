@@ -1,7 +1,7 @@
 ###############################################################################
 #                                                                             #
 # IPFire.org - A linux based firewall                                         #
-# Copyright (C) 2013  IPFire Team  <info@ipfire.org>                          #
+# Copyright (C) 2007-2018  IPFire Team  <info@ipfire.org>                     #
 #                                                                             #
 # This program is free software: you can redistribute it and/or modify        #
 # it under the terms of the GNU General Public License as published by        #
@@ -28,13 +28,13 @@ VER        = 0.9.25
 
 THISAPP    = pakfire-$(VER)
 DL_FILE    = $(THISAPP).tar.gz
-DL_FROM    = http://source.ipfire.org/releases/pakfire/
+DL_FROM    = https://source.ipfire.org/releases/pakfire/
 DIR_APP    = $(DIR_SRC)/$(THISAPP)
 TARGET     = $(DIR_INFO)/$(THISAPP)
 PROG	   = pakfire3
 PAK_VER    = 5
 
-DEPS       = "libsolv pycurl pygpgme python-progressbar python-xattr urlgrabber"
+DEPS       = libsolv pycurl pygpgme python-progressbar python-xattr urlgrabber
 
 ###############################################################################
 # Top-level Rules

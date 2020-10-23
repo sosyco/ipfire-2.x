@@ -88,7 +88,7 @@ END
 # start with an Chain the the name, start- and endline of the
 # chain is extracted into a hash
 
-	open (FILE, '/srv/web/ipfire/html/iptables.txt');
+	open (FILE, '/var/tmp/iptables.txt');
 	while (<FILE>){
 
 		$iplines[$lines] = $_;
@@ -150,8 +150,8 @@ END
 	print "</tr>\n";
 
 	print "<tr>\n";
-	print "   <td width='0'></td>\n   <td width='35'></td>\n   <td width='35'></td>\n";
-	print "   <td width='130'></td>\n   <td width='30'></td>\n";
+	print "   <td width='0'></td>\n   <td width='60'></td>\n   <td width='60'></td>\n";
+	print "   <td width='150'></td>\n   <td width='30'></td>\n";
 	print "   <td width='30'></td>\n   <td width='40'></td>\n";
 	print "   <td width='40'></td>\n   <td width='95'></td>\n";
 	print "   <td width='95'></td>\n   <td width='260'></td>\n";
@@ -210,7 +210,7 @@ END
 # start with an Chain the the name, start- and endline of the
 # chain is extracted into a hash
 
-	open (FILE, '/srv/web/ipfire/html/iptablesmangle.txt');
+	open (FILE, '/var/tmp/iptablesmangle.txt');
 	while (<FILE>){
 
 		$ipmlines[$manlines] = $_;
@@ -272,8 +272,8 @@ END
 	print "</tr>\n";
 
 	print "<tr>\n";
-	print "   <td width='0'></td>\n   <td width='35'></td>\n   <td width='35'></td>\n";
-	print "   <td width='130'></td>\n   <td width='30'></td>\n";
+	print "   <td width='0'></td>\n   <td width='60'></td>\n   <td width='60'></td>\n";
+	print "   <td width='150'></td>\n   <td width='30'></td>\n";
 	print "   <td width='30'></td>\n   <td width='40'></td>\n";
 	print "   <td width='40'></td>\n   <td width='95'></td>\n";
 	print "   <td width='95'></td>\n   <td width='260'></td>\n";
@@ -337,7 +337,7 @@ END
 # start with an Chain the the name, start- and endline of the
 # chain is extracted into a hash
 
-	open (FILE, '/srv/web/ipfire/html/iptablesnat.txt');
+	open (FILE, '/var/tmp/iptablesnat.txt');
 	while (<FILE>){
 
 		$ipnatlines[$natlines] = $_;
@@ -399,8 +399,8 @@ END
 	print "</tr>\n";
 
 	print "<tr>\n";
-	print "   <td width='0'></td>\n   <td width='35'></td>\n   <td width='35'></td>\n";
-	print "   <td width='130'></td>\n   <td width='30'></td>\n";
+	print "   <td width='0'></td>\n   <td width='60'></td>\n   <td width='60'></td>\n";
+	print "   <td width='150'></td>\n   <td width='30'></td>\n";
 	print "   <td width='30'></td>\n   <td width='40'></td>\n";
 	print "   <td width='40'></td>\n   <td width='95'></td>\n";
 	print "   <td width='95'></td>\n   <td width='260'></td>\n";
@@ -434,6 +434,6 @@ print "</table></div><br />";
 &Header::closebigbox();
 &Header::closepage();
 
-system(rm -f "/srv/web/ipfire/html/iptables.txt");
-system(rm -f "/srv/web/ipfire/html/iptablesmangle.txt");
-system(rm -f "/srv/web/ipfire/html/iptablesnat.txt");
+system("rm -f /var/tmp/iptables.txt");
+system("rm -f /var/tmp/iptablesmangle.txt");
+system("rm -f /var/tmp/iptablesnat.txt");

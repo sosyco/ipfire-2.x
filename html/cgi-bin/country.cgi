@@ -21,16 +21,16 @@
 
 use strict;
 
-use Locale::Codes::Country;
-
 my $col;
 my $lines = '1';
 my $lines2 = '';
 
 require '/var/ipfire/general-functions.pl';
-require "${General::swroot}/geoip-functions.pl";
+require "${General::swroot}/location-functions.pl";
 require "${General::swroot}/lang.pl";
 require "${General::swroot}/header.pl";
+
+require "${General::swroot}/location-functions.pl";
 
 &Header::showhttpheaders();
 
@@ -52,25 +52,28 @@ print<<END;
 	</tr>
 END
 
+# Init libloc database connection.
+my $db_handle = &Location::Functions::init();
+
 # Get a list of all supported country codes.
-my @countries = Locale::Codes::Country::all_country_codes();
+my @countries = &Location::database_countries($db_handle);
 
 # Loop through whole country list.
 foreach my $country (@countries) {
 	$lines++;
 
 	# Convert country code into upper case.
-	my $country_uc = uc($country);
+	$country = uc($country);
 
 	# Get flag icon for of the country.
-	my $flag_icon = &GeoIP::get_flag_icon($country);
+	my $flag_icon = &Location::Functions::get_flag_icon($country);
 
 	# Get country name.
-	my $name = &GeoIP::get_full_country_name($country);
+	my $name = &Location::Functions::get_full_country_name($country);
 
 	if ($lines % 2) {
-		print "<td $col><a id='$country'><img src='$flag_icon' alt='$country_uc' title='$country_uc'/></a></td>";
-		print "<td $col>$country_uc</td>";
+		print "<td $col><a id='$country'><img src='$flag_icon' alt='$country' title='$country'/></a></td>";
+		print "<td $col>$country</td>";
 		print "<td $col>$name</td></tr>\n";
 	} else {
 		$lines2++;
@@ -80,8 +83,8 @@ foreach my $country (@countries) {
 			$col="style='background-color:${Header::table1colour};'";
 		}
 		print "<tr>";
-		print "<td $col><a id='$country'><img src='$flag_icon' alt='$country_uc' title='$country_uc'/></a></td>";
-		print "<td $col>$country_uc</td>";
+		print "<td $col><a id='$country'><img src='$flag_icon' alt='$country' title='$country'/></a></td>";
+		print "<td $col>$country</td>";
 		print "<td $col>$name</td>";
 		print "<td $col>&nbsp;</td>";
 

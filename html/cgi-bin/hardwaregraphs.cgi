@@ -71,9 +71,13 @@ if ( $querry[0] =~ "hwtemp"){
 	print "Content-type: image/png\n\n";
 	binmode(STDOUT);
 	&Graphs::updatehddgraph($querry[0],$querry[1]);
+}elsif ( $querry[0] =~ "nvme?" ){
+	print "Content-type: image/png\n\n";
+	binmode(STDOUT);
+	&Graphs::updatehddgraph($querry[0],$querry[1]);
 }else{
 	&Header::showhttpheaders();
-	&Header::openpage($Lang::tr{'harddisk temperature graphs'}, 1, '');
+	&Header::openpage($Lang::tr{'hardware graphs'}, 1, '');
 	&Header::openbigbox('100%', 'left');
 
 	&Header::getcgihash(\%sensorsettings);
@@ -93,7 +97,7 @@ if ( $querry[0] =~ "hwtemp"){
 		&General::writehash("${General::swroot}/sensors/settings", \%sensorsettings);
 	}
 
-	my @disks = `ls -1 /sys/block | grep -E '^sd' | sort | uniq`;
+	my @disks = `ls -1 /sys/block | grep -E '^sd|^nvme' | sort | uniq`;
 
 	foreach (@disks){
 		my $disk = $_;
@@ -113,7 +117,7 @@ if ( $querry[0] =~ "hwtemp"){
 
 	if ( `ls $mainsettings{'RRDLOG'}/collectd/localhost/sensors-*/temperature-* 2>/dev/null` ) {
 		&Header::openbox('100%', 'center', "hwtemp $Lang::tr{'graph'}");
-		&Graphs::makegraphbox("hardwaregraphs.cgi","hwtemp","day","375");
+		&Graphs::makegraphbox("hardwaregraphs.cgi","hwtemp","day");
 		Header::closebox();
 	}
 
@@ -125,7 +129,7 @@ if ( $querry[0] =~ "hwtemp"){
 
 	if ( `ls $mainsettings{'RRDLOG'}/collectd/localhost/sensors-*/voltage-* 2>/dev/null` ) {
 		&Header::openbox('100%', 'center', "hwvolt $Lang::tr{'graph'}");
-		&Graphs::makegraphbox("hardwaregraphs.cgi","hwvolt","day","435");
+		&Graphs::makegraphbox("hardwaregraphs.cgi","hwvolt","day");
 		&Header::closebox();
 	}
 

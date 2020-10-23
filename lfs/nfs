@@ -1,7 +1,7 @@
 ###############################################################################
 #                                                                             #
 # IPFire.org - A linux based firewall                                         #
-# Copyright (C) 2007  Michael Tremer & Christian Schmidt                      #
+# Copyright (C) 2007-2018  IPFire Team  <info@ipfire.org>                     #
 #                                                                             #
 # This program is free software: you can redistribute it and/or modify        #
 # it under the terms of the GNU General Public License as published by        #
@@ -24,32 +24,27 @@
 
 include Config
 
-VER        = 1.2.7
+VER        = 2.5.1
 
 THISAPP    = nfs-utils-$(VER)
-DL_FILE    = $(THISAPP).tar.bz2
+DL_FILE    = $(THISAPP).tar.xz
 DL_FROM    = $(URL_IPFIRE)
 DIR_APP    = $(DIR_SRC)/$(THISAPP)
 TARGET     = $(DIR_INFO)/$(THISAPP)
 PROG       = nfs
-PAK_VER    = 6
+PAK_VER    = 14
 
-DEPS       = "portmap"
-
-LIBNFSIDMAP = 0.25
+DEPS       = libnfsidmap rpcbind
 
 ###############################################################################
 # Top-level Rules
 ###############################################################################
 
-objects = $(DL_FILE) \
-	libnfsidmap-$(LIBNFSIDMAP).tar.gz
+objects = $(DL_FILE)
 
 $(DL_FILE) = $(DL_FROM)/$(DL_FILE)
-libnfsidmap-$(LIBNFSIDMAP).tar.gz = $(DL_FROM)/libnfsidmap-$(LIBNFSIDMAP).tar.gz
 
-$(DL_FILE)_MD5 = 3b5ca797197765dc0c3a4122720c7716
-libnfsidmap-$(LIBNFSIDMAP).tar.gz_MD5 = 2ac4893c92716add1a1447ae01df77ab
+$(DL_FILE)_MD5 = d14294d5efcd9aada28f4dab871a44a6
 
 install : $(TARGET)
 
@@ -81,22 +76,27 @@ $(subst %,%_MD5,$(objects)) :
 
 $(TARGET) : $(patsubst %,$(DIR_DL)/%,$(objects))
 	@$(PREBUILD)
-	@rm -rf $(DIR_APP) && cd $(DIR_SRC) && tar jxf $(DIR_DL)/$(DL_FILE)
-
-	cd $(DIR_APP) && tar zxf $(DIR_DL)/libnfsidmap-$(LIBNFSIDMAP).tar.gz
-	cd $(DIR_APP)/libnfsidmap* && ./configure --prefix=/usr
-	cd $(DIR_APP)/libnfsidmap* && make $(MAKETUNING) $(EXTRA_MAKE)
-	cd $(DIR_APP)/libnfsidmap* && make install
-
+	@rm -rf $(DIR_APP) && cd $(DIR_SRC) && tar axf $(DIR_DL)/$(DL_FILE)
 	cd $(DIR_APP) && ./configure \
 		--prefix=/usr \
 		--sysconfdir=/etc  \
 		--disable-gss \
-		--disable-tirpc \
-		--disable-nfsv41 \
-		--without-tcp-wrappers
+		--without-tcp-wrappers \
+		--disable-ipv6
 
-	cd $(DIR_APP) && make $(MAKETUNING) $(EXTRA_MAKE)
+	cd $(DIR_APP) && make $(MAKETUNING)
 	cd $(DIR_APP) && make install
+
+	# Install initscript
+	$(call INSTALL_INITSCRIPT,nfs-server)
+
+	# Install configuration
+	mkdir -pv $(CONFIG_ROOT)/nfs
+	install -v -m 644 $(DIR_SRC)/config/cfgroot/nfs-server $(CONFIG_ROOT)/nfs/nfs-server
+
+	# Install backup include
+	install -v -m 644 $(DIR_SRC)/config/backup/includes/nfs \
+		 /var/ipfire/backup/addons/includes/nfs
+
 	@rm -rf $(DIR_APP)
 	@$(POSTBUILD)

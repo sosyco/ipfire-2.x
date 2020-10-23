@@ -41,7 +41,11 @@ my @querry = split(/\?/,$ENV{'QUERY_STRING'});
 $querry[0] = '' unless defined $querry[0];
 $querry[1] = 'hour' unless defined $querry[1];
 
-if ( $querry[0] =~ "fwhits"){
+if ( $querry[0] eq "conntrack") {
+	print "Content-Type: image/png\n\n";
+	binmode(STDOUT);
+	&Graphs::updateconntrackgraph($querry[1]);
+} elsif ( $querry[0] =~ "fwhits"){
 	print "Content-type: image/png\n\n";
 	binmode(STDOUT);
 	&Graphs::updatefwhitsgraph($querry[1]);
@@ -67,7 +71,11 @@ if ( $querry[0] =~ "fwhits"){
 		&Header::closebox();
 	}
 
-	&Header::openbox('100%', 'center', "Firewall Hits $Lang::tr{'graph'}");
+	&Header::openbox('100%', 'center', "$Lang::tr{'connection tracking'}");
+	&Graphs::makegraphbox("netother.cgi", "conntrack", "day");
+	&Header::closebox();
+
+	&Header::openbox('100%', 'center', "$Lang::tr{'firewallhits'} $Lang::tr{'graph'}");
 	&Graphs::makegraphbox("netother.cgi","fwhits","day");
 	&Header::closebox();
 
@@ -78,6 +86,14 @@ if ( $querry[0] =~ "fwhits"){
 	$output = &Header::cleanhtml($output,"y");
 	print "<pre>$output</pre>\n";
 	&Header::closebox();
+
+	$output = `/sbin/ip route list table 220`;
+	if ( $output ) {
+		&Header::openbox('100%', 'left', $Lang::tr{'ipsec routing table entries'});
+		$output = &Header::cleanhtml($output,"y");
+		print "<pre>$output</pre>\n";
+		&Header::closebox()
+	}
 
 	&Header::openbox('100%', 'left', $Lang::tr{'arp table entries'});
 	$output = `/sbin/ip neigh show`;

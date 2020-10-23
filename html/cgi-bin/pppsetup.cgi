@@ -103,10 +103,7 @@ elsif ($pppsettings{'ACTION'} eq $Lang::tr{'save'})
                 if ($pppsettings{'USERNAME'} eq '') {
                         $errormessage = $Lang::tr{'username not set'};
                         goto ERROR; }
-                if ($pppsettings{'PASSWORD'} eq '') {
-                        $errormessage = $Lang::tr{'password not set'};
-                        goto ERROR; }
-        }
+		}
 
         if ($pppsettings{'TIMEOUT'} eq '') {
                 $errormessage = $Lang::tr{'idle timeout not set'};
@@ -118,19 +115,6 @@ elsif ($pppsettings{'ACTION'} eq $Lang::tr{'save'})
         if ($pppsettings{'LOGINSCRIPT'} =~ /[.\/ ]/ ) {
                 $errormessage = $Lang::tr{'bad characters in script field'};
                 goto ERROR; }
-
-        if ($pppsettings{'DNS1'})
-        {
-                if (!(&General::validip($pppsettings{'DNS1'}))) {
-                        $errormessage = $Lang::tr{'invalid primary dns'};
-                        goto ERROR;  }
-        }
-        if ($pppsettings{'DNS2'})
-        {
-                if (!(&General::validip($pppsettings{'DNS2'}))) {
-                        $errormessage = $Lang::tr{'invalid secondary dns'};
-                        goto ERROR; }
-        }
 
         if ($pppsettings{'MAXRETRIES'} eq '') {
                 $errormessage = $Lang::tr{'max retries not set'};
@@ -185,8 +169,6 @@ elsif ($pppsettings{'ACTION'} eq $Lang::tr{'save'})
                         if (! &General::validip($pppsettings{'BROADCAST'})) {
                                  $errormessage = $errormessage.' '.$Lang::tr{'broadcast'}.' '.$Lang::tr{'invalid broadcast ip'}; }
                 }
-                if( $pppsettings{'DNS'} eq 'Automatic') {
-                        $errormessage = $Lang::tr{'invalid input'}; }
                 if ($errormessage ne '') {goto ERROR; }
         }
 
@@ -457,10 +439,6 @@ $selected{'AUTH'}{'standard-login-script'} = '';
 $selected{'AUTH'}{'demon-login-script'} = '';
 $selected{'AUTH'}{'other-login-script'} = '';
 $selected{'AUTH'}{$pppsettings{'AUTH'}} = "selected='selected'";
-
-$checked{'DNS'}{'Automatic'} = '';
-$checked{'DNS'}{'Manual'} = '';
-$checked{'DNS'}{$pppsettings{'DNS'}} = "checked='checked'";
 
 $checked{'IPTV'}{'enable'} = '';
 $checked{'IPTV'}{'disable'} = '';
@@ -927,7 +905,7 @@ print <<END
 <tr>
         <td width='25%'>$Lang::tr{'username'}&nbsp;<img src='/blob.gif' alt='*' /></td>
         <td width='25%'><input type='text' name='USERNAME' value='$pppsettings{'USERNAME'}' /></td>
-        <td width='25%'>$Lang::tr{'password'}&nbsp;<img src='/blob.gif' alt='*' /></td>
+        <td width='25%'>$Lang::tr{'password'}&nbsp;</td>
         <td width='25%'><input type='password' name='PASSWORD' value='$pppsettings{'PASSWORD'}' /></td>
 </tr>
 <tr>
@@ -950,22 +928,6 @@ print <<END
         </select></td>
         <td width='25%'>$Lang::tr{'script name'}</td>
         <td width='25%'><input type='text' name='LOGINSCRIPT' value='$pppsettings{'LOGINSCRIPT'}' /></td>
-</tr>
-<tr><td colspan='4' width='100%'><br></br></td></tr>
-<tr>
-        <td bgcolor='$color{'color20'}' colspan='4' width='100%'><b>DNS:</b></td>
-</tr>
-<tr>
-        <td colspan='4' width='100%'><input type='radio' name='DNS' value='Automatic' $checked{'DNS'}{'Automatic'} />$Lang::tr{'automatic'}</td>
-</tr>
-<tr>
-        <td colspan='4' width='100%'><input type='radio' name='DNS' value='Manual' $checked{'DNS'}{'Manual'} />$Lang::tr{'manual'}</td>
-</tr>
-<tr>
-        <td width='25%'>$Lang::tr{'primary dns'}</td>
-        <td width='25%'><input type='text' name='DNS1' value='$pppsettings{'DNS1'}'></td>
-        <td width='25%'>$Lang::tr{'secondary dns'}</td>
-        <td width='25%'><input type='text' name='DNS2' value='$pppsettings{'DNS2'}'></td>
 </tr>
 <tr><td colspan='4' width='100%'><br></br><hr></hr><br></br></td></tr>
 <tr>
@@ -1046,7 +1008,6 @@ sub initprofile
         $pppsettings{'TIMEOUT'} = 15;
         $pppsettings{'MODULATION'} = 'AUTO';
         $pppsettings{'AUTH'} = 'pap-or-chap';
-        $pppsettings{'DNS'} = 'Automatic';
         $pppsettings{'DEBUG'} = 'off';
         $pppsettings{'BACKUPPROFILE'} = $pppsettings{'PROFILE'};
         $pppsettings{'IPTVSERVERS'} = '192.168.2.51/32';

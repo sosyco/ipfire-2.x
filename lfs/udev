@@ -1,7 +1,7 @@
 ###############################################################################
 #                                                                             #
 # IPFire.org - A linux based firewall                                         #
-# Copyright (C) 2007-2013  IPFire Team  <info@ipfire.org>                     #
+# Copyright (C) 2007-2018  IPFire Team  <info@ipfire.org>                     #
 #                                                                             #
 # This program is free software: you can redistribute it and/or modify        #
 # it under the terms of the GNU General Public License as published by        #
@@ -24,26 +24,26 @@
 
 include Config
 
-VER        = 208
+VER        = 3.2.6
+RULES_VER  = 20171102
 
-THISAPP    = udev-$(VER)
-DL_FILE    = systemd-$(VER).tar.xz
+THISAPP    = eudev-$(VER)
+DL_FILE    = $(THISAPP).tar.gz
 DL_FROM    = $(URL_IPFIRE)
-DIR_APP    = $(DIR_SRC)/systemd-$(VER)
+DIR_APP    = $(DIR_SRC)/$(THISAPP)
 TARGET     = $(DIR_INFO)/$(THISAPP)
 
 ###############################################################################
 # Top-level Rules
 ###############################################################################
 
-objects = $(DL_FILE) udev-lfs-208-1.tar.bz2
-
+objects = $(DL_FILE) udev-lfs-$(RULES_VER).tar.bz2
 
 $(DL_FILE) = $(DL_FROM)/$(DL_FILE)
-udev-lfs-$(VER)-1.tar.bz2 = $(DL_FROM)/udev-lfs-$(VER)-1.tar.bz2
+udev-lfs-$(RULES_VER).tar.bz2 = $(DL_FROM)/udev-lfs-$(RULES_VER).tar.bz2
 
-$(DL_FILE)_MD5 = df64550d92afbffb4f67a434193ee165
-udev-lfs-$(VER)-1.tar.bz2_MD5 = 67a5339e7ef1fa08f5db8315a5ea69e7
+$(DL_FILE)_MD5 = 902c4cdc9235838067cc69978a780e72
+udev-lfs-$(RULES_VER).tar.bz2_MD5 = d92afb0c6e8e616792068ee4737b0d24
 
 install : $(TARGET)
 
@@ -73,28 +73,36 @@ $(subst %,%_MD5,$(objects)) :
 $(TARGET) : $(patsubst %,$(DIR_DL)/%,$(objects))
 	@$(PREBUILD)
 	@rm -rf $(DIR_APP) && cd $(DIR_SRC) && tar axf $(DIR_DL)/$(DL_FILE)
-	cd $(DIR_APP) && tar axf $(DIR_DL)/udev-lfs-$(VER)-1.tar.bz2
+	cd $(DIR_APP) && tar axf $(DIR_DL)/udev-lfs-$(RULES_VER).tar.bz2
 
-	cd $(DIR_APP) && patch -Np1 -i $(DIR_SRC)/src/patches/udev-208_remove_systemd_log.patch
+	cd $(DIR_APP) && ./configure \
+		--prefix=/usr \
+		--bindir=/bin \
+		--sbindir=/sbin \
+		--sysconfdir=/etc \
+		--libdir=/usr/lib \
+		--libexecdir=/lib \
+		--with-rootprefix= \
+		--with-rootlibdir=/lib \
+		--enable-manpages \
+		--disable-static
 
-	cd $(DIR_APP)/udev-lfs-$(VER)-1 && sed -i "s/HANDLE_AT 1/HANDLE_AT 0/g" cfg.h
+	cd $(DIR_APP) && make $(MAKETUNING)
+	cd $(DIR_APP) && make install
 
-	rm -rf /lib/udev/devices
-	install -dv /lib/firmware
+	# Generate hardware database
+	udevadm hwdb --update
 
-	cd $(DIR_APP) && make -f udev-lfs-$(VER)-1/Makefile.lfs $(MAKETUNING)
-	cd $(DIR_APP) && make -f udev-lfs-$(VER)-1/Makefile.lfs install
-
-	# Make some compat symlinks
-	ln -sf /lib/udev/udevd /sbin/udevd
-	ln -sf /sbin/udevadm /bin/udevadm
+	# Install rules
+	cd $(DIR_APP) && make -f udev-lfs-$(RULES_VER)/Makefile.lfs install
 
 	# Disable net generator rule. This does not work with the setup.
 	rm -f /lib/udev/rules.d/75-persistent-net-generator.rules
 	rm -f /lib/udev/rules.d/80-net-name-slot.rules
 
 	# Blacklist some modules
-	cp -vf $(DIR_SRC)/config/udev/blacklist.conf /etc/modprobe.d/blacklist.conf
+	cp -vf $(DIR_SRC)/config/udev/blacklist.conf \
+		/etc/modprobe.d/blacklist.conf
 
 	# Install config file
 	install -v -m 644 $(DIR_SRC)/config/udev/udev.conf \
@@ -109,6 +117,8 @@ $(TARGET) : $(patsubst %,$(DIR_DL)/%,$(objects))
 		/lib/udev/network-hotplug-rename
 	install -v -m 755 $(DIR_SRC)/config/udev/network-hotplug-vlan \
 		/lib/udev/network-hotplug-vlan
+	install -v -m 755 $(DIR_SRC)/config/udev/network-hotplug-bridges \
+		/lib/udev/network-hotplug-bridges
 	install -v -m 644 $(DIR_SRC)/config/udev/60-net.rules \
 		/lib/udev/rules.d
 
@@ -121,5 +131,6 @@ $(TARGET) : $(patsubst %,$(DIR_DL)/%,$(objects))
 		/lib/udev/rules.d
 	install -m 755 $(DIR_SRC)/config/udev/enable_codel \
 		/lib/udev/enable_codel
+
 	@rm -rf $(DIR_APP)
 	@$(POSTBUILD)

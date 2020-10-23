@@ -1,7 +1,7 @@
 ###############################################################################
 #                                                                             #
 # IPFire.org - A linux based firewall                                         #
-# Copyright (C) 2007-2013  IPFire Team  <info@ipfire.org>                     #
+# Copyright (C) 2007-2019  IPFire Team  <info@ipfire.org>                     #
 #                                                                             #
 # This program is free software: you can redistribute it and/or modify        #
 # it under the terms of the GNU General Public License as published by        #
@@ -24,7 +24,7 @@
 
 include Config
 
-VER        = 1.4.21
+VER        = 1.8.5
 
 THISAPP    = iptables-$(VER)
 DL_FILE    = $(THISAPP).tar.bz2
@@ -36,13 +36,13 @@ TARGET     = $(DIR_INFO)/$(THISAPP)
 # Top-level Rules
 ###############################################################################
 objects = $(DL_FILE) \
-	netfilter-layer7-v2.22.tar.gz
+	netfilter-layer7-v2.23.tar.gz
 
 $(DL_FILE) = $(DL_FROM)/$(DL_FILE)
-netfilter-layer7-v2.22.tar.gz = $(URL_IPFIRE)/netfilter-layer7-v2.22.tar.gz
+netfilter-layer7-v2.23.tar.gz = $(URL_IPFIRE)/netfilter-layer7-v2.23.tar.gz
 
-$(DL_FILE)_MD5 = 536d048c8e8eeebcd9757d0863ebb0c0
-netfilter-layer7-v2.22.tar.gz_MD5 = 98dff8a3d5a31885b73341633f69501f
+$(DL_FILE)_MD5 = 42cfa96d4ac5eb93ee7ed8dd85cfe8fb
+netfilter-layer7-v2.23.tar.gz_MD5 = 10910b6173d18e426cb56ae7e1300eeb
 
 install : $(TARGET)
 
@@ -75,23 +75,21 @@ $(TARGET) : $(patsubst %,$(DIR_DL)/%,$(objects))
 	@cd $(DIR_SRC) && tar jxf $(DIR_DL)/$(DL_FILE)
 
 	# Layer7
-	cd $(DIR_SRC) && tar zxf $(DIR_DL)/netfilter-layer7-v2.22.tar.gz
-	cd $(DIR_APP) && cp -vf $(DIR_SRC)/netfilter-layer7-v2.22/iptables-1.4.3forward-for-kernel-2.6.20forward/* \
+	cd $(DIR_SRC) && tar zxf $(DIR_DL)/netfilter-layer7-v2.23.tar.gz
+	cd $(DIR_APP) && cp -vf $(DIR_SRC)/netfilter-layer7-v2.23/iptables-1.4.3forward-for-kernel-2.6.20forward/* \
 	                 ./extensions/
-
-	# imq
-	cd $(DIR_APP) && patch -Np1 < $(DIR_SRC)/src/patches/iptables-1.4.12-IMQ-test4.diff
 
 	cd $(DIR_APP) && ./configure \
 		--prefix=/usr \
-		--with-ksource=/usr/src/linux \
 		--libdir=/lib \
 		--includedir=/usr/include \
 		--enable-libipq \
+		--with-xtlibdir=/lib/xtables \
 		--libexecdir=/lib \
 		--bindir=/sbin \
 		--sbindir=/sbin \
 		--mandir=/usr/share/man \
+		--disable-nftables \
 		--with-pkgconfigdir=/usr/lib/pkgconfig
 
 	cd $(DIR_APP) && make $(MAKETUNING)

@@ -2,7 +2,6 @@ lib/xtables/libxt_ACCOUNT.so
 lib/xtables/libxt_CHAOS.so
 lib/xtables/libxt_DELUDE.so
 lib/xtables/libxt_DHCPMAC.so
-lib/xtables/libxt_DNETMAP.so
 lib/xtables/libxt_ECHO.so
 lib/xtables/libxt_IPMARK.so
 lib/xtables/libxt_LOGMARK.so
@@ -24,10 +23,11 @@ lib/xtables/libxt_quota2.so
 usr/lib/libxt_ACCOUNT_cl.so.0
 usr/lib/libxt_ACCOUNT_cl.so.0.0.0
 #usr/libexec/xtables-addons
-usr/libexec/xtables-addons/xt_geoip_build
-usr/libexec/xtables-addons/xt_geoip_dl
+#usr/libexec/xtables-addons/xt_geoip_build
+#usr/libexec/xtables-addons/xt_geoip_dl
 usr/sbin/iptaccount
 #usr/share/man/man1/xt_geoip_build.1
 #usr/share/man/man1/xt_geoip_dl.1
 #usr/share/man/man8/iptaccount.8
 #usr/share/man/man8/xtables-addons.8
+/usr/share/xt_geoip/

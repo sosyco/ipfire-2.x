@@ -31,11 +31,16 @@ use HTTP::Message;
 use HTTP::Request;
 use Net::Ping;
 
+use Switch;
+
 package Pakfire;
 
-# GPG Keys
-my $myid = "64D96617";			# Our own gpg-key paks@ipfire.org
-my $trustid = "65D0FD58";		# gpg-key of CaCert
+my @VALID_KEY_FINGERPRINTS = (
+	# 2018
+	"3ECA8AA4478208B924BB96206FEF7A8ED713594B",
+	# 2007
+	"179740DC4D8C47DC63C099C74BDE364C64D96617",
+);
 
 # A small color-hash :D
 my %color;
@@ -64,6 +69,9 @@ my $bfile;
 
 my %pakfiresettings = ();
 &General::readhash("${General::swroot}/pakfire/settings", \%pakfiresettings);
+
+# Make version
+$Conf::version = &make_version();
 
 sub message {
 	my $message = shift;
@@ -103,6 +111,7 @@ sub usage {
   &Pakfire::message("               <update> - Contacts the servers for new lists of paks.");
   &Pakfire::message("               <upgrade> - Installs the latest version of all paks.");
   &Pakfire::message("               <list> - Outputs a short list with all available paks.");
+  &Pakfire::message("               <status> - Outputs a summary about available core upgrades, updates and a required reboot");
   &Pakfire::message("");
   &Pakfire::message("       Global options:");
   &Pakfire::message("               --non-interactive --> Enables the non-interactive mode.");
@@ -111,20 +120,6 @@ sub usage {
   &Pakfire::message("                     --no-colors --> Turns off the wonderful colors.");
   &Pakfire::message("");
   exit 1;
-}
-
-sub pinghost {
-	my $host = shift;
-	
-	$p = Net::Ping->new("icmp");
-  if ($p->ping($host)) {
- 	 logger("PING INFO: $host is alive");
-  	return 1;
-  } else {
-		logger("PING INFO: $host is unreachable");
-		return 0;
-	}
-  $p->close();
 }
 
 sub fetchfile {
@@ -136,7 +131,7 @@ sub fetchfile {
 	use File::Basename;
 	$bfile = basename("$getfile");
 	
-	logger("DOWNLOAD STARTED: $getfile") unless ($bfile =~ /^counter\?.*/);
+	logger("DOWNLOAD STARTED: $getfile");
 
 	$i = 0;	
 	while (($allok == 0) && $i < 5) {
@@ -152,11 +147,9 @@ sub fetchfile {
 			$file = $getfile;
 		}
 		
-		$proto = "HTTP" unless $proto;
+		$proto = "HTTPS" unless $proto;
 		
-		unless ($bfile =~ /^counter\?.*/) {
-			logger("DOWNLOAD INFO: Host: $host ($proto) - File: $file");
-		}
+		logger("DOWNLOAD INFO: Host: $host ($proto) - File: $file");
 
 		my $ua = LWP::UserAgent->new;
 		$ua->agent("Pakfire/$Conf::version");
@@ -166,30 +159,35 @@ sub fetchfile {
 		&General::readhash("${General::swroot}/proxy/advanced/settings", \%proxysettings);
 
 		if ($proxysettings{'UPSTREAM_PROXY'}) {
-			logger("DOWNLOAD INFO: Upstream proxy: \"$proxysettings{'UPSTREAM_PROXY'}\"") unless ($bfile =~ /^counter.py\?.*/); 
+			logger("DOWNLOAD INFO: Upstream proxy: \"$proxysettings{'UPSTREAM_PROXY'}\"");
 			if ($proxysettings{'UPSTREAM_USER'}) {
-				$ua->proxy("http","http://$proxysettings{'UPSTREAM_USER'}:$proxysettings{'UPSTREAM_PASSWORD'}@"."$proxysettings{'UPSTREAM_PROXY'}/");
-				logger("DOWNLOAD INFO: Logging in with: \"$proxysettings{'UPSTREAM_USER'}\" - \"$proxysettings{'UPSTREAM_PASSWORD'}\"") unless ($bfile =~ /^counter.py\?.*/);
+				$ua->proxy(["http", "https"], "http://$proxysettings{'UPSTREAM_USER'}:$proxysettings{'UPSTREAM_PASSWORD'}@"."$proxysettings{'UPSTREAM_PROXY'}/");
+				logger("DOWNLOAD INFO: Logging in with \"$proxysettings{'UPSTREAM_USER'}\" against \"$proxysettings{'UPSTREAM_PROXY'}\"");
 			} else {
-				$ua->proxy("http","http://$proxysettings{'UPSTREAM_PROXY'}/");
+				$ua->proxy(["http", "https"], "http://$proxysettings{'UPSTREAM_PROXY'}/");
 			}
 		}
 
 		$final_data = undef;
-	 	my $url = "http://$host/$file";
-		my $response;
-		
-		unless ($bfile =~ /^counter.py\?.*/) {
-			my $result = $ua->head($url);
-			my $remote_headers = $result->headers;
-			$total_size = $remote_headers->content_length;
-			logger("DOWNLOAD INFO: $file has size of $total_size bytes");
-			
-			$response = $ua->get($url, ':content_cb' => \&callback );
-			message("");
-		} else {
-			$response = $ua->get($url);
+
+		my $url;
+		switch ($proto) {
+			case "HTTP" { $url = "http://$host/$file"; }
+			case "HTTPS" { $url = "https://$host/$file"; }
+			else {
+				# skip all lines with unknown protocols
+				logger("DOWNLOAD WARNING: Skipping Host: $host due to unknown protocol ($proto) in mirror database");
+				next;
+			}
 		}
+
+		my $result = $ua->head($url);
+		my $remote_headers = $result->headers;
+		$total_size = $remote_headers->content_length;
+		logger("DOWNLOAD INFO: $file has size of $total_size bytes");
+		
+		my $response = $ua->get($url, ':content_cb' => \&callback );
+		message("");
 		
 		my $code = $response->code();
 		my $log = $response->status_line;
@@ -201,31 +199,27 @@ sub fetchfile {
 		}
 		
 		if ($response->is_success) {
-			unless ($bfile =~ /^counter.py\?.*/) {
-				if (open(FILE, ">$Conf::tmpdir/$bfile")) {
-					print FILE $final_data;
-					close(FILE);
-					logger("DOWNLOAD INFO: File received. Start checking signature...");
-					if (system("gpg --verify \"$Conf::tmpdir/$bfile\" &>/dev/null") eq 0) {
-						logger("DOWNLOAD INFO: Signature of $bfile is fine.");
-						move("$Conf::tmpdir/$bfile","$Conf::cachedir/$bfile");
-					} else {
-						message("DOWNLOAD ERROR: The downloaded file ($file) wasn't verified by IPFire.org. Sorry - Exiting...");
-						my $ntp = `ntpdate -q -t 10 pool.ntp.org 2>/dev/null | tail -1`;
-						if ( $ntp !~ /time\ server(.*)offset(.*)/ ){message("TIME ERROR: Unable to get the nettime, this may lead to the verification error.");}
-						else { $ntp =~ /time\ server(.*)offset(.*)/; message("TIME INFO: Time Server$1has$2 offset to localtime.");}
-						exit 1;
-					}
-					logger("DOWNLOAD FINISHED: $file");
-					$allok = 1;
-					return 0;
+			if (open(FILE, ">$Conf::tmpdir/$bfile")) {
+				print FILE $final_data;
+				close(FILE);
+				logger("DOWNLOAD INFO: File received. Start checking signature...");
+				if (&valid_signature("$Conf::tmpdir/$bfile")) {
+					logger("DOWNLOAD INFO: Signature of $bfile is fine.");
+					move("$Conf::tmpdir/$bfile","$Conf::cachedir/$bfile");
 				} else {
-					logger("DOWNLOAD ERROR: Could not open $Conf::tmpdir/$bfile for writing.");
+					message("DOWNLOAD ERROR: The downloaded file ($file) wasn't verified by IPFire.org. Sorry - Exiting...");
+					my $ntp = `ntpdate -q -t 10 pool.ntp.org 2>/dev/null | tail -1`;
+					if ( $ntp !~ /time\ server(.*)offset(.*)/ ){message("TIME ERROR: Unable to get the nettime, this may lead to the verification error.");}
+					else { $ntp =~ /time\ server(.*)offset(.*)/; message("TIME INFO: Time Server$1has$2 offset to localtime.");}
+					exit 1;
 				}
-			} else {
+				logger("DOWNLOAD FINISHED: $file");
+				$allok = 1;
 				return 0;
+			} else {
+				logger("DOWNLOAD ERROR: Could not open $Conf::tmpdir/$bfile for writing.");
 			}
-		}	else {
+		} else {
 			logger("DOWNLOAD ERROR: $log");
 		}
 	}
@@ -279,6 +273,25 @@ sub getcoredb {
 	}
 }
 
+sub valid_signature($) {
+	my $filename = shift;
+
+	open(my $cmd, "gpg --verify --status-fd 1 \"$filename\" 2>/dev/null |");
+	while (<$cmd>) {
+		# Process valid signature lines
+		if (/VALIDSIG ([A-Z0-9]+)/) {
+			# Check if we know the key
+			foreach my $key (@VALID_KEY_FINGERPRINTS) {
+				# Signature is valid
+				return 1 if ($key eq $1);
+			}
+		}
+	}
+	close($cmd);
+
+	# Signature is invalid
+	return 0;
+}
 
 sub selectmirror {
 	### Check if there is a current server list and read it.
@@ -308,16 +321,14 @@ sub selectmirror {
 
 	if ($scount eq 0) {
 		logger("MIRROR INFO: Could not find any servers. Falling back to main server $Conf::mainserver");
-		return ("HTTP", $Conf::mainserver, "/$Conf::version");
+		return ("HTTPS", $Conf::mainserver, "/$Conf::version");
 	}
 
 	### Choose a random server and test if it is online
 	#   If the check fails try a new server.
 	#   This will never give up.
-	my $found = 0;
 	my $servers = 0;
-	my $pingdelay = 1;
-	while ($found == 0) {
+	while (1) {
 		$server = int(rand($scount) + 1);
 		$servers = 0;
 		my ($line, $proto, $path, $host);
@@ -329,22 +340,8 @@ sub selectmirror {
 				$proto = $templine[0];
 				$host = $templine[1];
 				$path = $templine[2];
-				if ($pakfiresettings{'HEALTHCHECK'} eq "off") {
-				 	logger("PING INFO: Healthcheck is disabled");
-					$found = 1;
-					return ($proto, $host, $path);
-				}
-				elsif (pinghost("$host")) {
-					$found = 1;
-					return ($proto, $host, $path);
-				}
-				if ($found == 0) {
-					sleep($pingdelay);
-					$pingdelay=$pingdelay*2;
-					if ($pingdelay>1200) {
-						$pingdelay=1200;
-					}
-				}
+
+				return ($proto, $host, $path);
 			}
 		}
 	}
@@ -541,7 +538,7 @@ sub dblist {
 	}
 }
 
-sub resolvedeps {
+sub resolvedeps_one {
 	my $pak = shift;
 	
 	getmetafile("$pak");
@@ -553,7 +550,7 @@ sub resolvedeps {
 	close(FILE);
 	
 	my $line;
-	my (@templine, @deps, @tempdeps, @all);
+	my (@templine, @deps, @all);
 	foreach $line (@file) {
 		@templine = split(/\: /,$line);
 		if ("$templine[0]" eq "Dependencies") {
@@ -568,30 +565,41 @@ sub resolvedeps {
 		  	message("PAKFIRE RESV: $pak: Dependency is already installed: $_");
 		  } else {
 		  	message("PAKFIRE RESV: $pak: Need to install dependency: $_");
-				push(@tempdeps,$_);
 				push(@all,$_);
 			} 
 		}
 	}
 
-	foreach (@tempdeps) {
-		if ($_) {
-			my @newdeps = resolvedeps("$_");
-			foreach(@newdeps) {
-				unless (($_ eq " ") || ($_ eq "")) {
-					my $return = &isinstalled($_);
-					if ($return eq 0) {
-						message("PAKFIRE RESV: $pak: Dependency is already installed: $_");
-					} else {
-						message("PAKFIRE RESV: $pak: Need to install dependency: $_");
-						push(@all,$_);
-					}
-				}
+	return @all;
+}
+
+sub resolvedeps {
+	my $pak = shift;
+	my @all;
+
+	# Resolve all not yet installed dependencies of $pak
+	my @deps = &resolvedeps_one($pak);
+	push(@all, @deps);
+
+	# For each dependency, we check if more dependencies exist
+	while (@deps) {
+		my $dep = pop(@deps);
+
+		my @subdeps = &resolvedeps_one($dep);
+		foreach my $subdep (@subdeps) {
+			# Skip the package we are currently resolving for
+			next if ($pak eq $subdep);
+
+			# If the package is not already to be installed,
+			# we add it to the list (@all) and check if it has
+			# more dependencies on its own.
+			unless (grep {$_ eq $subdep} @all) {
+				push(@deps, $subdep);
+				push(@all, $subdep);
 			}
 		}
 	}
-	message("");
-	chomp (@all);
+
 	return @all;
 }
 
@@ -743,9 +751,6 @@ sub setuppak {
 	message("PAKFIRE INST: $pak: Copying files and running post-installation scripts...");
 	my $return = system("cd $Conf::tmpdir && NAME=$pak ./install.sh >> $Conf::logdir/install-$pak.log 2>&1");
 	$return %= 255;
-	if ($pakfiresettings{'UUID'} ne "off") {
-		fetchfile("counter.py?ver=$Conf::version&uuid=$Conf::uuid&ipak=$pak&return=$return", "$Conf::mainserver");
-	}
 	if ($return == 0) {
 	  move("$Conf::tmpdir/ROOTFILES", "$Conf::dbdir/rootfiles/$pak");
 	  cleanup("tmp");
@@ -763,6 +768,12 @@ sub upgradecore {
 	getcoredb("noforce");
 	eval(`grep "core_" $Conf::dbdir/lists/core-list.db`);
 	if ("$core_release" > "$Conf::core_mine") {
+		# Safety check for lazy testers:
+		# Before we upgrade to the latest release, we re-install the previous release
+		# to make sure that the tester has always been on the latest version.
+		my $tree = &get_tree();
+		$Conf::core_mine-- if ($tree eq "testing" || $tree eq "unstable");
+
 		message("CORE UPGR: Upgrading from release $Conf::core_mine to $core_release");
 		
 		my @seq = `seq $Conf::core_mine $core_release`;
@@ -804,9 +815,6 @@ sub upgradepak {
 	message("PAKFIRE UPGR: $pak: Upgrading files and running post-upgrading scripts...");
 	my $return = system("cd $Conf::tmpdir && NAME=$pak ./update.sh >> $Conf::logdir/update-$pak.log 2>&1");
 	$return %= 255;
-	if ($pakfiresettings{'UUID'} ne "off") {
-		fetchfile("counter.py?ver=$Conf::version&uuid=$Conf::uuid&upak=$pak&return=$return", "$Conf::mainserver");
-	}
 	if ($return == 0) {
 	  move("$Conf::tmpdir/ROOTFILES", "$Conf::dbdir/rootfiles/$pak");
 	  cleanup("tmp");
@@ -829,9 +837,6 @@ sub removepak {
 	message("PAKFIRE REMV: $pak: Removing files and running post-removing scripts...");
 	my $return = system("cd $Conf::tmpdir && NAME=$pak ./uninstall.sh >> $Conf::logdir/uninstall-$pak.log 2>&1");
 	$return %= 255;
-	if ($pakfiresettings{'UUID'} ne "off") {
-		fetchfile("counter.py?ver=$Conf::version&uuid=$Conf::uuid&dpak=$pak&return=$return", "$Conf::mainserver");
-	}
 	if ($return == 0) {
 	  unlink("$Conf::dbdir/rootfiles/$pak");
 	  unlink("$Conf::dbdir/installed/meta-$pak");
@@ -878,32 +883,6 @@ sub makeuuid {
 	}
 }
 
-sub senduuid {
-	if ($pakfiresettings{'UUID'} ne "off") {
-		unless("$Conf::uuid") {
-			$Conf::uuid = `cat $Conf::dbdir/uuid`;
-		}
-		logger("Sending my uuid: $Conf::uuid");
-		fetchfile("counter.py?ver=$Conf::version&uuid=$Conf::uuid", "$Conf::mainserver");
-		system("rm -f $Conf::tmpdir/counter* 2>/dev/null");
-	}
-}
-
-sub checkcryptodb {
-	logger("CRYPTO INFO: Checking GnuPG Database");
-	my $ret = system("gpg --list-keys | grep -q $myid");
-	unless ( "$ret" eq "0" ) {
-		message("CRYPTO WARN: The GnuPG isn't configured corectly. Trying now to fix this.");
-		message("CRYPTO WARN: It's normal to see this on first execution.");
-		message("CRYPTO WARN: If this message is being shown repeatedly, check if time and date are set correctly, and if IPFire can connect via port 11371 TCP.");
-		my $command = "gpg --keyserver pgp.ipfire.org --always-trust --status-fd 2";
-		system("$command --recv-key $myid >> $Conf::logdir/gnupg-database.log 2>&1");
-		system("$command --recv-key $trustid >> $Conf::logdir/gnupg-database.log 2>&1");
-	} else {
-		logger("CRYPTO INFO: Database is okay");
-	}
-}
-
 sub callback {
    my ($data, $response, $protocol) = @_;
    $final_data .= $data;
@@ -922,6 +901,111 @@ sub progress_bar {
 		}	
 		$progress = sprintf("%.2f%%", 100*$got/+$total);
     sprintf "$color{'lightgreen'}%-20s %7s |%-${width}s| %10s$color{'normal'}\r",$show_bfile, $progress, $char x (($width-1)*$got/$total). '>', beautifysize($got);
+}
+
+sub updates_available {
+	# Get packets with updates available
+	my @upgradepaks = &Pakfire::dblist("upgrade", "noweb");
+
+	# Get the length of the returned array
+	my $updatecount = scalar @upgradepaks;
+
+	return "$updatecount";
+}
+
+sub coreupdate_available {
+	eval(`grep "core_" $Conf::dbdir/lists/core-list.db`);
+	if ("$core_release" > "$Conf::core_mine") {
+		return "yes ($core_release)";
+	}
+	else {
+		return "no";
+	}
+}
+
+sub reboot_required {
+	if ( -e "/var/run/need_reboot" ) {
+		return "yes";
+	}
+	else {
+		return "no";
+	}
+}
+
+sub status {
+	# General info
+	my $return = "Core-Version: $Conf::version\n";
+	$return .= "Core-Update-Level: $Conf::core_mine\n";
+	$return .= "Last update: " . &General::age("/opt/pakfire/db/core/mine") . " ago\n";
+	$return .= "Last core-list update: " . &General::age("/opt/pakfire/db/lists/core-list.db") . " ago\n";
+	$return .= "Last server-list update: " . &General::age("/opt/pakfire/db/lists/server-list.db") . " ago\n";
+	$return .= "Last packages-list update: " . &General::age("/opt/pakfire/db/lists/packages_list.db") . " ago\n";
+
+	# Get availability of core updates
+	$return .= "Core-Update available: " . &Pakfire::coreupdate_available() . "\n";
+
+	# Get availability of package updates
+	$return .= "Package-Updates available: " . &Pakfire::updates_available() . "\n";
+
+	# Test if reboot is required
+	$return .= "Reboot required: " . &Pakfire::reboot_required() . "\n";
+
+	# Return status text
+	print "$return";
+	exit 1;
+}
+
+sub get_arch() {
+	# Append architecture
+	my ($sysname, $nodename, $release, $version, $machine) = POSIX::uname();
+
+	# We only support armv5tel for all 32 bit arches
+	if ($machine =~ m/armv[567]/) {
+		return "armv5tel";
+
+	# We only support i586 for 32 bit x86
+	} elsif ($machine =~ m/i[0-9]86/) {
+		return "i586";
+	}
+
+	return $machine;
+}
+
+sub get_tree() {
+	# Return stable if nothing is set
+	return "stable" unless (defined $pakfiresettings{'TREE'});
+
+	return $pakfiresettings{'TREE'};
+}
+
+sub make_version() {
+	my $version = "";
+
+	# Open /etc/system-release
+	open(RELEASE, "</etc/system-release");
+	my $release = <RELEASE>;
+	close(RELEASE);
+
+	# Add the main relase
+	if ($release =~ m/IPFire ([\d\.]+)/) {
+		$version .= $1;
+	}
+
+	# Append suffix for tree
+	my $tree = &get_tree();
+	if ($tree eq "testing") {
+		$version .= ".1";
+	} elsif ($tree eq "unstable") {
+		$version .= ".2";
+	}
+
+	# Append architecture
+	my $arch = &get_arch();
+	if ($arch ne "i586") {
+		$version .= "-${arch}";
+	}
+
+	return $version;
 }
 
 1;

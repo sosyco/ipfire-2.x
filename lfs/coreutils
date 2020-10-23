@@ -1,7 +1,7 @@
 ###############################################################################
 #                                                                             #
 # IPFire.org - A linux based firewall                                         #
-# Copyright (C) 2007-2015  IPFire Team  <info@ipfire.org>                     #
+# Copyright (C) 2007-2020  IPFire Team  <info@ipfire.org>                     #
 #                                                                             #
 # This program is free software: you can redistribute it and/or modify        #
 # it under the terms of the GNU General Public License as published by        #
@@ -24,25 +24,23 @@
 
 include Config
 
-VER        = 8.24
+VER        = 8.32
 
 THISAPP    = coreutils-$(VER)
 DL_FILE    = $(THISAPP).tar.xz
 DL_FROM    = $(URL_IPFIRE)
 DIR_APP    = $(DIR_SRC)/$(THISAPP)
 
-# Normal build or /tools build.
+# Normal build or $(TOOLS_DIR) build.
 #
 ifeq "$(ROOT)" ""
   TARGET = $(DIR_INFO)/$(THISAPP)
-  CONFIGURE_OPTIONS = --prefix=/usr
 else
   TARGET = $(DIR_INFO)/$(THISAPP)-tools
-  CONFIGURE_OPTIONS = --prefix=/tools
 endif
 
 CONFIGURE_OPTIONS += \
-	--disable-selinux \
+	--prefix=$(PREFIX) \
 	--enable-largefile \
 	--disable-rpath \
 	--enable-install-program=arch \
@@ -52,15 +50,20 @@ CONFIGURE_OPTIONS += \
 
 CFLAGS += -fno-strict-aliasing
 
+# Build with 32 bit time_t on 32 bit architectures
+ifeq "$(IS_32BIT)" "1"
+	export TIME_T_32_BIT_OK=yes
+endif
+
 ###############################################################################
 # Top-level Rules
 ###############################################################################
 
 objects =$(DL_FILE)
 
-$(DL_FILE)                      = $(DL_FROM)/$(DL_FILE)
+$(DL_FILE)= $(DL_FROM)/$(DL_FILE)
 
-$(DL_FILE)_MD5                  = 40efdbce865d2458d8da0a9dcee7c16c
+$(DL_FILE)_MD5 = 022042695b7d5bcf1a93559a9735e668
 
 install : $(TARGET)
 
@@ -90,7 +93,11 @@ $(subst %,%_MD5,$(objects)) :
 $(TARGET) : $(patsubst %,$(DIR_DL)/%,$(objects))
 	@$(PREBUILD)
 	@rm -rf $(DIR_APP) && cd $(DIR_SRC) && tar axf $(DIR_DL)/$(DL_FILE)
-	cd $(DIR_APP) && ./configure $(CONFIGURE_OPTIONS)
+	cd $(DIR_APP) && patch -Np1 < $(DIR_SRC)/src/patches/coreutils-8.27-uname-1.patch
+	cd $(DIR_APP) && patch -Np1 < $(DIR_SRC)/src/patches/coreutils-8.32-i18n-1.patch
+	# this is upstream and also fix the aarch64 build
+	cd $(DIR_APP) && patch -Np1 < $(DIR_SRC)/src/patches/coreutils/ls-restore-8.31-behavior-on-removed-directories.patch
+	cd $(DIR_APP) && FORCE_UNSAFE_CONFIGURE=1 && ./configure $(CONFIGURE_OPTIONS)
 	cd $(DIR_APP) && make $(MAKETUNING)
 	cd $(DIR_APP) && make install
 

@@ -2,7 +2,7 @@
 ###############################################################################
 #                                                                             #
 # IPFire.org - A linux based firewall                                         #
-# Copyright (C) 2015  IPFire Team  <alexander.marx@ipfire.org>                #
+# Copyright (C) 2007-2020  IPFire Team  <info@ipfire.org>                     #
 #                                                                             #
 # This program is free software: you can redistribute it and/or modify        #
 # it under the terms of the GNU General Public License as published by        #
@@ -81,19 +81,10 @@ if ( -f $mailfile){
 
 #ACTIONS
 if ($cgiparams{'ACTION'} eq "$Lang::tr{'save'}"){ #SaveButton on configsite
-	#Check fields
-	if ($cgiparams{'USEMAIL'} eq 'on'){
-		$errormessage=&checkmailsettings;
-	}else{
-		$cgiparams{'txt_mailserver'}='';
-		$cgiparams{'txt_mailport'}='';
-		$cgiparams{'txt_mailuser'}='';
-		$cgiparams{'txt_mailpass'}='';
-		$cgiparams{'mail_tls'}='';
-		$cgiparams{'txt_mailsender'}='';
-		$cgiparams{'txt_recipient'}='';
-	}
-	if(!$errormessage){
+	# Check fields
+	$errormessage = &checkmailsettings();
+
+	if (!$errormessage) {
 		#clear hashes
 		%auth=();
 		%dma=();
@@ -119,8 +110,8 @@ if ($cgiparams{'ACTION'} eq "$Lang::tr{'save'}"){ #SaveButton on configsite
 
 		$dma{'SMARTHOST'}		= $cgiparams{'txt_mailserver'};
 		$dma{'PORT'}			= $cgiparams{'txt_mailport'};
-		$dma{'STARTTLS'}		= '' if ($cgiparams{'mail_tls'});
-		$dma{'SECURETRANSFER'}	= '' if exists $dma{'STARTTLS'};
+		$dma{'STARTTLS'}		= '' if ($cgiparams{'mail_tls'} eq 'explicit');
+		$dma{'SECURETRANSFER'}	= '' if ($cgiparams{'mail_tls'} eq 'explicit' || $cgiparams{'mail_tls'} eq 'implicit');
 		$dma{'SPOOLDIR'}		= "/var/spool/dma";
 		$dma{'FULLBOUNCE'}		= '';
 		$dma{'MAILNAME'}		= "$mainsettings{'HOSTNAME'}.$mainsettings{DOMAINNAME}";
@@ -149,8 +140,6 @@ if ($cgiparams{'ACTION'} eq "$Lang::tr{'email testmail'}"){ #Testmail button on 
 
 #FUNCTIONS
 sub configsite{
-	
-
 	#If update set fieldvalues new
 	if($cgiparams{'update'} eq 'on'){
 		$mail{'USEMAIL'}	= 'on';
@@ -165,7 +154,9 @@ sub configsite{
 	}
 	#find preselections
 	$checked{'usemail'}{$mail{'USEMAIL'}}	= 'CHECKED';
-	$checked{'mail_tls'}{'on'}				= 'CHECKED' if exists $dma{'STARTTLS'};
+	$selected{'mail_tls'}{'explicit'} = 'selected' if exists $dma{'STARTTLS'};
+	$selected{'mail_tls'}{'implicit'} = 'selected' if (exists $dma{'SECURETRANSFER'}) and (not exists $dma{'STARTTLS'});
+	$selected{'mail_tls'}{'disabled'} = 'selected' if (not exists $dma{'SECURETRANSFER'}) and (not exists $dma{'STARTTLS'});
 	
 	#Open site
 	&Header::openpage($Lang::tr{'email settings'}, 1, '');
@@ -235,7 +226,13 @@ END
 		</tr>
 		<tr>
 			<td>$Lang::tr{'email tls'}</td>
-			<td><input type='checkbox' name='mail_tls' $checked{'mail_tls'}{'on'}></td>
+			<td>
+				<select name='mail_tls'>
+					<option value='implicit' $selected{'mail_tls'}{'implicit'}>$Lang::tr{'email tls implicit'}</option>
+					<option value='explicit' $selected{'mail_tls'}{'explicit'}>$Lang::tr{'email tls explicit'}</option>
+					<option value='disabled' $selected{'mail_tls'}{'disabled'}>$Lang::tr{'disabled'}</option>
+				</select>
+			</td>
 		</tr>
 END
 		if (! -z $dmafile && $mail{'USEMAIL'} eq 'on' && !$errormessage){
@@ -269,21 +266,21 @@ sub checkmailsettings {
 	#Check if mailserver is an ip address or a domain
 	if ($cgiparams{'txt_mailserver'} =~ /^(\d+)\.(\d+)\.(\d+)\.(\d+)$/){
 		if (! &General::validip($cgiparams{'txt_mailserver'})){
-			$errormessage.="$Lang::tr{'email invalid mailip'} $cgiparams{'txt_mailserver'}<br>";
+			$errormessage .= $Lang::tr{'email invalid mailip'} . "<br>";
 		}
 	}elsif(! &General::validfqdn($cgiparams{'txt_mailserver'})){
-			$errormessage.="$Lang::tr{'email invalid mailfqdn'} $cgiparams{'txt_mailserver'}<br>";
+			$errormessage .= $Lang::tr{'email invalid mailfqdn'} . "<br>";
 	}
 	#Check valid mailserverport
 	if($cgiparams{'txt_mailport'} < 1 || $cgiparams{'txt_mailport'} > 65535){
-		$errormessage.="$Lang::tr{'email invalid mailport'} $cgiparams{'txt_mailport'}<br>";
+		$errormessage .= $Lang::tr{'email invalid mailport'} . "<br>";
 	}
 	#Check valid sender
 	if(! $cgiparams{'txt_mailsender'}){
-		$errormessage.="$Lang::tr{'email empty field'} $Lang::tr{'email mailsender'}<br>";
+		$errormessage .= $Lang::tr{'email empty field'} . "<br>";
 	}else{
 		if (! &General::validemail($cgiparams{'txt_mailsender'})){
-			$errormessage.="<br>$Lang::tr{'email invalid'} $Lang::tr{'email mailsender'}<br>";
+			$errormessage .= "$Lang::tr{'email invalid'} $Lang::tr{'email mailsender'}<br>";
 		}
 	}
 	return $errormessage;

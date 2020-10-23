@@ -1,7 +1,7 @@
 ###############################################################################
 #                                                                             #
 # IPFire.org - A linux based firewall                                         #
-# Copyright (C) 2007-2014  IPFire Team  <info@ipfire.org>                     #
+# Copyright (C) 2007-2019  IPFire Team  <info@ipfire.org>                     #
 #                                                                             #
 # This program is free software: you can redistribute it and/or modify        #
 # it under the terms of the GNU General Public License as published by        #
@@ -31,13 +31,12 @@ TARGET     = $(DIR_INFO)/$(THISAPP)
 
 DEVICE     = $(shell losetup -f)
 PART_BOOT  = /dev/mapper/$(patsubst /dev/%,%,$(DEVICE))p1
+ifeq "$(EFI)" "1"
+  PART_EFI = /dev/mapper/$(patsubst /dev/%,%,$(DEVICE))p2
+endif
 PART_ROOT  = /dev/mapper/$(patsubst /dev/%,%,$(DEVICE))p3
 
-ifeq "$(SCON)" "1"
-	IMAGE_FILE = /install/images/$(SNAME)-$(VERSION).1gb-ext4-scon.$(MACHINE)-full-core$(CORE).img.gz
-else
-	IMAGE_FILE = /install/images/$(SNAME)-$(VERSION).1gb-ext4.$(MACHINE)-full-core$(CORE).img.gz
-endif
+IMAGE_FILE = /install/images/$(SNAME)-$(VERSION).2gb-ext4.$(BUILD_ARCH)-full-core$(CORE).img.xz
 
 FSTAB_FMT = UUID=%s %-8s %-4s %-10s %d %d\n
 
@@ -56,30 +55,49 @@ md5 :
 ###############################################################################
 # Installation Details
 ###############################################################################
-MNThdd   := /install/harddisk
-IMG      := /install/images/image.img
+MNThdd   := $(DIR_TMP)/harddisk
+IMG      := $(DIR_TMP)/image.img
 
 # All sizes in blocks
-ifeq "$(MACHINE_TYPE)" "arm"
+ifeq "$(BUILD_PLATFORM)" "arm"
  BOOTLOADER =
  S_OFFSET = 8192
 
  # FAT32
  PART_TYPE = c
+ifeq "$(BUILD_ARCH)" "aarch64"
+ BOOTLOADER = grub
+endif
 else
  BOOTLOADER = grub
  S_OFFSET = 8192
 
- # Logical
+ # Linux
  PART_TYPE = L
 endif
 
-# /boot:  64MB - OFFSET
-# /    : 750MB
-S_BOOT := $(shell echo $$(( 131072 - $(S_OFFSET) )))
-S_ROOT := 1536000
+# /boot:  128MB - OFFSET
+# /    : 1400 MB
+S_BOOT := $(shell echo $$(( 262144 - $(S_OFFSET) )))
+S_ROOT := 2934784
+
+ifeq "$(EFI)" "1"
+ S_EFI = 65536 # 32 MB
+else
+ S_EFI = 0
+endif
 
 PADDING = 100 # MB
+
+ifeq "$(EFI)" "1"
+ SFDISK      = $(SFDISK_BOOT)$(SFDISK_EFI)$(SFDISK_ROOT)
+else
+ SFDISK      = $(SFDISK_BOOT),0,0\n$(SFDISK_ROOT)
+endif
+
+SFDISK_BOOT = $(S_OFFSET),$(S_BOOT),$(PART_TYPE),*\n
+SFDISK_EFI  = $(shell echo $$(( $(S_OFFSET) + $(S_BOOT) ))),$(S_EFI),U\n
+SFDISK_ROOT = $(shell echo $$(( $(S_OFFSET) + $(S_BOOT) + $(S_EFI) ))),$(S_ROOT),L\n
 
 $(TARGET) : $(patsubst %,$(DIR_DL)/%,$(objects))
 	# Stop if $(MNThdd) is still mounted
@@ -88,12 +106,11 @@ $(TARGET) : $(patsubst %,$(DIR_DL)/%,$(objects))
 	rm -rf $(IMG) $(MNThdd) && mkdir -p $(MNThdd)
 
 	# Allocate image on disk
-	dd if=/dev/zero of=$(IMG) bs=512 count=$$(( $(S_OFFSET) + $(S_BOOT) + $(S_ROOT) ))
+	dd if=/dev/zero of=$(IMG) bs=512 count=$$(( $(S_OFFSET) + $(S_BOOT) + $(S_EFI) + $(S_ROOT) ))
 	losetup $(DEVICE) $(IMG)
 
 	# Write Partition table
-	echo -e "$(S_OFFSET),$(S_BOOT),$(PART_TYPE),*\n,0,0\n$$(( $(S_BOOT) + $(S_OFFSET) )),$(S_ROOT),L\n" \
-		| sfdisk -D -uS -H 64 -S 32 $(DEVICE)
+	echo -e "$(SFDISK)" | sfdisk -uS $(DEVICE)
 
 	kpartx -v -a $(DEVICE)
 
@@ -102,6 +119,9 @@ ifeq "$(PART_TYPE)" "c"
 	mkfs.vfat $(PART_BOOT)
 else
 	mkfs.ext2 -F $(PART_BOOT)
+endif
+ifeq "$(EFI)" "1"
+	mkfs.vfat $(PART_EFI)
 endif
 	mkfs.ext4 -O ^has_journal,extent -F $(PART_ROOT)
 
@@ -116,45 +136,26 @@ endif
 	mkdir -pv $(MNThdd)/boot
 	mount $(PART_BOOT) $(MNThdd)/boot
 
+ifeq "$(EFI)" "1"
+	mkdir -pv $(MNThdd)/boot/efi
+	mount $(PART_EFI) $(MNThdd)/boot/efi
+endif
+
 	# Install Pandaboard MLO and uboot first
-ifeq "$(MACHINE_TYPE)" "arm"
+ifeq "$(BUILD_ARCH)" "armv5tel"
 	cp -v /boot/MLO $(MNThdd)/boot/
 	cp -v /boot/u-boot.img $(MNThdd)/boot/
-	cp -v /boot/zImage-ipfire-multi $(MNThdd)/boot/
-	# work around a u-boot bug not find the folders sometimes
-	mkdir -pv $(MNThdd)/boot/dtb-$(KVER)-ipfire-multi
-	mkdir -pv $(MNThdd)/boot/dtb-$(KVER)-ipfire-kirkwood
 	sync
 	umount $(MNThdd)/boot
 	mount $(PART_BOOT) $(MNThdd)/boot
 endif
 
 	# Install IPFire
-ifneq "$(MACHINE_TYPE)" "arm"
-	tar -x --lzma -C $(MNThdd)/ -f /install/cdrom/distro.img
+ifneq "$(BUILD_PLATFORM)" "arm"
+	tar -x --xz -C $(MNThdd)/ -f $(DIR_TMP)/cdrom/distro.img
 else
-	tar -x -C $(MNThdd)/ -f /install/cdrom/distro.img
+	tar -x -C $(MNThdd)/ -f $(DIR_TMP)/cdrom/distro.img
 endif
-	echo "LANGUAGE=en" >> $(MNThdd)/var/ipfire/main/settings
-	echo "HOSTNAME=$(SNAME)" >> $(MNThdd)/var/ipfire/main/settings
-	echo "THEME=ipfire" >> $(MNThdd)/var/ipfire/main/settings
-
-ifeq "$(SCON)" "1"
-	# Enable serial console
-	sed -i -e "s|1:2345:respawn:|#1:2345:respawn:|g" $(MNThdd)/etc/inittab
-	sed -i -e "s|2:2345:respawn:|#2:2345:respawn:|g" $(MNThdd)/etc/inittab
-	sed -i -e "s|3:2345:respawn:|#3:2345:respawn:|g" $(MNThdd)/etc/inittab
-	sed -i -e "s|4:2345:respawn:|#4:2345:respawn:|g" $(MNThdd)/etc/inittab
-	sed -i -e "s|5:2345:respawn:|#5:2345:respawn:|g" $(MNThdd)/etc/inittab
-	sed -i -e "s|6:2345:respawn:|#6:2345:respawn:|g" $(MNThdd)/etc/inittab
-	sed -i -e "s|#7:2345:respawn:|7:2345:respawn:|g" $(MNThdd)/etc/inittab
-
-ifeq "$(MACHINE_TYPE)" "arm"
-	sed -i -e "s| console=tty1 | console=ttyAMA0,115200n8 |g" $(MNThdd)/boot/cmdline.txt
-	sed -i -e "s| console=tty1 | console=ttyO2,115200n8 |g" $(MNThdd)/boot/uEnv.txt
-endif
-endif
-
 	-touch $(MNThdd)/lib/modules/$(KVER)-ipfire/modules.dep
 	mkdir $(MNThdd)/proc
 	mount --bind /proc $(MNThdd)/proc
@@ -166,30 +167,62 @@ endif
 	# Create /etc/fstab
 	printf "$(FSTAB_FMT)" "$$(blkid -o value -s UUID $(PART_BOOT))" "/boot" \
 		"auto" "defaults" 1 2 >  $(MNThdd)/etc/fstab
+ifeq "$(EFI)" "1"
+	printf "$(FSTAB_FMT)" "$$(blkid -o value -s UUID $(PART_EFI))" "/boot/efi" \
+		"auto" "defaults" 1 2 >> $(MNThdd)/etc/fstab
+endif
 	printf "$(FSTAB_FMT)" "$$(blkid -o value -s UUID $(PART_ROOT))" "/" \
 		"auto" "defaults" 1 1 >> $(MNThdd)/etc/fstab
 
 ifeq "$(BOOTLOADER)" "grub"
-ifeq "$(SCON)" "1"
-	# Enable serial console on GRUB
-	echo "GRUB_TERMINAL=\"serial\"" >> $(MNThdd)/etc/default/grub
+	# backup defaults file
+	cp $(MNThdd)/etc/default/grub $(MNThdd)/etc/default/grub.backup
+
+	# Enable also serial console on GRUB
+	echo "GRUB_TERMINAL=\"serial console\"" >> $(MNThdd)/etc/default/grub
 	echo "GRUB_SERIAL_COMMAND=\"serial --unit=0 --speed=115200\"" >> $(MNThdd)/etc/default/grub
 
-	sed -i -e "s|panic=10|& console=ttyS0,115200n8|g" $(MNThdd)/etc/default/grub
-endif
+	# Add additional entry for Serial console
+	cp $(DIR_SRC)/config/flash-images/grub/11_linux_scon \
+			$(MNThdd)/etc/grub.d/
 
 	# Create configuration
 	mkdir -pv $(MNThdd)/boot/grub
 	chroot $(MNThdd) grub-mkconfig -o /boot/grub/grub.cfg
 
-	# Insert the UUID because grub-mkconfig fails to detect that correctly
-	sed -i $(MNThdd)/boot/grub/grub.cfg \
-		-e "s/root=[a-z0-9\/]*/root=UUID=$$(blkid -o value -s UUID $(PART_ROOT))/g"
+	# Boot the first kernel by default
+	chroot $(MNThdd) grub-set-default 0
 
+	# Insert the UUID because grub-mkconfig often fails to
+	# detect that correctly
+	sed -i $(MNThdd)/boot/grub/grub.cfg \
+		-e "s/root=[A-Za-z0-9\/=-]*/root=UUID=$$(blkid -o value -s UUID $(PART_ROOT))/g"
+
+ifeq "$(BUILD_PLATFORM)" "x86"
 	# Install GRUB
-	grub-install --force --recheck --no-floppy \
+	grub-install --force --recheck --no-floppy --target=i386-pc \
 		--root-directory=$(MNThdd) $(DEVICE)
 endif
+
+ifeq "$(EFI)" "1"
+	# Install GRUB for EFI
+	grub-install --target=$(GRUB_ARCH)-efi --removable --no-nvram \
+		--boot-directory=$(MNThdd)/boot --efi-directory=$(MNThdd)/boot/efi
+endif
+
+	# restore orginal defaults
+	mv -f $(MNThdd)/etc/default/grub.backup $(MNThdd)/etc/default/grub
+	rm -f $(MNThdd)/etc/grub.d/11_linux_scon
+endif
+
+ifeq "$(BUILD_PLATFORM)" "arm"
+	# Insert the UUID to uENV.txt
+	sed -i $(MNThdd)/boot/uENV.txt \
+		-e "s/^root_dev=.*/root_dev=UUID=$$(blkid -o value -s UUID $(PART_ROOT))/g"
+endif
+
+	# Set ramdisk mode to automatic
+	echo RAMDISK_MODE=2 > $(MNThdd)/etc/sysconfig/ramdisk
 
 	# Automatically resize the root partition to its maximum size at first boot
 	touch $(MNThdd)/.partresize
@@ -198,6 +231,9 @@ endif
 	umount $(MNThdd)/proc
 	umount $(MNThdd)/sys
 	umount $(MNThdd)/dev
+ifeq "$(EFI)" "1"
+	umount $(MNThdd)/boot/efi
+endif
 	umount $(MNThdd)/boot
 	umount $(MNThdd)
 
@@ -219,11 +255,11 @@ endif
 	# not copied to a block device)
 	dd if=/dev/zero bs=1M count=$(PADDING) >> $(IMG)
 
-ifeq "$(MACHINE_TYPE)" "arm"
-	# Install u-boot for LeMaker Banana Pi into image 8KB
-	dd if=/usr/share/u-boot/banana_pi/u-boot-sunxi-with-spl.bin of=$(IMG) bs=1K seek=8 conv=notrunc
+ifeq "$(BUILD_ARCH)" "armv5tel"
+	# Install u-boot for Orangepi Zero/Nanopi DUO into image 8KB
+	dd if=/usr/share/u-boot/orangepi_zero/u-boot-sunxi-with-spl.bin of=$(IMG) bs=1K seek=8 conv=notrunc
 endif
 
 	# Compress Image
-	pigz -f9 < $(IMG) > $(IMAGE_FILE)
-	rm -rf $(IMG) $(MNThdd)
+	xz $(XZ_OPT) < $(IMG) > $(IMAGE_FILE)
+	rm -rf $(IMG) $(MNThdd) $(DIR_TMP)/cdrom

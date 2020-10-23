@@ -1,6 +1,6 @@
 ###############################################################################
 # IPFire.org    - An Open Source Firewall Solution                            #
-# Copyright (C) - IPFire Development Team <info@ipfire.org>                   #
+# Copyright (C) 2007-2018  IPFire Team  <info@ipfire.org>                     #
 ###############################################################################
 
 ###############################################################################
@@ -19,7 +19,7 @@ TARGET     = $(DIR_INFO)/$(THISAPP)
 PROG       = wavemon
 PAK_VER    = 1
 
-DEPS       = ""
+DEPS       =
 
 ###############################################################################
 # Top-level Rules
@@ -62,6 +62,7 @@ $(subst %,%_MD5,$(objects)) :
 $(TARGET) : $(patsubst %,$(DIR_DL)/%,$(objects))
 	@$(PREBUILD)
 	@rm -rf $(DIR_APP) && cd $(DIR_SRC) && tar axf $(DIR_DL)/$(DL_FILE)
+	$(UPDATE_AUTOMAKE)
 	cd $(DIR_APP) && ./configure \
 		--prefix=/usr
 

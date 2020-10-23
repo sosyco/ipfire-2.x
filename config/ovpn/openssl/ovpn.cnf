@@ -1,5 +1,4 @@
 HOME				= .
-RANDFILE			= /var/ipfire/ovpn/ca/.rnd
 oid_section			= new_oids
 
 [ new_oids ]
@@ -17,7 +16,6 @@ certificate			= $dir/ca/cacert.pem
 serial				= $dir/certs/serial
 crl				= $dir/crl.pem
 private_key			= $dir/ca/cakey.pem
-RANDFILE			= $dir/ca/.rand
 x509_extensions			= usr_cert
 default_days			= 999999
 default_crl_days		= 30
@@ -77,6 +75,8 @@ basicConstraints		= CA:FALSE
 nsComment			= "OpenSSL Generated Certificate"
 subjectKeyIdentifier		= hash
 authorityKeyIdentifier		= keyid,issuer:always
+extendedKeyUsage               = clientAuth
+keyUsage                       = digitalSignature
 
 [ server ]
 
@@ -86,6 +86,8 @@ nsCertType			= server
 nsComment			= "OpenSSL Generated Server Certificate"
 subjectKeyIdentifier		= hash
 authorityKeyIdentifier		= keyid,issuer:always 
+extendedKeyUsage               = serverAuth
+keyUsage                       = digitalSignature, keyEncipherment
 
 [ v3_req ]
 basicConstraints 		= CA:FALSE

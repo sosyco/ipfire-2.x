@@ -102,6 +102,26 @@ sub bin2ip($) {
 	return $address;
 }
 
+# Takes two network addresses, compares them against each other
+# and returns true if equal or false if not
+sub network_equal {
+	my $network1 = shift;
+	my $network2 = shift;
+
+	my @bin1 = &network2bin($network1);
+	my @bin2 = &network2bin($network2);
+
+	if (!defined $bin1 || !defined $bin2) {
+		return undef;
+	}
+
+	if ($bin1[0] == $bin2[0] && $bin1[1] == $bin2[1]) {
+		return 1;
+	}
+
+	return 0;
+}
+
 # Takes a network in either a.b.c.d/a.b.c.d or a.b.c.d/e notation
 # and will return an 32 bit integer representing the start
 # address and an other one representing the network mask.
@@ -116,6 +136,10 @@ sub network2bin($) {
 
 	my $address_bin = &ip2bin($address);
 	my $netmask_bin = &ip2bin($netmask);
+
+	if (!defined $address_bin || !defined $netmask_bin) {
+		return undef;
+	}
 
 	my $network_start = $address_bin & $netmask_bin;
 
@@ -167,7 +191,7 @@ sub check_ip_address_and_netmask($$) {
 	my ($address, $netmask) = split(/\//, $network, 2);
 
 	# Check if the IP address is fine.
-	# 
+	#
 	my $result = &check_ip_address($address);
 	unless ($result) {
 		return $result;
@@ -271,7 +295,7 @@ sub ip_address_in_network($$) {
 	# Find end address
 	my $broadcast_bin = $network_bin ^ (~$netmask_bin % 2 ** 32);
 
-	return (($address_bin ge $network_bin) && ($address_bin le $broadcast_bin));
+	return (($address_bin >= $network_bin) && ($address_bin <= $broadcast_bin));
 }
 
 sub setup_upstream_proxy() {
@@ -299,19 +323,141 @@ sub setup_upstream_proxy() {
 	}
 }
 
+my %wireless_status = ();
+
+sub _get_wireless_status($) {
+	my $intf = shift;
+
+	if (!$wireless_status{$intf}) {
+		$wireless_status{$intf} = `iwconfig $intf`;
+	}
+
+	return $wireless_status{$intf};
+}
+
+sub wifi_get_essid($) {
+	my $status = &_get_wireless_status(shift);
+
+	my ($essid) = $status =~ /ESSID:\"(.*)\"/;
+
+	return $essid;
+}
+
+sub wifi_get_frequency($) {
+	my $status = &_get_wireless_status(shift);
+
+	my ($frequency) = $status =~ /Frequency:(\d+\.\d+ GHz)/;
+
+	return $frequency;
+}
+
+sub wifi_get_access_point($) {
+	my $status = &_get_wireless_status(shift);
+
+	my ($access_point) = $status =~ /Access Point: ([0-9A-F:]+)/;
+
+	return $access_point;
+}
+
+sub wifi_get_bit_rate($) {
+	my $status = &_get_wireless_status(shift);
+
+	my ($bit_rate) = $status =~ /Bit Rate=(\d+ [GM]b\/s)/;
+
+	return $bit_rate;
+}
+
+sub wifi_get_link_quality($) {
+	my $status = &_get_wireless_status(shift);
+
+	my ($cur, $max) = $status =~ /Link Quality=(\d+)\/(\d+)/;
+
+	return $cur * 100 / $max;
+}
+
+sub wifi_get_signal_level($) {
+	my $status = &_get_wireless_status(shift);
+
+	my ($signal_level) = $status =~ /Signal level=(\-\d+ dBm)/;
+
+	return $signal_level;
+}
+
+sub get_hardware_address($) {
+	my $ip_address = shift;
+	my $ret;
+
+	open(FILE, "/proc/net/arp") or die("Could not read ARP table");
+
+	while (<FILE>) {
+		my ($ip_addr, $hwtype, $flags, $hwaddr, $mask, $device) = split(/\s+/, $_);
+		if ($ip_addr eq $ip_address) {
+			$ret = $hwaddr;
+			last;
+		}
+	}
+
+	close(FILE);
+
+	return $ret;
+}
+
+sub get_nic_property {
+	my $nicname = shift;
+	my $property = shift;
+	my $result;
+
+	open(FILE, "/sys/class/net/$nicname/$property") or die("Could not read property");
+	$result = <FILE>;
+	close(FILE);
+
+	chomp($result);
+
+	return $result;
+}
+
+sub valid_mac($) {
+	my $mac = shift;
+
+	return $mac =~ /^([0-9A-Fa-f]{2}[:]){5}([0-9A-Fa-f]{2})$/;
+}
+
+sub random_mac {
+	my $address = "02";
+
+	for my $i (0 .. 4) {
+		$address = sprintf("$address:%02x", int(rand(255)));
+	}
+
+	return $address;
+}
+
+sub get_mac_by_name($) {
+	my $mac = shift;
+
+	if ((!&valid_mac($mac)) && ($mac ne "")) {
+		if (-e "/sys/class/net/$mac/") {
+			$mac = get_nic_property($mac, "address");
+		}
+	}
+
+	return $mac;
+}
+
 1;
 
 # Remove the next line to enable the testsuite
 __END__
 
-sub assert($) {
+sub assert($$) {
+	my $tst = shift;
 	my $ret = shift;
 
 	if ($ret) {
 		return;
 	}
 
-	print "ASSERTION ERROR";
+	print "ASSERTION ERROR - $tst\n";
 	exit(1);
 }
 
@@ -319,10 +465,10 @@ sub testsuite() {
 	my $result;
 
 	my $address1 = &ip2bin("8.8.8.8");
-	assert($address1 == 134744072);
+	assert('ip2bin("8.8.8.8")', $address1 == 134744072);
 
 	my $address2 = &bin2ip($address1);
-	assert($address2 eq "8.8.8.8");
+	assert("bin2ip($address1)", $address2 eq "8.8.8.8");
 
 	# Check if valid IP addresses are correctly recognised.
 	foreach my $address ("1.2.3.4", "192.168.180.1", "127.0.0.1") {
@@ -341,22 +487,39 @@ sub testsuite() {
 	}
 
 	$result = &check_ip_address_and_netmask("192.168.180.0/255.255.255.0");
-	assert($result);
+	assert('check_ip_address_and_netmask("192.168.180.0/255.255.255.0")', $result);
 
 	$result = &convert_netmask2prefix("255.255.254.0");
-	assert($result == 23);
+	assert('convert_netmask2prefix("255.255.254.0")', $result == 23);
 
 	$result = &convert_prefix2netmask(8);
-	assert($result eq "255.0.0.0");
+	assert('convert_prefix2netmask(8)', $result eq "255.0.0.0");
 
 	$result = &find_next_ip_address("1.2.3.4", 2);
-	assert($result eq "1.2.3.6");
+	assert('find_next_ip_address("1.2.3.4", 2)', $result eq "1.2.3.6");
+
+	$result = &network_equal("192.168.0.0/24", "192.168.0.0/255.255.255.0");
+	assert('network_equal("192.168.0.0/24", "192.168.0.0/255.255.255.0")', $result);
+
+	$result = &network_equal("192.168.0.0/24", "192.168.0.0/25");
+	assert('network_equal("192.168.0.0/24", "192.168.0.0/25")', !$result);
+
+	$result = &network_equal("192.168.0.0/24", "192.168.0.128/25");
+	assert('network_equal("192.168.0.0/24", "192.168.0.128/25")', !$result);
+
+	$result = &network_equal("192.168.0.1/24", "192.168.0.XXX/24");
+	assert('network_equal("192.168.0.1/24", "192.168.0.XXX/24")', !$result);
 
 	$result = &ip_address_in_network("10.0.1.4", "10.0.0.0/8");
-	assert($result);
+	assert('ip_address_in_network("10.0.1.4", "10.0.0.0/8"', $result);
 
 	$result = &ip_address_in_network("192.168.30.11", "192.168.30.0/255.255.255.0");
-	assert($result);
+	assert('ip_address_in_network("192.168.30.11", "192.168.30.0/255.255.255.0")', $result);
+
+	$result = &ip_address_in_network("192.168.30.11", "0.0.0.0/8");
+	assert('ip_address_in_network("192.168.30.11", "0.0.0.0/8")', !$result);
+
+	print "Testsuite completed successfully!\n";
 
 	return 0;
 }

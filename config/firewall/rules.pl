@@ -2,7 +2,7 @@
 ###############################################################################
 #                                                                             #
 # IPFire.org - A linux based firewall                                         #
-# Copyright (C) 2013 Alexander Marx <amarx@ipfire.org>                        #
+# Copyright (C) 2007-2019  IPFire Team  <info@ipfire.org>                     #
 #                                                                             #
 # This program is free software: you can redistribute it and/or modify        #
 # it under the terms of the GNU General Public License as published by        #
@@ -20,10 +20,12 @@
 ###############################################################################
 
 use strict;
+use experimental 'smartmatch';
 
 require '/var/ipfire/general-functions.pl';
 require "${General::swroot}/lang.pl";
 require "/usr/lib/firewall/firewall-lib.pl";
+require "${General::swroot}/location-functions.pl";
 
 # Set to one to enable debugging mode.
 my $DEBUG = 0;
@@ -46,6 +48,13 @@ my @PROTOCOLS_WITH_PORTS = ("tcp", "udp");
 
 my @VALID_TARGETS = ("ACCEPT", "DROP", "REJECT");
 
+my @PRIVATE_NETWORKS = (
+	"10.0.0.0/8",
+	"172.16.0.0/12",
+	"192.168.0.0/16",
+	"100.64.0.0/10",
+);
+
 my %fwdfwsettings=();
 my %fwoptions = ();
 my %defaultNetworks=();
@@ -54,13 +63,17 @@ my %customgrp=();
 my %configinputfw=();
 my %configoutgoingfw=();
 my %confignatfw=();
+my %locationsettings = (
+	"LOCATIONBLOCK_ENABLED" => "off"
+);
+
 my @p2ps=();
 
 my $configfwdfw		= "${General::swroot}/firewall/config";
 my $configinput	    = "${General::swroot}/firewall/input";
 my $configoutgoing  = "${General::swroot}/firewall/outgoing";
 my $p2pfile			= "${General::swroot}/firewall/p2protocols";
-my $geoipfile		= "${General::swroot}/firewall/geoipblock";
+my $locationfile		= "${General::swroot}/firewall/locationblock";
 my $configgrp		= "${General::swroot}/fwhosts/customgroups";
 my $netsettings		= "${General::swroot}/ethernet/settings";
 
@@ -71,6 +84,15 @@ my $netsettings		= "${General::swroot}/ethernet/settings";
 &General::readhasharray($configinput, \%configinputfw);
 &General::readhasharray($configoutgoing, \%configoutgoingfw);
 &General::readhasharray($configgrp, \%customgrp);
+
+# Check if the location settings file exists
+if (-e "$locationfile") {
+	# Read settings file
+	&General::readhash("$locationfile", \%locationsettings);
+}
+
+# Get all available locations.
+my @locations = &Location::Functions::get_locations();
 
 my @log_limit_options = &make_log_limit_options();
 
@@ -103,8 +125,8 @@ sub main {
 	# Load P2P block rules.
 	&p2pblock();
 
-	# Load GeoIP block rules.
-	&geoipblock();
+	# Load Location block rules.
+	&locationblock();
 
 	# Reload firewall policy.
 	run("/usr/sbin/firewall-policy");
@@ -175,9 +197,9 @@ sub buildrules {
 	}
 
 	if ($POLICY_INPUT_ACTION eq "DROP") {
-		push(@special_input_targets, "REJECT");
+		push(@special_input_targets, ("ACCEPT", "REJECT"));
 	} elsif ($POLICY_INPUT_ACTION eq "REJECT") {
-		push(@special_input_targets, "DROP");
+		push(@special_input_targets, ("ACCEPT", "DROP"));
 	}
 
 	my @special_output_targets = ();
@@ -187,9 +209,9 @@ sub buildrules {
 		push(@special_output_targets, "ACCEPT");
 
 		if ($POLICY_OUTPUT_ACTION eq "DROP") {
-			push(@special_output_targets, "REJECT");
+			push(@special_output_targets, ("ACCEPT", "REJECT"));
 		} elsif ($POLICY_OUTPUT_ACTION eq "REJECT") {
-			push(@special_output_targets, "DROP");
+			push(@special_output_targets, ("ACCEPT", "DROP"));
 		}
 	}
 
@@ -383,6 +405,19 @@ sub buildrules {
 						push(@destination_options, ("-d", $destination));
 					}
 
+					# Add source and destination interface to the filter rules.
+					# These are supposed to help filtering forged packets that originate
+					# from BLUE with an IP address from GREEN for instance.
+					my @source_intf_options = ();
+					if ($source_intf) {
+						push(@source_intf_options, ("-i", $source_intf));
+					}
+
+					my @destination_intf_options = ();
+					if ($destination_intf) {
+						push(@destination_intf_options, ("-o", $destination_intf));
+					}
+
 					# Add time constraint options.
 					push(@options, @time_options);
 
@@ -465,41 +500,42 @@ sub buildrules {
 
 						# Source NAT
 						} elsif ($NAT_MODE eq "SNAT") {
+							my @snat_options = ( "-m", "policy", "--dir", "out", "--pol", "none" );
 							my @nat_options = @options;
 
-							if ($destination_intf) {
-								push(@nat_options, ("-o", $destination_intf));
+							# Get addresses for the configured firewall interfaces.
+							my @local_addresses = &fwlib::get_internal_firewall_ip_addresses(1);
+
+							# Check if the nat_address is one of the local addresses.
+							foreach my $local_address (@local_addresses) {
+								if ($nat_address eq $local_address) {
+									# Clear SNAT options.
+									@snat_options = ();
+
+									# Finish loop.
+									last;
+								}
 							}
 
+							push(@nat_options, @destination_intf_options);
 							push(@nat_options, @source_options);
 							push(@nat_options, @destination_options);
 
 							if ($LOG) {
-								run("$IPTABLES -t nat -A $CHAIN_NAT_SOURCE @nat_options @log_limit_options -j LOG --log-prefix 'SNAT '");
+								run("$IPTABLES -t nat -A $CHAIN_NAT_SOURCE @nat_options @snat_options @log_limit_options -j LOG --log-prefix 'SNAT '");
 							}
-							run("$IPTABLES -t nat -A $CHAIN_NAT_SOURCE @nat_options -j SNAT --to-source $nat_address");
+							run("$IPTABLES -t nat -A $CHAIN_NAT_SOURCE @nat_options @snat_options -j SNAT --to-source $nat_address");
 						}
-					}
-
-					# Add source and destination interface to the filter rules.
-					# These are supposed to help filtering forged packets that originate
-					# from BLUE with an IP address from GREEN for instance.
-					if ($source_intf) {
-						push(@source_options, ("-i", $source_intf));
-					}
-
-					if ($destination_intf) {
-						push(@destination_options, ("-o", $destination_intf));
 					}
 
 					push(@options, @source_options);
 					push(@options, @destination_options);
 
 					# Insert firewall rule.
-					if ($LOG && !$NAT) {
-						run("$IPTABLES -A $chain @options @log_limit_options -j LOG --log-prefix '$chain '");
+					if ($LOG) {
+						run("$IPTABLES -A $chain @options @source_intf_options @destination_intf_options @log_limit_options -j LOG --log-prefix '$chain '");
 					}
-					run("$IPTABLES -A $chain @options -j $target");
+					run("$IPTABLES -A $chain @options @source_intf_options @destination_intf_options -j $target");
 
 					# Handle forwarding rules and add corresponding rules for firewall access.
 					if ($chain eq $CHAIN_FORWARD) {
@@ -507,18 +543,18 @@ sub buildrules {
 						# is granted/forbidden for any network that the firewall itself is part of, we grant/forbid access
 						# for the firewall, too.
 						if ($firewall_is_in_destination_subnet && ($target ~~ @special_input_targets)) {
-							if ($LOG && !$NAT) {
-								run("$IPTABLES -A $CHAIN_INPUT @options @log_limit_options -j LOG --log-prefix '$CHAIN_INPUT '");
+							if ($LOG) {
+								run("$IPTABLES -A $CHAIN_INPUT @options @source_intf_options @log_limit_options -j LOG --log-prefix '$CHAIN_INPUT '");
 							}
-							run("$IPTABLES -A $CHAIN_INPUT @options -j $target");
+							run("$IPTABLES -A $CHAIN_INPUT @options @source_intf_options -j $target");
 						}
 
 						# Likewise.
 						if ($firewall_is_in_source_subnet && ($target ~~ @special_output_targets)) {
-							if ($LOG && !$NAT) {
-								run("$IPTABLES -A $CHAIN_OUTPUT @options @log_limit_options -j LOG --log-prefix '$CHAIN_OUTPUT '");
+							if ($LOG) {
+								run("$IPTABLES -A $CHAIN_OUTPUT @options @destination_intf_options @log_limit_options -j LOG --log-prefix '$CHAIN_OUTPUT '");
 							}
-							run("$IPTABLES -A $CHAIN_OUTPUT @options -j $target");
+							run("$IPTABLES -A $CHAIN_OUTPUT @options @destination_intf_options -j $target");
 						}
 					}
 				}
@@ -582,34 +618,32 @@ sub p2pblock {
 	}
 }
 
-sub geoipblock {
-	my %geoipsettings = ();
-	$geoipsettings{'GEOIPBLOCK_ENABLED'} = "off";
-
+sub locationblock {
 	# Flush iptables chain.
-	run("$IPTABLES -F GEOIPBLOCK");
+	run("$IPTABLES -F LOCATIONBLOCK");
 
-	# Check if the geoip settings file exists
-	if (-e "$geoipfile") {
-		# Read settings file
-		&General::readhash("$geoipfile", \%geoipsettings);
-	}
-
-	# If geoip blocking is not enabled, we are finished here.
-	if ($geoipsettings{'GEOIPBLOCK_ENABLED'} ne "on") {
+	# If location blocking is not enabled, we are finished here.
+	if ($locationsettings{'LOCATIONBLOCK_ENABLED'} ne "on") {
 		# Exit submodule. Process remaining script.
 		return;
 	}
 
-	# Get supported locations.
-	my @locations = &fwlib::get_geoip_locations();
+	# Only check the RED interface
+	if ($defaultNetworks{'RED_DEV'} ne "") {
+		run("$IPTABLES -A LOCATIONBLOCK ! -i $defaultNetworks{'RED_DEV'} -j RETURN");
+	}
 
-	# Loop through all supported geoip locations and
-	# create iptables rules, if blocking this country
+	# Do not check any private address space
+	foreach my $network (@PRIVATE_NETWORKS) {
+		run("$IPTABLES -A LOCATIONBLOCK -s $network -j RETURN");
+	}
+
+	# Loop through all supported locations and
+	# create iptables rules, if blocking for this country
 	# is enabled.
 	foreach my $location (@locations) {
-		if($geoipsettings{$location} eq "on") {
-			run("$IPTABLES -A GEOIPBLOCK -m geoip --src-cc $location -j DROP");
+		if(exists $locationsettings{$location} && $locationsettings{$location} eq "on") {
+			run("$IPTABLES -A LOCATIONBLOCK -m geoip --src-cc $location -j DROP");
 		}
 	}
 }
@@ -804,8 +838,8 @@ sub make_log_limit_options {
 	# Maybe we should get this from the configuration.
 	my $limit = 10;
 
-	# We limit log messages to $limit messages per minute.
-	push(@options, ("--limit", "$limit/min"));
+	# We limit log messages to $limit messages per second.
+	push(@options, ("--limit", "$limit/second"));
 
 	# And we allow bursts of 2x $limit.
 	push(@options, ("--limit-burst", $limit * 2));

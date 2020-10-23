@@ -1,7 +1,7 @@
 ###############################################################################
 #                                                                             #
 # IPFire.org - A linux based firewall                                         #
-# Copyright (C) 2007  Michael Tremer & Christian Schmidt                      #
+# Copyright (C) 2007-2018  IPFire Team  <info@ipfire.org>                     #
 #                                                                             #
 # This program is free software: you can redistribute it and/or modify        #
 # it under the terms of the GNU General Public License as published by        #
@@ -26,8 +26,9 @@ include Config
 
 VER = ipfire
 
-THISAPP    = core-updates
-TARGET     = $(DIR_INFO)/$(THISAPP)
+THISAPP     = core-updates
+TARGET      = $(DIR_INFO)/$(THISAPP)
+TAR_OPTIONS = --xz
 
 ###############################################################################
 # Top-level Rules
@@ -51,15 +52,16 @@ $(TARGET) : $(CORE)
 
 .PHONY:
 core/%:
-	rm -rf /install/packages/package
+	rm -rf /install/packages/package /tmp/*
 	mkdir -p /install/packages/package
 	eval $$(cat /usr/src/config/rootfiles/$@/meta)
 
 	#Generate ROOTFILES from filelists
-	$(DIR_SRC)/src/scripts/archive.files \
+	BUILD_ARCH=$(BUILD_ARCH) BUILDTARGET=$(BUILDTARGET) KVER=$(KVER) \
+		$(DIR_SRC)/src/scripts/archive.files \
 		$(DIR_SRC)/config/rootfiles/$@/filelists \
 		$(DIR_SRC)/config/rootfiles/$@/files \
-		$(DIR_SRC)/config/rootfiles/$@/files.$(MACHINE) \
+		$(DIR_SRC)/config/rootfiles/$@/files.$(BUILD_ARCH) \
 		> /tmp/ROOTFILES.tmp
 
 	#remove excluded files from ROOTFILES
@@ -70,14 +72,13 @@ core/%:
 	sed -e "s/KVER/$(KVER)/g" -i /tmp/ROOTFILES
 
 	#Remove doubled files with tar/untar/tar to save space
-	tar -c -C / --files-from=/tmp/ROOTFILES \
-		-f /$(SNAME).tar --exclude='#*' --exclude='dev/pts/*' \
-		--exclude='proc/*' --exclude='tmp/ROOTFILES' \
-		--exclude-from=$(DIR_SRC)/config/rootfiles/$@/exclude
+	tar -c --exclude='proc/*' --exclude='tmp/ROOTFILES' --exclude='__pycache__' --exclude='#*' --exclude='dev/pts/*' \
+		--exclude-from=$(DIR_SRC)/config/rootfiles/$@/exclude \
+		-C / --files-from=/tmp/ROOTFILES -f /$(SNAME).tar
 	mv -f /tmp/ROOTFILES /install/packages/package/ROOTFILES
 	tar -p --numeric-owner -x  -C /tmp -f /$(SNAME).tar
 	rm -f /$(SNAME).tar
-	cd /tmp && tar cJf /install/packages/package/files.tar.xz * && rm -rf *
+	cd /tmp && XZ_OPT="$(XZ_OPT)" tar cJf /install/packages/package/files.tar.xz $(TAR_OPTIONS) * && rm -rf *
 	cat /install/packages/package/ROOTFILES | grep -v "#" > /install/packages/package/ROOTFILES.tmp
 	rm /install/packages/package/ROOTFILES
 	mv /install/packages/package/ROOTFILES.tmp /install/packages/package/ROOTFILES

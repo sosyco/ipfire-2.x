@@ -1,5 +1,4 @@
 etc/sudoers
-etc/sudoers.d
 usr/bin/sudo
 usr/bin/sudoedit
 usr/bin/sudoreplay
@@ -74,4 +73,4 @@ usr/sbin/visudo
 #usr/share/man/man8/sudoedit.8
 #usr/share/man/man8/sudoreplay.8
 #usr/share/man/man8/visudo.8
-var/lib/sudo
+var/db/sudo

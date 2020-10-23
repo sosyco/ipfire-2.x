@@ -7,14 +7,11 @@ etc/ssh/ssh_config
 #etc/ssh/ssh_host_ecdsa_key.pub
 #etc/ssh/ssh_host_ed25519_key
 #etc/ssh/ssh_host_ed25519_key.pub
-#etc/ssh/ssh_host_key
-#etc/ssh/ssh_host_key.pub
 #etc/ssh/ssh_host_rsa_key
 #etc/ssh/ssh_host_rsa_key.pub
 etc/ssh/sshd_config
 usr/bin/scp
 usr/bin/sftp
-usr/bin/slogin
 usr/bin/ssh
 usr/bin/ssh-add
 usr/bin/ssh-agent
@@ -24,10 +21,10 @@ usr/bin/ssh-keyscan
 usr/lib/openssh/sftp-server
 usr/lib/openssh/ssh-keysign
 usr/lib/openssh/ssh-pkcs11-helper
+usr/lib/openssh/ssh-sk-helper
 usr/sbin/sshd
 #usr/share/man/man1/scp.1
 #usr/share/man/man1/sftp.1
-#usr/share/man/man1/slogin.1
 #usr/share/man/man1/ssh-add.1
 #usr/share/man/man1/ssh-agent.1
 #usr/share/man/man1/ssh-keygen.1
@@ -39,4 +36,5 @@ usr/sbin/sshd
 #usr/share/man/man8/sftp-server.8
 #usr/share/man/man8/ssh-keysign.8
 #usr/share/man/man8/ssh-pkcs11-helper.8
+#usr/share/man/man8/ssh-sk-helper.8
 #usr/share/man/man8/sshd.8

@@ -1,0 +1,112 @@
+###############################################################################
+#                                                                             #
+# IPFire.org - A linux based firewall                                         #
+# Copyright (C) 2007-2020  IPFire Team  <info@ipfire.org>                     #
+#                                                                             #
+# This program is free software: you can redistribute it and/or modify        #
+# it under the terms of the GNU General Public License as published by        #
+# the Free Software Foundation, either version 3 of the License, or           #
+# (at your option) any later version.                                         #
+#                                                                             #
+# This program is distributed in the hope that it will be useful,             #
+# but WITHOUT ANY WARRANTY; without even the implied warranty of              #
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the               #
+# GNU General Public License for more details.                                #
+#                                                                             #
+# You should have received a copy of the GNU General Public License           #
+# along with this program.  If not, see <http://www.gnu.org/licenses/>.       #
+#                                                                             #
+###############################################################################
+
+###############################################################################
+# Definitions
+###############################################################################
+
+include Config
+
+VER        = 0.9.4
+DB_DATE    = 2020-09-21
+
+THISAPP    = libloc-$(VER)
+DL_FILE    = $(THISAPP).tar.gz
+DL_FROM    = $(URL_IPFIRE)
+DIR_APP    = $(DIR_SRC)/libloc-$(VER)
+TARGET     = $(DIR_INFO)/$(THISAPP)
+
+###############################################################################
+# Top-level Rules
+###############################################################################
+
+objects = $(DL_FILE) \
+	location-$(DB_DATE).db.xz
+
+$(DL_FILE)                    = https://source.ipfire.org/releases/libloc//$(DL_FILE)
+location-$(DB_DATE).db.xz     = https://location.ipfire.org/databases/1/archive/location-$(DB_DATE).db.xz
+
+$(DL_FILE)_MD5                = 82770e9eba20f636c96e6fa42ff234b5
+location-$(DB_DATE).db.xz_MD5 = fa3069bf31170629d638317e283913c0
+
+install : $(TARGET)
+
+check : $(patsubst %,$(DIR_CHK)/%,$(objects))
+
+download :$(patsubst %,$(DIR_DL)/%,$(objects))
+
+md5 : $(subst %,%_MD5,$(objects))
+
+dist:
+	@$(PAK)
+
+###############################################################################
+# Downloading, checking, md5sum
+###############################################################################
+
+$(patsubst %,$(DIR_CHK)/%,$(objects)) :
+	@$(CHECK)
+
+$(patsubst %,$(DIR_DL)/%,$(objects)) :
+	@$(LOAD)
+
+$(subst %,%_MD5,$(objects)) :
+	@$(MD5)
+
+###############################################################################
+# Installation Details
+###############################################################################
+
+$(TARGET) : $(patsubst %,$(DIR_DL)/%,$(objects))
+	@$(PREBUILD)
+	@rm -rf $(DIR_APP) && cd $(DIR_SRC) && tar xvf $(DIR_DL)/$(DL_FILE)
+
+	# Add patch for i586 to disable strong stack protector.
+ifeq "$(BUILD_ARCH)" "i586"
+	cd $(DIR_APP) && patch -Np1 -i $(DIR_SRC)/src/patches/libloc-0.9.3-perl-i586-regular-stack-protector.patch
+endif
+
+	cd $(DIR_APP) && ./autogen.sh
+	cd $(DIR_APP) && ./configure \
+		--prefix=/usr \
+		--sysconfdir=/etc \
+		--localstatedir=/var \
+		--disable-manpages
+	cd $(DIR_APP) && make $(MAKETUNING)
+	cd $(DIR_APP) && make install
+
+	# Copy database to correct location.
+	cd $(DIR_APP) && cp -avf $(DIR_DL)/location-$(DB_DATE).db.xz /var/lib/location/database.db.xz
+
+	# Uncompress database.
+	cd $(DIR_APP) && rm -f /var/lib/location/database.db
+	cd $(DIR_APP) && xz -d /var/lib/location/database.db.xz
+
+	# Launch location util and export all locations in xt_geoip format.
+	cd $(DIR_APP) && /usr/bin/location export \
+		--directory=/usr/share/xt_geoip \
+		--family=ipv4 \
+		--format=xt_geoip
+
+	# Remove exported IPv6 zones.
+	cd $(DIR_APP) && rm -rvf /usr/share/xt_geoip/*.iv6
+
+	@rm -rf $(DIR_APP)
+	@$(POSTBUILD)

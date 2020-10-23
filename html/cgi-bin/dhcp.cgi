@@ -20,6 +20,7 @@
 ###############################################################################
 
 use strict;
+use experimental 'smartmatch';
 
 # enable only the following on debugging purpose
 #use warnings;
@@ -443,18 +444,23 @@ if ($dhcpsettings{'ACTION'} eq $Lang::tr{'add'}.'2') {
 	$dhcpsettings{'FIX_ROOTPATH'} = &Header::cleanhtml($dhcpsettings{'FIX_ROOTPATH'});
 	if ($dhcpsettings{'KEY2'} eq '') { #add or edit ?
 	    unshift (@current2, "$dhcpsettings{'FIX_MAC'},$dhcpsettings{'FIX_ADDR'},$dhcpsettings{'FIX_ENABLED'},$dhcpsettings{'FIX_NEXTADDR'},$dhcpsettings{'FIX_FILENAME'},$dhcpsettings{'FIX_ROOTPATH'},$dhcpsettings{'FIX_REMARK'}\n");
+	    open(FILE, ">$filename2") or die 'Unable to open fixed lease file.';
+	    print FILE @current2;
+	    close(FILE);
 	    &General::log($Lang::tr{'fixed ip lease added'});
 
 	    # Enter edit mode
-	    $dhcpsettings{'KEY2'} = $key;
+	    $dhcpsettings{'KEY2'} = 0;
 	} else {
 	    @current2[$dhcpsettings{'KEY2'}] = "$dhcpsettings{'FIX_MAC'},$dhcpsettings{'FIX_ADDR'},$dhcpsettings{'FIX_ENABLED'},$dhcpsettings{'FIX_NEXTADDR'},$dhcpsettings{'FIX_FILENAME'},$dhcpsettings{'FIX_ROOTPATH'},$dhcpsettings{'FIX_REMARK'}\n";
 	    $dhcpsettings{'KEY2'} = '';       # End edit mode
 	    &General::log($Lang::tr{'fixed ip lease modified'});
+
+	    # sort newly added/modified entry
+	    &sortcurrent2;
 	}
 
         #Write changes to dhcpd.conf.
-        &sortcurrent2;    # sort newly added/modified entry
         &buildconf;       # before calling buildconf which use fixed lease file !
     }
 }
@@ -615,7 +621,7 @@ $checked{'DNS_UPDATE_ENABLED'}{'on'} = ( $dhcpsettings{'DNS_UPDATE_ENABLED'} ne 
 print <<END
 <table  width='100%'>
 	<tr>
-		<td width='25%' class='boldbase'>$Lang::tr{'dhcp dns enable update'}</td>
+		<td width='30%' class='boldbase'>$Lang::tr{'dhcp dns enable update'}</td>
 		<td class='base'><input type='checkbox' name='DNS_UPDATE_ENABLED' $checked{'DNS_UPDATE_ENABLED'}{'on'}>
 		</td>
 	<tr>
@@ -1272,7 +1278,7 @@ sub buildconf {
 	    print FILE ", " . $dhcpsettings{"WINS2_${itf}"}                            if ($dhcpsettings{"WINS2_${itf}"});
 	    print FILE ";\n"                                                           if ($dhcpsettings{"WINS1_${itf}"});
 	    print FILE "\tnext-server " . $dhcpsettings{"NEXT_${itf}"} . ";\n" if ($dhcpsettings{"NEXT_${itf}"});
-	    print FILE "\tfilename \"" . $dhcpsettings{"FILE_${itf}"} . "\";\n" if ($dhcpsettings{"FILE_${itf}"});
+	    print FILE "\tfilename \"" . &EscapeFilename($dhcpsettings{"FILE_${itf}"}) . "\";\n" if ($dhcpsettings{"FILE_${itf}"});
 	    print FILE "\tdefault-lease-time " . ($dhcpsettings{"DEFAULT_LEASE_TIME_${itf}"} * 60). ";\n";
 	    print FILE "\tmax-lease-time "     . ($dhcpsettings{"MAX_LEASE_TIME_${itf}"} * 60)    . ";\n";
 	    print FILE "\tallow bootp;\n" if ($dhcpsettings{"ENABLEBOOTP_${itf}"} eq 'on');
@@ -1325,7 +1331,7 @@ sub buildconf {
 	    print FILE "\thardware ethernet $temp[0];\n";
 	    print FILE "\tfixed-address $temp[1];\n";
 	    print FILE "\tnext-server $temp[3];\n"          if ($temp[3]);
-	    print FILE "\tfilename \"$temp[4]\";\n"         if ($temp[4]);
+	    print FILE "\tfilename \"" . &EscapeFilename($temp[4]) . "\";\n" if ($temp[4]);
 	    print FILE "\toption root-path \"$temp[5]\";\n" if ($temp[5]);
 	    print FILE "}\n";
 	    $key++;
@@ -1335,7 +1341,7 @@ sub buildconf {
     close FILE;
     if ( $dhcpsettings{"ENABLE_GREEN"} eq 'on' || $dhcpsettings{"ENABLE_BLUE"} eq 'on' ) {system '/usr/local/bin/dhcpctrl enable >/dev/null 2>&1';}
     else {system '/usr/local/bin/dhcpctrl disable >/dev/null 2>&1';}
-    system '/usr/local/bin/dhcpctrl restart >/dev/null 2>&1';
+    system '/usr/local/bin/dhcpctrl restart >/dev/null 2>&1 &';
 }
 
 #
@@ -1391,4 +1397,13 @@ sub IsUsedNewOptionDefinition {
 	return 1 if ( ($opt eq $temp[1]) && ($temp[2] !~ /code \d+=/) );
     }
     return 0;
+}
+
+sub EscapeFilename($) {
+	my $filename = shift;
+
+	# Replace all single / by \/
+	$filename =~ s/\//\\\//g;
+
+	return $filename;
 }

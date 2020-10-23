@@ -75,7 +75,8 @@ int changeaddress(struct keyvalue *kv, char *colour, int typeflag,
 	int startstatictype = 0;
 	int startdhcptype = 0;
 	int startpppoetype = 0;
-		
+	unsigned char buffer[sizeof(struct in_addr)];
+
 	/* Build some key strings. */
 	sprintf(addressfield, "%s_ADDRESS", colour);
 	sprintf(netmaskfield, "%s_NETMASK", colour);
@@ -184,7 +185,7 @@ int changeaddress(struct keyvalue *kv, char *colour, int typeflag,
 					strcat(message, "\n");
 					error = 1;
 				}
-				if (inet_addr(netmaskresult) == INADDR_NONE)
+				if (inet_pton(AF_INET, netmaskresult, &buffer) == 0)
 				{
 					strcat(message, _("Network mask"));
 					strcat(message, "\n");
@@ -601,16 +602,16 @@ int scan_network_cards(void)
 int nicmenu(int colour)
 {
 	int rc, choise = 0, count = 0, kcount = 0, mcount = 0, i, j, nic_in_use;
-	int found_NIC_as_Card[4];
+	int found_NIC_as_Card[MAX_NICS];
 	char message[STRING_SIZE];
 	char temp[STRING_SIZE];
 
 	char cMenuInhalt[STRING_SIZE];
-	char MenuInhalt[20][180];
-	char *pMenuInhalt[20];
+	char MenuInhalt[MAX_NICS][STRING_SIZE];
+	char *pMenuInhalt[MAX_NICS];
 	
 	while (strcmp(nics[count].macaddr, "")) count++;			// 2 find how many nics in system
-	for ( i=0 ; i<4;i++) if (strcmp(knics[i].macaddr, "")) kcount++;	// loop to find all knowing nics
+	for (i=0; i<MAX_NICS; i++) if (strcmp(knics[i].macaddr, "")) kcount++;	// loop to find all knowing nics
 
 	// If new nics are found...
 	if (count > kcount) {
@@ -648,7 +649,7 @@ int nicmenu(int colour)
 		sprintf(message, _("Please choose a networkcard for the following interface - %s."), ucolourcard[colour]);
 		rc=2;
 		while ( rc == 2 ) {
-			rc = newtWinMenu(_("Extended Network Menu"), message, 50, 5, 5, 6, pMenuInhalt, &choise,
+			rc = newtWinMenu(_("Extended Network Menu"), message, 50, 5, 5, mcount, pMenuInhalt, &choise,
 				_("Select"), _("Identify"), _("Cancel"), NULL);
 			if ( rc == 2 ) {
 				sprintf(temp, "/sbin/ip link set %s up", nics[found_NIC_as_Card[choise]].nic);

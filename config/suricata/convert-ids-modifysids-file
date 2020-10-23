@@ -1,0 +1,60 @@
+#!/usr/bin/perl
+###############################################################################
+#                                                                             #
+# IPFire.org - A linux based firewall                                         #
+# Copyright (C) 2019 IPFire Development Team <info@ipfire.org>                #
+#                                                                             #
+# This program is free software: you can redistribute it and/or modify        #
+# it under the terms of the GNU General Public License as published by        #
+# the Free Software Foundation, either version 3 of the License, or           #
+# (at your option) any later version.                                         #
+#                                                                             #
+# This program is distributed in the hope that it will be useful,             #
+# but WITHOUT ANY WARRANTY; without even the implied warranty of              #
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the               #
+# GNU General Public License for more details.                                #
+#                                                                             #
+# You should have received a copy of the GNU General Public License           #
+# along with this program.  If not, see <http://www.gnu.org/licenses/>.       #
+#                                                                             #
+###############################################################################
+
+use strict;
+
+require '/var/ipfire/general-functions.pl';
+require "${General::swroot}/ids-functions.pl";
+
+exit unless(-f $IDS::ids_settings_file and -f $IDS::rules_settings_file);
+
+#
+## Step 1: Re-generate and write the file to modify the ruleset.
+#
+
+# Call subfunction and pass the desired IDS action.
+&IDS::write_modify_sids_file();
+
+# Set correct ownership.
+&IDS::set_ownership("$IDS::modify_sids_file");
+
+#
+## Step 2: Call oinkmaster to extract and setup the rules structures.
+#
+
+# Check if a rulestarball is present.
+if (-f $IDS::rulestarball) {
+	# Launch oinkmaster by calling the subfunction.
+	&IDS::oinkmaster();
+
+	# Set correct ownership for the rulesdir and files.
+	&IDS::set_ownership("$IDS::rulespath");
+}
+
+#
+## Step 3: Reload the IDS ruleset if running.
+#
+
+# Check if the IDS should be started.
+if(&IDS::ids_is_running()) {
+	# Call suricatactrl and reload the rules.
+	&IDS::call_suricatactrl("reload");
+}

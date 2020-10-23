@@ -1,0 +1,59 @@
+#!/bin/sh
+########################################################################
+# Begin $rc_base/init.d/setclock
+#
+# Description : Setting Linux Clock
+#
+# Authors     : Gerard Beekmans - gerard@linuxfromscratch.org
+#
+# Version     : 00.00
+#
+# Notes       :
+#
+########################################################################
+
+. /etc/sysconfig/rc
+. ${rc_functions}
+
+CLOCKPARAMS=
+
+case ${1} in
+	start)
+
+		boot_mesg "Setting system clock..."
+
+		# udev not create the rtc symlink if rtc is in the kernel
+		if [ ! -e /dev/rtc ]; then
+			if [ -e /dev/rtc0 ]; then
+				ln -s rtc0 /dev/rtc
+			fi
+		fi
+
+		hwclock --hctosys ${CLOCKPARAMS} &>/dev/null
+		date
+
+		if [ -e /var/log/messages ]; then
+			LOGTIMESTAMP=`stat --format "%y" /var/log/messages`
+			LOGTIME=`date +%s -d "$LOGTIMESTAMP"`
+			SYSTIME=`date +%s`
+			if [ $SYSTIME -lt $LOGTIME ]; then
+				boot_mesg "Warning! clock runs later than last log access. Check battery/rtc!"
+				date -s "$LOGTIMESTAMP"
+				echo_warning;
+			else
+				echo_ok;
+			fi
+		fi
+		;;
+
+	stop)
+		boot_mesg "Setting hardware clock..."
+		hwclock --systohc ${CLOCKPARAMS} &>/dev/null
+		evaluate_retval
+		;;
+
+	*)
+		echo "Usage: ${0} {start} {stop}"
+		;;
+
+esac

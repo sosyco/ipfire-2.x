@@ -1,4 +1,5 @@
-.config
+/.DS_Store
+/.config
 /build
 /cache
 /ccache
@@ -8,7 +9,9 @@
 /packages
 /tmp
 /*.diff
+._*
 *.img.gz
+*.img.xz
 *.iso
 *.tar.bz2
 /*.md5

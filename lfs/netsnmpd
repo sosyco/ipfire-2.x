@@ -1,7 +1,7 @@
 ###############################################################################
 #                                                                             #
 # IPFire.org - A linux based firewall                                         #
-# Copyright (C) 2015  IPFire Team  <info@ipfire.org>                          #
+# Copyright (C) 2007-2019  IPFire Team  <info@ipfire.org>                     #
 #                                                                             #
 # This program is free software: you can redistribute it and/or modify        #
 # it under the terms of the GNU General Public License as published by        #
@@ -24,7 +24,7 @@
 
 include Config
 
-VER        = 5.7.3
+VER        = 5.8
 
 THISAPP    = net-snmp-$(VER)
 DL_FILE    = $(THISAPP).tar.gz
@@ -32,8 +32,9 @@ DL_FROM    = $(URL_IPFIRE)
 DIR_APP    = $(DIR_SRC)/$(THISAPP)
 TARGET     = $(DIR_INFO)/$(THISAPP)
 PROG       = netsnmpd
-PAK_VER    = 4
-DEPS       = ""
+PAK_VER    = 9
+
+DEPS       =
 
 ###############################################################################
 # Top-level Rules
@@ -43,7 +44,7 @@ objects = $(DL_FILE)
 
 $(DL_FILE) = $(DL_FROM)/$(DL_FILE)
 
-$(DL_FILE)_MD5 = d4a3459e1577d0efa8d96ca70a885e53
+$(DL_FILE)_MD5 = 63bfc65fbb86cdb616598df1aff6458a
 
 install : $(TARGET)
 
@@ -76,6 +77,8 @@ $(subst %,%_MD5,$(objects)) :
 $(TARGET) : $(patsubst %,$(DIR_DL)/%,$(objects))
 	@$(PREBUILD)
 	@rm -rf $(DIR_APP) && cd $(DIR_SRC) && tar zxf $(DIR_DL)/$(DL_FILE)
+
+	$(UPDATE_AUTOMAKE)
 	cd $(DIR_APP) && ./configure \
 		--prefix=/usr \
 		--with-default-snmp-version="2" \
@@ -83,14 +86,25 @@ $(TARGET) : $(patsubst %,$(DIR_DL)/%,$(objects))
 		--with-sys-location="localhost" \
 		--with-logfile="/var/log/snmpd.log" \
 		--with-persistent-directory="/var/net-snmp" \
+		--with-mib-modules="host agentx smux \
+		ucd-snmp/diskio tcp-mib udp-mib mibII/mta_sendmail \
+		ip-mib/ipv4InterfaceTable ip-mib/ipv6InterfaceTable \
+		ip-mib/ipAddressPrefixTable/ipAddressPrefixTable \
+		ip-mib/ipDefaultRouterTable/ipDefaultRouterTable \
+		ip-mib/ipv6ScopeZoneIndexTable ip-mib/ipIfStatsTable \
+		sctp-mib rmon-mib etherlike-mib ucd-snmp/lmsensorsMib"
 		--libdir=/usr/lib \
 		--sysconfdir="/etc"
-	cd $(DIR_APP) && make 
+
+	cd $(DIR_APP) && make #$(MAKETUNING)
 	cd $(DIR_APP) && make install
-	install -v -m644 $(DIR_SRC)/config/netsnmpd/snmpd.conf /etc/snmpd.conf
+	install -v -m 644 $(DIR_SRC)/config/netsnmpd/snmpd.conf /etc/snmpd.conf
 	install -v -m 644 $(DIR_SRC)/config/backup/includes/netsnmpd \
 		/var/ipfire/backup/addons/includes/netsnmpd
-	install -v -m755 $(DIR_SRC)/src/initscripts/init.d/netsnmpd /etc/init.d/netsnmpd
+
+	# install initscripts
+	$(call INSTALL_INITSCRIPT,netsnmpd)
+
 	ln -sf ../init.d/netsnmpd /etc/rc.d/rc3.d/S65netsnmpd
 	ln -sf ../init.d/netsnmpd /etc/rc.d/rc0.d/K02netsnmpd
 	ln -sf ../init.d/netsnmpd /etc/rc.d/rc6.d/K02netsnmpd

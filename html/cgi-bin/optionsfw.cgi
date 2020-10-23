@@ -1,16 +1,24 @@
 #!/usr/bin/perl
-#
-# SmoothWall CGIs
-#
-# This code is distributed under the terms of the GPL
-#
-# (c) The SmoothWall Team
-#
-# Copyright (C) 01-02-2002 Graham Smith <grhm@grhm.co.uk>
-#
-# $Id: optionsfw.cgi,v 1.1.2.10 2005/10/03 00:34:10 gespinasse Exp $
-#
-#
+###############################################################################
+#                                                                             #
+# IPFire.org - A linux based firewall                                         #
+# Copyright (C) 2014-2020  IPFire Team  <info@ipfire.org>                     #
+#                                                                             #
+# This program is free software: you can redistribute it and/or modify        #
+# it under the terms of the GNU General Public License as published by        #
+# the Free Software Foundation, either version 3 of the License, or           #
+# (at your option) any later version.                                         #
+#                                                                             #
+# This program is distributed in the hope that it will be useful,             #
+# but WITHOUT ANY WARRANTY; without even the implied warranty of              #
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the               #
+# GNU General Public License for more details.                                #
+#                                                                             #
+# You should have received a copy of the GNU General Public License           #
+# along with this program.  If not, see <http://www.gnu.org/licenses/>.       #
+#                                                                             #
+###############################################################################
+
 # enable only the following on debugging purpose
 #use warnings;
 #use CGI::Carp 'fatalsToBrowser';
@@ -120,6 +128,24 @@ $checked{'SHOWTABLES'}{$settings{'SHOWTABLES'}} = "checked='checked'";
 $checked{'SHOWDROPDOWN'}{'off'} = '';
 $checked{'SHOWDROPDOWN'}{'on'} = '';
 $checked{'SHOWDROPDOWN'}{$settings{'SHOWDROPDOWN'}} = "checked='checked'";
+$checked{'CONNTRACK_FTP'}{'off'} = '';
+$checked{'CONNTRACK_FTP'}{'on'} = '';
+$checked{'CONNTRACK_FTP'}{$settings{'CONNTRACK_FTP'}} = "checked='checked'";
+$checked{'CONNTRACK_H323'}{'off'} = '';
+$checked{'CONNTRACK_H323'}{'on'} = '';
+$checked{'CONNTRACK_H323'}{$settings{'CONNTRACK_H323'}} = "checked='checked'";
+$checked{'CONNTRACK_IRC'}{'off'} = '';
+$checked{'CONNTRACK_IRC'}{'on'} = '';
+$checked{'CONNTRACK_IRC'}{$settings{'CONNTRACK_IRC'}} = "checked='checked'";
+$checked{'CONNTRACK_PPTP'}{'off'} = '';
+$checked{'CONNTRACK_PPTP'}{'on'} = '';
+$checked{'CONNTRACK_PPTP'}{$settings{'CONNTRACK_PPTP'}} = "checked='checked'";
+$checked{'CONNTRACK_SIP'}{'off'} = '';
+$checked{'CONNTRACK_SIP'}{'on'} = '';
+$checked{'CONNTRACK_SIP'}{$settings{'CONNTRACK_SIP'}} = "checked='checked'";
+$checked{'CONNTRACK_TFTP'}{'off'} = '';
+$checked{'CONNTRACK_TFTP'}{'on'} = '';
+$checked{'CONNTRACK_TFTP'}{$settings{'CONNTRACK_TFTP'}} = "checked='checked'";
 $selected{'FWPOLICY'}{$settings{'FWPOLICY'}}= 'selected';
 $selected{'FWPOLICY1'}{$settings{'FWPOLICY1'}}= 'selected';
 $selected{'FWPOLICY2'}{$settings{'FWPOLICY2'}}= 'selected';
@@ -188,42 +214,95 @@ END
 
 <table width='95%' cellspacing='0'>
 <tr bgcolor='$color{'color20'}'><td colspan='2' align='left'><b>$Lang::tr{'fw logging'}</b></td></tr>
-<tr><td align='left' width='60%'>$Lang::tr{'drop newnotsyn'}</td><td align='left'>on <input type='radio' name='DROPNEWNOTSYN' value='on' $checked{'DROPNEWNOTSYN'}{'on'} />/
-																						<input type='radio' name='DROPNEWNOTSYN' value='off' $checked{'DROPNEWNOTSYN'}{'off'} /> off</td></tr>
-<tr><td align='left' width='60%'>$Lang::tr{'drop input'}</td><td align='left'>on <input type='radio' name='DROPINPUT' value='on' $checked{'DROPINPUT'}{'on'} />/
-																						<input type='radio' name='DROPINPUT' value='off' $checked{'DROPINPUT'}{'off'} /> off</td></tr>
-<tr><td align='left' width='60%'>$Lang::tr{'drop forward'}</td><td align='left'>on <input type='radio' name='DROPFORWARD' value='on' $checked{'DROPFORWARD'}{'on'} />/
-																						<input type='radio' name='DROPFORWARD' value='off' $checked{'DROPFORWARD'}{'off'} /> off</td></tr>
-<tr><td align='left' width='60%'>$Lang::tr{'drop outgoing'}</td><td align='left'>on <input type='radio' name='DROPOUTGOING' value='on' $checked{'DROPOUTGOING'}{'on'} />/
-																						<input type='radio' name='DROPOUTGOING' value='off' $checked{'DROPOUTGOING'}{'off'} /> off</td></tr>																						
-<tr><td align='left' width='60%'>$Lang::tr{'drop portscan'}</td><td align='left'>on <input type='radio' name='DROPPORTSCAN' value='on' $checked{'DROPPORTSCAN'}{'on'} />/
-																						<input type='radio' name='DROPPORTSCAN' value='off' $checked{'DROPPORTSCAN'}{'off'} /> off</td></tr>
-<tr><td align='left' width='60%'>$Lang::tr{'drop wirelessinput'}</td><td align='left'>on <input type='radio' name='DROPWIRELESSINPUT' value='on' $checked{'DROPWIRELESSINPUT'}{'on'} />/
-																						<input type='radio' name='DROPWIRELESSINPUT' value='off' $checked{'DROPWIRELESSINPUT'}{'off'} /> off</td></tr>
-<tr><td align='left' width='60%'>$Lang::tr{'drop wirelessforward'}</td><td align='left'>on <input type='radio' name='DROPWIRELESSFORWARD' value='on' $checked{'DROPWIRELESSFORWARD'}{'on'} />/
-																						<input type='radio' name='DROPWIRELESSFORWARD' value='off' $checked{'DROPWIRELESSFORWARD'}{'off'} /> off</td></tr>
+<tr><td align='left' width='60%'>$Lang::tr{'drop newnotsyn'}</td><td align='left'>$Lang::tr{'on'} <input type='radio' name='DROPNEWNOTSYN' value='on' $checked{'DROPNEWNOTSYN'}{'on'} />/
+																						<input type='radio' name='DROPNEWNOTSYN' value='off' $checked{'DROPNEWNOTSYN'}{'off'} /> $Lang::tr{'off'}</td></tr>
+<tr><td align='left' width='60%'>$Lang::tr{'drop input'}</td><td align='left'>$Lang::tr{'on'} <input type='radio' name='DROPINPUT' value='on' $checked{'DROPINPUT'}{'on'} />/
+																						<input type='radio' name='DROPINPUT' value='off' $checked{'DROPINPUT'}{'off'} /> $Lang::tr{'off'}</td></tr>
+<tr><td align='left' width='60%'>$Lang::tr{'drop forward'}</td><td align='left'>$Lang::tr{'on'} <input type='radio' name='DROPFORWARD' value='on' $checked{'DROPFORWARD'}{'on'} />/
+																						<input type='radio' name='DROPFORWARD' value='off' $checked{'DROPFORWARD'}{'off'} /> $Lang::tr{'off'}</td></tr>
+<tr><td align='left' width='60%'>$Lang::tr{'drop outgoing'}</td><td align='left'>$Lang::tr{'on'} <input type='radio' name='DROPOUTGOING' value='on' $checked{'DROPOUTGOING'}{'on'} />/
+																						<input type='radio' name='DROPOUTGOING' value='off' $checked{'DROPOUTGOING'}{'off'} /> $Lang::tr{'off'}</td></tr>
+<tr><td align='left' width='60%'>$Lang::tr{'drop portscan'}</td><td align='left'>$Lang::tr{'on'} <input type='radio' name='DROPPORTSCAN' value='on' $checked{'DROPPORTSCAN'}{'on'} />/
+																						<input type='radio' name='DROPPORTSCAN' value='off' $checked{'DROPPORTSCAN'}{'off'} /> $Lang::tr{'off'}</td></tr>
+<tr><td align='left' width='60%'>$Lang::tr{'drop wirelessinput'}</td><td align='left'>$Lang::tr{'on'} <input type='radio' name='DROPWIRELESSINPUT' value='on' $checked{'DROPWIRELESSINPUT'}{'on'} />/
+																						<input type='radio' name='DROPWIRELESSINPUT' value='off' $checked{'DROPWIRELESSINPUT'}{'off'} /> $Lang::tr{'off'}</td></tr>
+<tr><td align='left' width='60%'>$Lang::tr{'drop wirelessforward'}</td><td align='left'>$Lang::tr{'on'} <input type='radio' name='DROPWIRELESSFORWARD' value='on' $checked{'DROPWIRELESSFORWARD'}{'on'} />/
+																						<input type='radio' name='DROPWIRELESSFORWARD' value='off' $checked{'DROPWIRELESSFORWARD'}{'off'} /> $Lang::tr{'off'}</td></tr>
 </table>
 <br/>
 
 <table width='95%' cellspacing='0'>
 <tr bgcolor='$color{'color20'}'><td colspan='2' align='left'><b>$Lang::tr{'fw blue'}</b></td></tr>
-<tr><td align='left' width='60%'>$Lang::tr{'drop proxy'}</td><td align='left'>on <input type='radio' name='DROPPROXY' value='on' $checked{'DROPPROXY'}{'on'} />/
-																						<input type='radio' name='DROPPROXY' value='off' $checked{'DROPPROXY'}{'off'} /> off</td></tr>
-<tr><td align='left' width='60%'>$Lang::tr{'drop samba'}</td><td align='left'>on <input type='radio' name='DROPSAMBA' value='on' $checked{'DROPSAMBA'}{'on'} />/
-																						<input type='radio' name='DROPSAMBA' value='off' $checked{'DROPSAMBA'}{'off'} /> off</td></tr>
+<tr><td align='left' width='60%'>$Lang::tr{'drop proxy'}</td><td align='left'>$Lang::tr{'on'} <input type='radio' name='DROPPROXY' value='on' $checked{'DROPPROXY'}{'on'} />/
+																						<input type='radio' name='DROPPROXY' value='off' $checked{'DROPPROXY'}{'off'} /> $Lang::tr{'off'}</td></tr>
+<tr><td align='left' width='60%'>$Lang::tr{'drop samba'}</td><td align='left'>$Lang::tr{'on'} <input type='radio' name='DROPSAMBA' value='on' $checked{'DROPSAMBA'}{'on'} />/
+																						<input type='radio' name='DROPSAMBA' value='off' $checked{'DROPSAMBA'}{'off'} /> $Lang::tr{'off'}</td></tr>
 </table>
 <br>
 <table width='95%' cellspacing='0'>
 <tr bgcolor='$color{'color20'}'><td colspan='2' align='left'><b>$Lang::tr{'fw settings'}</b></td></tr>
-<tr><td align='left' width='60%'>$Lang::tr{'fw settings color'}</td><td align='left'>on <input type='radio' name='SHOWCOLORS' value='on' $checked{'SHOWCOLORS'}{'on'} />/
-																						<input type='radio' name='SHOWCOLORS' value='off' $checked{'SHOWCOLORS'}{'off'} /> off</td></tr>
-<tr><td align='left' width='60%'>$Lang::tr{'fw settings remark'}</td><td align='left'>on <input type='radio' name='SHOWREMARK' value='on' $checked{'SHOWREMARK'}{'on'} />/
-																						<input type='radio' name='SHOWREMARK' value='off' $checked{'SHOWREMARK'}{'off'} /> off</td></tr>		
-<tr><td align='left' width='60%'>$Lang::tr{'fw settings ruletable'}</td><td align='left'>on <input type='radio' name='SHOWTABLES' value='on' $checked{'SHOWTABLES'}{'on'} />/
-																						<input type='radio' name='SHOWTABLES' value='off' $checked{'SHOWTABLES'}{'off'} /> off</td></tr>
-<tr><td align='left' width='60%'>$Lang::tr{'fw settings dropdown'}</td><td align='left'>on <input type='radio' name='SHOWDROPDOWN' value='on' $checked{'SHOWDROPDOWN'}{'on'} />/
-																						<input type='radio' name='SHOWDROPDOWN' value='off' $checked{'SHOWDROPDOWN'}{'off'} /> off</td></tr>																																																												
-</table>																						
+<tr><td align='left' width='60%'>$Lang::tr{'fw settings color'}</td><td align='left'>$Lang::tr{'on'} <input type='radio' name='SHOWCOLORS' value='on' $checked{'SHOWCOLORS'}{'on'} />/
+																						<input type='radio' name='SHOWCOLORS' value='off' $checked{'SHOWCOLORS'}{'off'} /> $Lang::tr{'off'}</td></tr>
+<tr><td align='left' width='60%'>$Lang::tr{'fw settings remark'}</td><td align='left'>$Lang::tr{'on'} <input type='radio' name='SHOWREMARK' value='on' $checked{'SHOWREMARK'}{'on'} />/
+																						<input type='radio' name='SHOWREMARK' value='off' $checked{'SHOWREMARK'}{'off'} /> $Lang::tr{'off'}</td></tr>
+<tr><td align='left' width='60%'>$Lang::tr{'fw settings ruletable'}</td><td align='left'>$Lang::tr{'on'} <input type='radio' name='SHOWTABLES' value='on' $checked{'SHOWTABLES'}{'on'} />/
+																						<input type='radio' name='SHOWTABLES' value='off' $checked{'SHOWTABLES'}{'off'} /> $Lang::tr{'off'}</td></tr>
+<tr><td align='left' width='60%'>$Lang::tr{'fw settings dropdown'}</td><td align='left'>$Lang::tr{'on'} <input type='radio' name='SHOWDROPDOWN' value='on' $checked{'SHOWDROPDOWN'}{'on'} />/
+																						<input type='radio' name='SHOWDROPDOWN' value='off' $checked{'SHOWDROPDOWN'}{'off'} /> $Lang::tr{'off'}</td></tr>
+</table>
+
+<br />
+
+<table width='95%' cellspacing='0'>
+	<tr bgcolor='$color{'color20'}'>
+		<td colspan='2' align='left'>
+			<b>$Lang::tr{'application layer gateways'}</b>
+		</td>
+	</tr>
+	<tr>
+		<td align='left' width='60%'>FTP</td>
+		<td align='left'>
+			$Lang::tr{'on'} <input type='radio' name='CONNTRACK_FTP' value='on' $checked{'CONNTRACK_FTP'}{'on'} /> /
+			<input type='radio' name='CONNTRACK_FTP' value='off' $checked{'CONNTRACK_FTP'}{'off'} /> $Lang::tr{'off'}
+		</td>
+	</tr>
+	<tr>
+		<td align='left' width='60%'>H.323</td>
+		<td align='left'>
+			$Lang::tr{'on'} <input type='radio' name='CONNTRACK_H323' value='on' $checked{'CONNTRACK_H323'}{'on'} /> /
+			<input type='radio' name='CONNTRACK_H323' value='off' $checked{'CONNTRACK_H323'}{'off'} /> $Lang::tr{'off'}
+		</td>
+	</tr>
+	<tr>
+		<td align='left' width='60%'>IRC</td>
+		<td align='left'>
+			$Lang::tr{'on'} <input type='radio' name='CONNTRACK_IRC' value='on' $checked{'CONNTRACK_IRC'}{'on'} /> /
+			<input type='radio' name='CONNTRACK_IRC' value='off' $checked{'CONNTRACK_IRC'}{'off'} /> $Lang::tr{'off'}
+		</td>
+	</tr>
+	<tr>
+		<td align='left' width='60%'>PPTP</td>
+		<td align='left'>
+			$Lang::tr{'on'} <input type='radio' name='CONNTRACK_PPTP' value='on' $checked{'CONNTRACK_PPTP'}{'on'} /> /
+			<input type='radio' name='CONNTRACK_PPTP' value='off' $checked{'CONNTRACK_PPTP'}{'off'} /> $Lang::tr{'off'}
+		</td>
+	</tr>
+	<tr>
+		<td align='left' width='60%'>SIP</td>
+		<td align='left'>
+			$Lang::tr{'on'} <input type='radio' name='CONNTRACK_SIP' value='on' $checked{'CONNTRACK_SIP'}{'on'} /> /
+			<input type='radio' name='CONNTRACK_SIP' value='off' $checked{'CONNTRACK_SIP'}{'off'} /> $Lang::tr{'off'}
+		</td>
+	</tr>
+	<tr>
+		<td align='left' width='60%'>TFTP</td>
+		<td align='left'>
+			$Lang::tr{'on'} <input type='radio' name='CONNTRACK_TFTP' value='on' $checked{'CONNTRACK_TFTP'}{'on'} /> /
+			<input type='radio' name='CONNTRACK_TFTP' value='off' $checked{'CONNTRACK_TFTP'}{'off'} /> $Lang::tr{'off'}
+		</td>
+	</tr>
+</table>
+
 <br />
 <table width='95%' cellspacing='0'>
 <tr bgcolor='$color{'color20'}'><td colspan='2' align='left'><b>$Lang::tr{'fw default drop'}</b></td></tr>

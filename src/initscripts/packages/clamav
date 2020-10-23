@@ -1,0 +1,75 @@
+#!/bin/sh
+# Begin $rc_base/init.d/clamav
+
+. /etc/sysconfig/rc
+. $rc_functions
+
+case "$1" in
+	start)
+		if [ $(basename $0) == "clamav" ]; then 
+			boot_mesg "Starting Clamav Definition Updater..."
+			loadproc /usr/bin/freshclam -d -c 10
+
+			COUNTER=0
+			while [ "$COUNTER" -lt "61" ]; do
+				[ -e "/var/lib/clamav/main.cld" ] || \
+				[ -e "/var/lib/clamav/main.cvd" ] && \
+				[ -e "/var/lib/clamav/bytecode.cld" ] || \
+				[ -e "/var/lib/clamav/bytecode.cvd" ] && \
+				[ -e "/var/lib/clamav/daily.cld" ] || \
+				[ -e "/var/lib/clamav/daily.cvd" ] && \
+				break
+				if [ "$COUNTER" -lt "1" ]; then
+					boot_mesg -n "Downloading database"
+				else
+					boot_mesg -n "."
+				fi
+				sleep 15
+				COUNTER=$(($COUNTER + 1))
+			done
+			if [ "$COUNTER" -gt "0" ]; then
+				boot_mesg
+			fi
+			if [ "$COUNTER" -gt "60" ]; then
+				boot_mesg "Download takes longer than 15min check freshclam status!"
+				echo_failure;
+				exit 1;
+			fi
+
+			boot_mesg "Starting Clamav Daemon..."
+			loadproc /usr/sbin/clamd
+		else
+			boot_mesg "Starting Clamav in background..."
+			/etc/init.d/clamav start > /dev/tty12 < /dev/tty12 &
+			echo_ok;
+			exit 0;
+		fi
+		;;
+
+	stop)
+		boot_mesg "Stopping Clamav Definition Updater..."
+		killproc /usr/bin/freshclam
+		rm -rf /var/lib/clamav/*.tmp
+
+		boot_mesg "Stopping Clamav Daemon..."
+		killproc /usr/sbin/clamd
+		;;
+
+	restart)
+		$0 stop
+		sleep 1
+		$0 start
+		;;
+
+	status)
+		statusproc /usr/sbin/clamd
+		statusproc /usr/bin/freshclam
+		;;
+
+	*)
+		echo "Usage: $0 {start|stop|restart|status}"
+		exit 1
+		;;
+esac
+
+# End $rc_base/init.d/clamav

@@ -1,7 +1,7 @@
 ###############################################################################
 #                                                                             #
 # IPFire.org - A linux based firewall                                         #
-# Copyright (C) 2007  Michael Tremer & Christian Schmidt                      #
+# Copyright (C) 2007-2018  IPFire Team  <info@ipfire.org>                     #
 #                                                                             #
 # This program is free software: you can redistribute it and/or modify        #
 # it under the terms of the GNU General Public License as published by        #
@@ -34,7 +34,9 @@ TARGET     = $(DIR_INFO)/$(THISAPP)
 PROG       = tftpd
 PAK_VER    = 1
 
-DEPS       = ""
+DEPS       =
+
+CFLAGS    += -fcommon
 
 ###############################################################################
 # Top-level Rules
@@ -81,5 +83,7 @@ $(TARGET) : $(patsubst %,$(DIR_DL)/%,$(objects))
 	cd $(DIR_APP) && make $(MAKETUNING)
 	cd $(DIR_APP) && make install
 	mv -fv /usr/sbin/in.tftpd /usr/sbin/tftpd
+	#install initscripts
+	$(call INSTALL_INITSCRIPT,tftpd)
 	@rm -rf $(DIR_APP)
 	@$(POSTBUILD)

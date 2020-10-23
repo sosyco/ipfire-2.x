@@ -1,0 +1,15 @@
+usr/bin/kdig
+#usr/lib/libcontrib.a
+#usr/lib/libcontrib.la
+#usr/lib/libdnssec.la
+#usr/lib/libdnssec.lai
+#usr/lib/libdnssec.so
+usr/lib/libdnssec.so.8
+usr/lib/libdnssec.so.8.0.0
+#usr/lib/libknot.la
+#usr/lib/libknot.lai
+#usr/lib/libknot.so
+usr/lib/libknot.so.11
+usr/lib/libknot.so.11.0.0
+#usr/lib/libknotus.a
+#usr/lib/libknotus.la

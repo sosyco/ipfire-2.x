@@ -73,6 +73,10 @@ $wlanapsettings{'SYSLOGLEVEL'} = '0';
 $wlanapsettings{'DEBUG'} = '4';
 $wlanapsettings{'DRIVER'} = 'NL80211';
 $wlanapsettings{'HTCAPS'} = '';
+$wlanapsettings{'VHTCAPS'} = '';
+$wlanapsettings{'NOSCAN'} = 'off';
+$wlanapsettings{'CLIENTISOLATION'} = 'off';
+$wlanapsettings{'IEEE80211W'} = 'off';
 
 &General::readhash("/var/ipfire/wlanap/settings", \%wlanapsettings);
 &Header::getcgihash(\%wlanapsettings);
@@ -154,7 +158,7 @@ if ( $wlanapsettings{'ACTION'} eq "$Lang::tr{'save'}" ){
 	$memory=0;
 }
 
-&Header::openpage('', 1, '', '');
+&Header::openpage($Lang::tr{'wlanap configuration'}, 1, '', '');
 &Header::openbigbox('100%', 'left', '', $errormessage);
 
 if ( $errormessage ){
@@ -246,6 +250,18 @@ $checked{'HIDESSID'}{'off'} = '';
 $checked{'HIDESSID'}{'on'} = '';
 $checked{'HIDESSID'}{$wlanapsettings{'HIDESSID'}} = "checked='checked'";
 
+$checked{'NOSCAN'}{'off'} = '';
+$checked{'NOSCAN'}{'on'} = '';
+$checked{'NOSCAN'}{$wlanapsettings{'NOSCAN'}} = "checked='checked'";
+
+$checked{'CLIENTISOLATION'}{'off'} = '';
+$checked{'CLIENTISOLATION'}{'on'} = '';
+$checked{'CLIENTISOLATION'}{$wlanapsettings{'CLIENTISOLATION'}} = "checked='checked'";
+
+$checked{'IEEE80211W'}{'off'} = '';
+$checked{'IEEE80211W'}{'on'} = '';
+$checked{'IEEE80211W'}{$wlanapsettings{'IEEE80211W'}} = "checked='checked'";
+
 $selected{'ENC'}{$wlanapsettings{'ENC'}} = "selected='selected'";
 $selected{'CHANNEL'}{$wlanapsettings{'CHANNEL'}} = "selected='selected'";
 $selected{'COUNTRY'}{$wlanapsettings{'COUNTRY'}} = "selected='selected'";
@@ -259,7 +275,7 @@ if ( -d '/sys/class/net/mon.'.$wlanapsettings{'INTERFACE'} ) {
 }
 
 my @channellist_cmd;
-my @channellist;
+my @channellist = (0);
 
 if ( $wlanapsettings{'DRIVER'} eq 'NL80211' ){
 my $wiphy = `iw dev $wlanapsettings{'INTERFACE'} info | grep wiphy | cut -d" " -f2`;
@@ -274,7 +290,7 @@ $_ =~ /(.*) \[(\d+)(.*)\]/;
 $channel = $2;chomp $channel;
 if ( $channel =~ /\d+/ ){push(@temp,$channel + 0);}
 }
-@channellist = @temp;
+push(@channellist, @temp);
 } else {
 @channellist_cmd = `iwlist $monwlaninterface channel|tail -n +2 2>/dev/null`;
 # get available channels
@@ -285,7 +301,7 @@ $_ =~ /(.*)Channel (\d+)(.*):/;
 $channel = $2;chomp $channel;
 if ( $channel =~ /\d+/ ){push(@temp,$channel + 0);}
 }
-@channellist = @temp;
+push(@channellist, @temp);
 }
 
 my @countrylist_cmd = `regdbdump /usr/lib/crda/regulatory.bin 2>/dev/null`;
@@ -323,7 +339,7 @@ if ( $wlan_card_status ne '' ){
 	print "<tr><td class='base'>$Lang::tr{'wlanap wlan card'} ($wlanapsettings{'DRIVER'})</td>";
 	print $wlan_card_status eq 'up' ? $status_started : $status_stopped;
 	print"<td colspan='4'></td></tr>";
-	print "<tr><td class='base' bgcolor='$color{'color22'}'>$Lang::tr{'wlanap access point'}</td>";
+	print "<tr><td class='base' bgcolor='$color{'color22'}'>$Lang::tr{'wlanap'}</td>";
 	print $wlan_ap_status eq 'up' ? $status_started : $status_stopped;
 	if ( ($memory != 0) && (@pid[0] ne "///") ){
 		print "<td bgcolor='$color{'color22'}' align='center'>@pid[0]</td>";
@@ -368,11 +384,10 @@ print <<END
 <table width='80%' cellspacing='0' class='tbl' border='0'>
 <tr><th bgcolor='$color{'color20'}' colspan='4' align='left'><strong>$Lang::tr{'wlanap wlan settings'}</strong></th></tr>
 <tr><td colspan='4'><br></td></tr>
-<tr><td width='25%' class='base'>SSID:&nbsp;</td><td class='base' colspan='3'><input type='text' name='SSID' size='30' value='$wlanapsettings{'SSID'}' /></td></tr>
+<tr><td width='25%' class='base'>$Lang::tr{'wlanap ssid'}:&nbsp;</td><td class='base' colspan='3'><input type='text' name='SSID' size='30' value='$wlanapsettings{'SSID'}' /></td></tr>
 <!--SSID Broadcast: on => HIDESSID: off -->
-<tr><td width='25%' class='base'>SSID Broadcast:&nbsp;</td><td class='base' colspan='3'>on <input type='radio' name='HIDESSID' value='off' $checked{'HIDESSID'}{'off'} /> | <input type='radio' name='HIDESSID' value='on' $checked{'HIDESSID'}{'on'} /> off</td></tr>
-
-
+<tr><td width='25%' class='base'>$Lang::tr{'wlanap broadcast ssid'}:&nbsp;</td><td class='base' colspan='3'>$Lang::tr{'on'} <input type='radio' name='HIDESSID' value='off' $checked{'HIDESSID'}{'off'} /> | <input type='radio' name='HIDESSID' value='on' $checked{'HIDESSID'}{'on'} /> $Lang::tr{'off'}</td></tr>
+<tr><td width='25%' class='base'>$Lang::tr{'wlanap client isolation'}:&nbsp;</td><td class='base' colspan='3'>$Lang::tr{'on'} <input type='radio' name='CLIENTISOLATION' value='on' $checked{'CLIENTISOLATION'}{'on'} /> | <input type='radio' name='CLIENTISOLATION' value='off' $checked{'CLIENTISOLATION'}{'off'} /> $Lang::tr{'off'}</td></tr>
 <tr><td width='25%' class='base'>$Lang::tr{'wlanap country'}:&nbsp;</td><td class='base' colspan='3'>
 	<select name='COUNTRY'>
 END
@@ -389,6 +404,7 @@ print<<END
 		<option value='g' $selected{'HW_MODE'}{'g'}>802.11g</option>
 		<option value='an' $selected{'HW_MODE'}{'an'}>802.11an</option>
 		<option value='gn' $selected{'HW_MODE'}{'gn'}>802.11gn</option>
+		<option value='ac' $selected{'HW_MODE'}{'ac'}>802.11ac</option>
 	</select>
 </td></tr>
 END
@@ -401,7 +417,13 @@ if ( scalar @channellist > 0 ){
 END
 ;
 	foreach $channel (@channellist){
-		print "<option $selected{'CHANNEL'}{$channel}>$channel</option>";
+		print "<option $selected{'CHANNEL'}{$channel}>";
+		if ($channel eq 0) {
+			print "- $Lang::tr{'wlanap auto'} -";
+		} else {
+			print $channel;
+		}
+		print "</option>";
 	}
 	print "</select></td></tr>"
 } else {
@@ -413,6 +435,7 @@ END
 ;
 }
 print<<END
+<tr><td width='25%' class='base'>$Lang::tr{'wlanap neighbor scan'}:&nbsp;</td><td class='base' >$Lang::tr{'on'} <input type='radio' name='NOSCAN' value='off' $checked{'NOSCAN'}{'off'} /> | <input type='radio' name='NOSCAN' value='on' $checked{'NOSCAN'}{'on'} /> $Lang::tr{'off'}</td><td class='base' colspan='2'>$Lang::tr{'wlanap neighbor scan warning'}</td></tr>
 <tr><td colspan='4'><br></td></tr>
 <tr><td width='25%' class='base'>$Lang::tr{'wlanap encryption'}:&nbsp;</td><td class='base' colspan='3'>
 	<select name='ENC'>
@@ -423,11 +446,23 @@ print<<END
 	</select>
 </td></tr>
 <tr><td width='25%' class='base'>Passphrase:&nbsp;</td><td class='base' colspan='3'><input type='text' name='PWD' size='30' value='$wlanapsettings{'PWD'}' /></td></tr>
+<tr>
+	<td width='25%' class='base'>$Lang::tr{'wlanap management frame protection'}:&nbsp;</td>
+	<td class='base' colspan="3">
+		<label>
+			$Lang::tr{'on'} <input type='radio' name='IEEE80211W' value='on' $checked{'IEEE80211W'}{'on'} />
+		</label> |
+		<label>
+			<input type='radio' name='IEEE80211W' value='off' $checked{'IEEE80211W'}{'off'} /> $Lang::tr{'off'}
+		</label>
+	</td>
+</tr>
 <tr><td colspan='4'><br></td></tr>
 END
 ;
 print <<END
 <tr><td width='25%' class='base'>HT Caps:&nbsp;</td><td class='base' colspan='3'><input type='text' name='HTCAPS' size='30' value='$wlanapsettings{'HTCAPS'}' /></td></tr>
+<tr><td width='25%' class='base'>VHT Caps:&nbsp;</td><td class='base' colspan='3'><input type='text' name='VHTCAPS' size='30' value='$wlanapsettings{'VHTCAPS'}' /></td></tr>
 <tr><td width='25%' class='base'>Tx Power:&nbsp;</td><td class='base' colspan='3'><input type='text' name='TXPOWER' size='10' value='$wlanapsettings{'TXPOWER'}' /></td></tr>
 <tr><td width='25%' class='base'>Loglevel (hostapd):&nbsp;</td><td class='base' width='25%'>
 	<select name='SYSLOGLEVEL'>
@@ -577,6 +612,18 @@ ht_capab=$wlanapsettings{'HTCAPS'}
 END
 ;
 
+ }elsif ( $wlanapsettings{'HW_MODE'} eq 'ac' ){
+	print CONFIGFILE <<END
+hw_mode=a
+ieee80211ac=1
+ieee80211n=1
+wmm_enabled=1
+ht_capab=$wlanapsettings{'HTCAPS'}
+vht_capab=$wlanapsettings{'VHTCAPS'}
+vht_oper_chwidth=1
+END
+;
+
  }else{
  	print CONFIGFILE <<END
 hw_mode=$wlanapsettings{'HW_MODE'}
@@ -590,10 +637,10 @@ logger_syslog=-1
 logger_syslog_level=$wlanapsettings{'SYSLOGLEVEL'}
 logger_stdout=-1
 logger_stdout_level=$wlanapsettings{'DEBUG'}
-dump_file=/tmp/hostapd.dump
 auth_algs=1
 ctrl_interface=/var/run/hostapd
 ctrl_interface_group=0
+disassoc_low_ack=1
 END
 ;
  if ( $wlanapsettings{'HIDESSID'} eq 'on' ){
@@ -610,6 +657,35 @@ ignore_broadcast_ssid=0
 END
 ;
 
+ }
+
+ # https://forum.ipfire.org/viewtopic.php?f=22&t=12274&p=79070#p79070
+ if ( $wlanapsettings{'CLIENTISOLATION'} eq 'on' ){
+	print CONFIGFILE <<END
+ap_isolate=1
+END
+;
+ }
+
+ if ( $wlanapsettings{'NOSCAN'} eq 'on' ){
+	print CONFIGFILE <<END
+noscan=1
+END
+;
+
+ }else{
+ 	print CONFIGFILE <<END
+noscan=0
+END
+;
+
+ }
+
+ # Management Frame Protection (802.11w)
+ if ($wlanapsettings{'IEEE80211W'} eq "on") {
+	print CONFIGFILE "ieee80211w=2\n";
+ } else {
+	print CONFIGFILE "ieee80211w=0\n";
  }
 
  if ( $wlanapsettings{'ENC'} eq 'wpa1'){

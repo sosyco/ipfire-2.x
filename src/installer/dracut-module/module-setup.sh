@@ -29,7 +29,7 @@ install() {
     instmods virtio_net hv_netvsc vmxnet3
 
     # Filesystem support
-    inst_multiple parted mkswap mke2fs mkreiserfs mkfs.xfs
+    inst_multiple parted mkswap mke2fs mkreiserfs mkfs.xfs mkfs.vfat
     instmods ext4 iso9660 reiserfs vfat xfs
 
     # Extraction
@@ -42,12 +42,15 @@ install() {
     inst /var/ipfire/dhcpc/dhcpcd-run-hooks
     inst "$moddir/70-dhcpcd.exe" "/var/ipfire/dhcpc/dhcpcd-hooks/70-dhcpcd.exe"
 
+    # CAs
+    inst /etc/ssl/cert.pem
+
     inst /etc/host.conf /etc/protocols
     inst /etc/nsswitch.conf /etc/resolv.conf
     inst_libdir_file "libnss_dns.so.*"
 
     # Misc. tools
-    inst_multiple chmod cut grep eject id killall md5sum touch
+    inst_multiple chmod cut grep eject id killall md5sum ntpdate touch
     inst_multiple -o fdisk cfdisk df ps top
 
     # Hardware IDs

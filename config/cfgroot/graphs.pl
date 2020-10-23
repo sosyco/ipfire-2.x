@@ -31,6 +31,30 @@ require "${General::swroot}/header.pl";
 
 my $ERROR;
 
+my @GRAPH_ARGS = (
+	# Output format
+	"--imgformat", "PNG",
+
+	# No border
+	"--border", "0",
+
+	# For a more 'organic' look
+	"--slope-mode",
+
+	# HxW define the size of the output image
+	"--full-size-mode",
+
+	# Watermark
+	"-W www.ipfire.org",
+
+	# Default size
+	"-w 910",
+	"-h 300",
+
+	# Use alternative grid
+	"--alt-y-grid",
+);
+
 # Read the global settings files to get the current theme and after this load
 # colors for this theme
 
@@ -77,11 +101,6 @@ foreach (@sensorsdir){
 # 3 if given is the height of the iframe default if nothing is given
 
 sub makegraphbox {
-	my $height = 285;
-	my $width = 700;
-
-	if ( $_[3] ne "" ){ $height = $_[3]; }
-
 	print "<center>";
 	print "<a href='".$_[0]."?".$_[1]."?hour' target='".$_[1]."box'><b>".$Lang::tr{'hour'}."</b></a>";
 	print " - ";
@@ -93,7 +112,7 @@ sub makegraphbox {
 	print " - ";
 	print "<a href='".$_[0]."?".$_[1]."?year' target='".$_[1]."box'><b>".$Lang::tr{'year'}."</b></a>";
 	print "<br></center>";
-	print "<iframe src='".$_[0]."?".$_[1]."?".$_[2]."' width='".$width."' height='".$height."' scrolling='no' frameborder='no' marginheight='0' name='".$_[1]."box'></iframe>";
+	print "<iframe class='graph' src='".$_[0]."?".$_[1]."?".$_[2]."' scrolling='no' frameborder='no' marginheight='0' name='".$_[1]."box'></iframe>";
 }
 
 # Generate the CPU Graph for the current period of time for values given by
@@ -103,16 +122,10 @@ sub updatecpugraph {
 	my $cpucount = `ls -dA $mainsettings{'RRDLOG'}/collectd/localhost/cpu-*/ 2>/dev/null | wc -l`;
 	my $period    = $_[0];
 	my @command = (
+		@GRAPH_ARGS,
 		"-",
 		"--start",
 		"-1".$period,
-		"-aPNG",
-		"-i",
-		"-z",
-		"-W www.ipfire.org",
-		"--alt-y-grid",
-		"-w 600",
-		"-h 125",
 		"-l 0",
 		"-u 100",
 		"-r",
@@ -159,7 +172,7 @@ sub updatecpugraph {
 	}
 	
 	for(my $i = 2; $i < $cpucount; $i++) {
-		$addstring .= "+,";
+		$addstring .= "ADDNAN,";
 	}
 
 	if ( $cpucount > 1){
@@ -177,7 +190,7 @@ sub updatecpugraph {
 		push(@command,$nice,$interrupt,$steal,$user,$system,$idle,$iowait,$irq);
 	}
 
-	push(@command,"CDEF:total=user,system,idle,iowait,irq,nice,interrupt,steal,+,+,+,+,+,+,+"
+	push(@command,"CDEF:total=user,system,idle,iowait,irq,nice,interrupt,steal,ADDNAN,ADDNAN,ADDNAN,ADDNAN,ADDNAN,ADDNAN,ADDNAN"
 			,"CDEF:userpct=100,user,total,/,*"
 			,"CDEF:nicepct=100,nice,total,/,*"
 			,"CDEF:interruptpct=100,interrupt,total,/,*"
@@ -212,7 +225,7 @@ sub updatecpugraph {
 			,"GPRINT:stealpct:MIN:%3.2lf%%"
 			,"GPRINT:stealpct:LAST:%3.2lf%%\\j"
 			,"STACK:userpct".$color{"color11"}."A0:".sprintf("%-25s",$Lang::tr{'cpu user usage'})
-			,"GPRINT:userpct:MAX:%3.2lf%%"
+			,"GPRINT:userpct:MAX:%3.1lf%%"
 			,"GPRINT:userpct:AVERAGE:%3.2lf%%"
 			,"GPRINT:userpct:MIN:%3.2lf%%"
 			,"GPRINT:userpct:LAST:%3.2lf%%\\j"
@@ -237,19 +250,13 @@ sub updatecpugraph {
 sub updateloadgraph {
 	my $period    = $_[0];
 	RRDs::graph(
+		@GRAPH_ARGS,
 		"-",
 		"--start",
 		"-1".$period,
-		"-aPNG",
-		"-i",
-		"-z",
-		"-W www.ipfire.org",
-		"--alt-y-grid",
-		"-w 600",
-		"-h 125",
 		"-l 0",
 		"-r",
-		"-t Load Average ".$Lang::tr{'graph per'}." ".$Lang::tr{$period."-graph"},
+		"-t ".$Lang::tr{'uptime load average'}." ".$Lang::tr{'graph per'}." ".$Lang::tr{$period."-graph"},
 		"-v ".$Lang::tr{'processes'},
 		"--color=SHADEA".$color{"color19"},
 		"--color=SHADEB".$color{"color19"},
@@ -275,16 +282,10 @@ sub updateloadgraph {
 sub updatememorygraph {
 	my $period    = $_[0];
 	RRDs::graph(
+		@GRAPH_ARGS,
 		"-",
 		"--start",
 		"-1".$period,
-		"-aPNG",
-		"-i",
-		"-z",
-		"-W www.ipfire.org",
-		"--alt-y-grid",
-		"-w 600",
-		"-h 125",
 		"-l 0",
 		"-u 100",
 		"-r",
@@ -337,16 +338,10 @@ sub updatememorygraph {
 sub updateswapgraph {
 	my $period    = $_[0];
 	RRDs::graph(
+		@GRAPH_ARGS,
 		"-",
 		"--start",
 		"-1".$period,
-		"-aPNG",
-		"-i",
-		"-z",
-		"-W www.ipfire.org",
-		"--alt-y-grid",
-		"-w 600",
-		"-h 125",
 		"-l 0",
 		"-u 100",
 		"-r",
@@ -395,16 +390,10 @@ sub updateprocessescpugraph {
 	my $count="0";
 
 	my @command = (
+		@GRAPH_ARGS,
 		"-",
 		"--start",
 		"-1".$period,
-		"-aPNG",
-		"-i",
-		"-z",
-		"-W www.ipfire.org",
-		"--alt-y-grid",
-		"-w 600",
-		"-h 125",
 		"-l 0",
 		"-r",
 		"-t ".$Lang::tr{'processes'}." ".$Lang::tr{'graph per'}." ".$Lang::tr{$period."-graph"},
@@ -448,16 +437,10 @@ sub updateprocessesmemorygraph {
 	my $count="0";
 
 	my @command = (
+		@GRAPH_ARGS,
 		"-",
 		"--start",
 		"-1".$period,
-		"-aPNG",
-		"-i",
-		"-z",
-		"-W www.ipfire.org",
-		"--alt-y-grid",
-		"-w 600",
-		"-h 125",
 		"-l 0",
 		"-r",
 		"-t ".$Lang::tr{'processes'}." ".$Lang::tr{'memory'}." ".$Lang::tr{'graph per'}." ".$Lang::tr{$period."-graph"},
@@ -498,18 +481,12 @@ sub updatediskgraph {
 	my $disk    = $_[0];
 	my $period    = $_[1];
 	RRDs::graph(
+		@GRAPH_ARGS,
 		"-",
 		"--start",
 		"-1".$period,
-		"-aPNG",
-		"-i",
-		"-z",
-		"-W www.ipfire.org",
-		"--alt-y-grid",
-		"-w 600",
-		"-h 125",
 		"-r",
-		"-t ".$disk." ".$Lang::tr{'disk access per'}." ".$Lang::tr{$period."-graph"},
+		"-t ".$disk." ".$Lang::tr{'disk access'}." ".$Lang::tr{'graph per'}." ".$Lang::tr{$period."-graph"},
 		"-v ".$Lang::tr{'bytes per second'},
 		"--color=SHADEA".$color{"color19"},
 		"--color=SHADEB".$color{"color19"},
@@ -548,16 +525,10 @@ sub updateifgraph {
 	my $interface = $_[0];
 	my $period    = $_[1];
 	RRDs::graph(
+		@GRAPH_ARGS,
 		"-",
 		"--start",
 		"-1".$period,
-		"-aPNG",
-		"-i",
-		"-z",
-		"-W www.ipfire.org",
-		"--alt-y-grid",
-		"-w 600",
-		"-h 125",
 		"-r",
 		"-t ".$Lang::tr{'traffic on'}." ".$interface." ".$Lang::tr{'graph per'}." ".$Lang::tr{$period."-graph"},
 		"-v ".$Lang::tr{'bytes per second'},
@@ -591,16 +562,10 @@ sub updatevpngraph {
 	my $interface = $_[0];
 	my $period    = $_[1];
 	RRDs::graph(
+		@GRAPH_ARGS,
 		"-",
 		"--start",
 		"-1".$period,
-		"-aPNG",
-		"-i",
-		"-z",
-		"-W www.ipfire.org",
-		"--alt-y-grid",
-		"-w 600",
-		"-h 125",
 		"-r",
 		"-t ".$Lang::tr{'traffic on'}." ".$interface." ".$Lang::tr{'graph per'}." ".$Lang::tr{$period."-graph"},
 		"-v ".$Lang::tr{'bytes per second'},
@@ -634,16 +599,10 @@ sub updatevpnn2ngraph {
 	my $interface = $_[0];
 	my $period    = $_[1];
 	RRDs::graph(
+		@GRAPH_ARGS,
 		"-",
 		"--start",
 		"-1".$period,
-		"-aPNG",
-		"-i",
-		"-z",
-		"-W www.ipfire.org",
-		"--alt-y-grid",
-		"-w 600",
-		"-h 125",
 		"-r",
 		"-t ".$Lang::tr{'traffic on'}." ".$interface." ".$Lang::tr{'graph per'}." ".$Lang::tr{$period."-graph"},
 		"-v ".$Lang::tr{'bytes per second'},
@@ -704,16 +663,10 @@ sub updatevpnn2ngraph {
 sub updatefwhitsgraph {
 	my $period    = $_[0];
 	RRDs::graph(
+		@GRAPH_ARGS,
 		"-",
 		"--start",
 		"-1".$period,
-		"-aPNG",
-		"-i",
-		"-z",
-		"-W www.ipfire.org",
-		"--alt-y-grid",
-		"-w 600",
-		"-h 125",
 		"-r",
 		"-t ".$Lang::tr{'firewall hits per'}." ".$Lang::tr{$period."-graph"},
 		"-v ".$Lang::tr{'bytes per second'},
@@ -730,22 +683,22 @@ sub updatefwhitsgraph {
 		"COMMENT:".sprintf("%15s",$Lang::tr{'average'}),
 		"COMMENT:".sprintf("%14s",$Lang::tr{'minimal'}),
 		"COMMENT:".sprintf("%15s",$Lang::tr{'current'})."\\j",
-		"AREA:output".$color{"color25"}."A0:".sprintf("%-25s",$Lang::tr{'firewallhits'}."-OUTPUT"),
+		"AREA:output".$color{"color25"}."A0:".sprintf("%-25s",$Lang::tr{'firewallhits'}." (OUTPUT)"),
 		"GPRINT:output:MAX:%8.1lf %sBps",
 		"GPRINT:output:AVERAGE:%8.1lf %sBps",
 		"GPRINT:output:MIN:%8.1lf %sBps",
 		"GPRINT:output:LAST:%8.1lf %sBps\\j",
-		"STACK:forward".$color{"color23"}."A0:".sprintf("%-25s",$Lang::tr{'firewallhits'}."-FORWARD"),
+		"STACK:forward".$color{"color23"}."A0:".sprintf("%-25s",$Lang::tr{'firewallhits'}." (FORWARD)"),
 		"GPRINT:forward:MAX:%8.1lf %sBps",
 		"GPRINT:forward:AVERAGE:%8.1lf %sBps",
 		"GPRINT:forward:MIN:%8.1lf %sBps",
 		"GPRINT:forward:LAST:%8.1lf %sBps\\j",
-		"STACK:input".$color{"color24"}."A0:".sprintf("%-25s",$Lang::tr{'firewallhits'}."-INPUT"),
+		"STACK:input".$color{"color24"}."A0:".sprintf("%-25s",$Lang::tr{'firewallhits'}." (INPUT)"),
 		"GPRINT:input:MAX:%8.1lf %sBps",
 		"GPRINT:input:AVERAGE:%8.1lf %sBps",
 		"GPRINT:input:MIN:%8.1lf %sBps",
 		"GPRINT:input:LAST:%8.1lf %sBps\\j",
-		"STACK:newnotsyn".$color{"color14"}."A0:".sprintf("%-25s","NewNotSyn"),
+		"STACK:newnotsyn".$color{"color14"}."A0:".sprintf("%-25s","NewNotSYN"),
 		"GPRINT:newnotsyn:MAX:%8.1lf %sBps",
 		"GPRINT:newnotsyn:MIN:%8.1lf %sBps",
 		"GPRINT:newnotsyn:AVERAGE:%8.1lf %sBps",
@@ -766,16 +719,10 @@ sub updatepinggraph {
 	my $period    = $_[1];
 	my $host    = $_[0];
 	RRDs::graph(
+		@GRAPH_ARGS,
 		"-",
 		"--start",
 		"-1".$period,
-		"-aPNG",
-		"-i",
-		"-z",
-		"-W www.ipfire.org",
-		"--alt-y-grid",
-		"-w 600",
-		"-h 125",
 		"-l 0",
 		"-r",
 		"-t ".$Lang::tr{'linkq'}." ".$host." ".$Lang::tr{'graph per'}." ".$Lang::tr{$period."-graph"},
@@ -812,16 +759,10 @@ sub updatewirelessgraph {
 	my $period    = $_[1];
 	my $interface    = $_[0];
 	RRDs::graph(
+		@GRAPH_ARGS,
 		"-",
 		"--start",
 		"-1".$period,
-		"-aPNG",
-		"-i",
-		"-z",
-		"-W www.ipfire.org",
-		"--alt-y-grid",
-		"-w 600",
-		"-h 125",
 		"-t Wireless ".$interface." ".$Lang::tr{'graph per'}." ".$Lang::tr{$period."-graph"},
 		"-v dBm",
 		"--color=SHADEA".$color{"color19"},
@@ -855,16 +796,10 @@ sub updatehddgraph {
 	my $disk = $_[0];
 	my $period = $_[1];
 	RRDs::graph(
+		@GRAPH_ARGS,
 		"-",
 		"--start",
 		"-1".$period,
-		"-aPNG",
-		"-i",
-		"-z",
-		"-W www.ipfire.org",
-		"--alt-y-grid",
-		"-w 600",
-		"-h 125",
 		"-r",
 		"-t ".$disk." ".$Lang::tr{'harddisk temperature'}." ".$Lang::tr{'graph per'}." ".$Lang::tr{$period."-graph"},
 		"-v Celsius",
@@ -875,15 +810,15 @@ sub updatehddgraph {
 		"DEF:standby=".$mainsettings{'RRDLOG'}."/hddshutdown-$disk.rrd:standby:AVERAGE",
 		"CDEF:st=standby,INF,*",
 		"AREA:st".$color{"color20"}."A0:standby",
-		"LINE3:temperature".$color{"color11"}."A0:$Lang::tr{'hdd temperature in'} C\\j",
+		"LINE3:temperature".$color{"color11"}."A0:$Lang::tr{'hdd temperature in'} °C\\j",
 		"COMMENT:$Lang::tr{'maximal'}",
 		"COMMENT:$Lang::tr{'average'}",
 		"COMMENT:$Lang::tr{'minimal'}",
 		"COMMENT:$Lang::tr{'current'}\\j",
-		"GPRINT:temperature:MAX:%3.0lf Grad C",
-		"GPRINT:temperature:AVERAGE:%3.0lf Grad C",
-		"GPRINT:temperature:MIN:%3.0lf Grad C",
-		"GPRINT:temperature:LAST:%3.0lf Grad C\\j",
+		"GPRINT:temperature:MAX:%3.0lf °C",
+		"GPRINT:temperature:AVERAGE:%3.0lf °C",
+		"GPRINT:temperature:MIN:%3.0lf °C",
+		"GPRINT:temperature:LAST:%3.0lf °C\\j",
 		);
 		$ERROR = RRDs::error;
 		print "Error in RRD::graph for hdd-".$disk.": ".$ERROR."\n" if $ERROR;
@@ -895,18 +830,13 @@ sub updatehwtempgraph {
 	my $period = $_[0];
 
 	my @command = (
+		@GRAPH_ARGS,
 		"-",
 		"--start",
 		"-1".$period,
-		"-aPNG",
-		"-i",
-		"-z",
-		"-W www.ipfire.org",
-		"--alt-y-grid",
-		"-w 600",
-		"-h 125",
 		"-r",
 		"-t ".$Lang::tr{'mbmon temp'}." ".$Lang::tr{'graph per'}." ".$Lang::tr{$period."-graph"},
+		"-v Celsius",
 		"--color=SHADEA".$color{"color19"},
 		"--color=SHADEB".$color{"color19"},
 		"--color=BACK".$color{"color21"},
@@ -933,7 +863,7 @@ sub updatehwtempgraph {
 				$_ =~ /\/(.*)sensors-(.*)\/(.*)\.rrd/;
 				my $label = $2.$3;$label=~ s/-//g;
 				if ( $sensorsettings{'LINE-'.$label} eq "off" ){next;}
-				push(@command,"LINE3:".$sensorsettings{'LABEL-'.$label}.random_hex_color(6)."A0:".sprintf("%-25s",$sensorsettings{'LABEL-'.$label}),"GPRINT:".$sensorsettings{'LABEL-'.$label}.":MAX:%3.2lf C","GPRINT:".$sensorsettings{'LABEL-'.$label}.":AVERAGE:%3.2lf C","GPRINT:".$sensorsettings{'LABEL-'.$label}.":MIN:%3.2lf C","GPRINT:".$sensorsettings{'LABEL-'.$label}.":LAST:%3.2lf C\\j",);
+				push(@command,"LINE3:".$sensorsettings{'LABEL-'.$label}.random_hex_color(6)."A0:".sprintf("%-25s",$sensorsettings{'LABEL-'.$label}),"GPRINT:".$sensorsettings{'LABEL-'.$label}.":MAX:%3.2lf °C","GPRINT:".$sensorsettings{'LABEL-'.$label}.":AVERAGE:%3.2lf °C","GPRINT:".$sensorsettings{'LABEL-'.$label}.":MIN:%3.2lf °C","GPRINT:".$sensorsettings{'LABEL-'.$label}.":LAST:%3.2lf °C\\j",);
 			}
 		}
 
@@ -948,16 +878,10 @@ sub updatehwfangraph {
 	my $period = $_[0];
 
 	my @command = (
+		@GRAPH_ARGS,
 		"-",
 		"--start",
 		"-1".$period,
-		"-aPNG",
-		"-i",
-		"-z",
-		"-W www.ipfire.org",
-		"--alt-y-grid",
-		"-w 600",
-		"-h 125",
 		"-r",
 		"-t ".$Lang::tr{'mbmon fan'}." ".$Lang::tr{'graph per'}." ".$Lang::tr{$period."-graph"},
 		"--color=SHADEA".$color{"color19"},
@@ -1001,16 +925,10 @@ sub updatehwvoltgraph {
 	my $period = $_[0];
 
 	my @command = (
+		@GRAPH_ARGS,
 		"-",
 		"--start",
 		"-1".$period,
-		"-aPNG",
-		"-i",
-		"-z",
-		"-W www.ipfire.org",
-		"--alt-y-grid",
-		"-w 600",
-		"-h 125",
 		"-r",
 		"-t ".$Lang::tr{'mbmon volt'}." ".$Lang::tr{'graph per'}." ".$Lang::tr{$period."-graph"},
 		"--color=SHADEA".$color{"color19"},
@@ -1074,16 +992,10 @@ sub updateqosgraph {
 	my $color="#000000";
 
 	my @command = (
+		@GRAPH_ARGS,
 		"-",
 		"--start",
 		"-1".$period,
-		"-aPNG",
-		"-i",
-		"-z",
-		"-W www.ipfire.org",
-		"--alt-y-grid",
-		"-w 600",
-		"-h 125",
 		"-r",
 		"-t ".$Lang::tr{'Utilization on'}." (".$qossettings{'DEV'}.") ".$Lang::tr{'graph per'}." ".$Lang::tr{$period."-graph"},
 		"-v ".$Lang::tr{'bytes per second'},
@@ -1133,16 +1045,10 @@ sub updatecpufreqgraph {
 	my $cpucount = `ls -dA $mainsettings{'RRDLOG'}/collectd/localhost/cpu-*/ 2>/dev/null | wc -l`;
 	my $period    = $_[0];
 	my @command = (
+		@GRAPH_ARGS,
 		"-",
 		"--start",
 		"-1".$period,
-		"-aPNG",
-		"-i",
-		"-z",
-		"-W www.ipfire.org",
-		"--alt-y-grid",
-		"-w 600",
-		"-h 125",
 		"-r",
 		"-t ".$Lang::tr{'cpu frequency per'}." ".$Lang::tr{$period."-graph"},
 		"-v MHz",
@@ -1178,19 +1084,13 @@ sub updatethermaltempgraph {
 	my $thermalcount = `ls -dA $mainsettings{'RRDLOG'}/collectd/localhost/thermal-thermal_zone* 2>/dev/null | wc -l`;
 	my $period    = $_[0];
 	my @command = (
+		@GRAPH_ARGS,
 		"-",
 		"--start",
 		"-1".$period,
-		"-aPNG",
-		"-i",
-		"-z",
-		"-W www.ipfire.org",
-		"--alt-y-grid",
-		"-w 600",
-		"-h 125",
 		"-r",
-		"-t "."ACPI Thermal-Zone Temperature"." - ".$Lang::tr{$period."-graph"},
-		"-v Grad Celsius",
+		"-t ".$Lang::tr{'acpitemp'}." ".$Lang::tr{'graph per'}." ".$Lang::tr{$period."-graph"},
+		"-v Celsius",
 		"--color=SHADEA".$color{"color19"},
 		"--color=SHADEB".$color{"color19"},
 		"--color=BACK".$color{"color21"},
@@ -1206,10 +1106,10 @@ sub updatethermaltempgraph {
 		push(@command,"DEF:temp".$i."_=".$mainsettings{'RRDLOG'}."/collectd/localhost/thermal-thermal_zone".$i."/temperature-temperature.rrd:value:AVERAGE"
 				,"CDEF:temp".$i."=temp".$i."_,1,/"
 				,"LINE3:temp".$i.$color{"color1$j"}."A0:Temp ".$i." "
-				,"GPRINT:temp".$i.":MAX:%3.0lf Grad C"
-				,"GPRINT:temp".$i.":AVERAGE:%3.0lf Grad C"
-				,"GPRINT:temp".$i.":MIN:%3.0lf Grad C"
-				,"GPRINT:temp".$i.":LAST:%3.0lf Grad C\\j");
+				,"GPRINT:temp".$i.":MAX:%3.0lf °C"
+				,"GPRINT:temp".$i.":AVERAGE:%3.0lf °C"
+				,"GPRINT:temp".$i.":MIN:%3.0lf °C"
+				,"GPRINT:temp".$i.":LAST:%3.0lf °C\\j");
 	}
 
 	RRDs::graph (@command);
@@ -1237,19 +1137,13 @@ sub getprocesses {
 sub updateentropygraph {
 	my $period    = $_[0];
 	my @command = (
+		@GRAPH_ARGS,
 		"-",
 		"--start",
 		"-1".$period,
-		"-aPNG",
-		"-i",
-		"-z",
-		"-W www.ipfire.org",
-		"--alt-y-grid",
-		"-w 600",
-		"-h 225",
 		"-r",
 		"--lower-limit","0",
-		"-t $Lang::tr{'entropy'}",
+		"-t ".$Lang::tr{'entropy'}." ".$Lang::tr{'graph per'}." ".$Lang::tr{$period."-graph"},
 		"-v $Lang::tr{'bit'}",
 		"DEF:entropy=$mainsettings{'RRDLOG'}/collectd/localhost/entropy/entropy.rrd:entropy:AVERAGE",
 		"LINE3:entropy#ff0000:" . sprintf("%-15s", $Lang::tr{'entropy'}),
@@ -1259,10 +1153,39 @@ sub updateentropygraph {
 		"GPRINT:entrmax:" . sprintf("%12s\\: %%5.0lf", $Lang::tr{'maximum'}),
 		"GPRINT:entrmin:" . sprintf("%12s\\: %%5.0lf", $Lang::tr{'minimum'}),
 		"GPRINT:entravg:" . sprintf("%12s\\: %%5.0lf", $Lang::tr{'average'}) . "\\n",
+		"--color=BACK".$color{"color21"},
 	);
 
 	RRDs::graph (@command);
 	$ERROR = RRDs::error;
 
 	print "Error in RRD::graph for entropy: ".$ERROR."\n" if $ERROR;
+}
+
+sub updateconntrackgraph {
+	my $period = $_[0];
+	my @command = (
+		@GRAPH_ARGS,
+		"-",
+		"--start",
+		"-1" . $period,
+		"-r",
+		"--lower-limit","0",
+		"-t $Lang::tr{'connection tracking'}",
+		"-v $Lang::tr{'open connections'}",
+		"DEF:conntrack=$mainsettings{'RRDLOG'}/collectd/localhost/conntrack/conntrack.rrd:entropy:AVERAGE",
+		"LINE3:conntrack#ff0000:" . sprintf("%-15s", $Lang::tr{'open connections'}),
+		"VDEF:ctmin=conntrack,MINIMUM",
+		"VDEF:ctmax=conntrack,MAXIMUM",
+		"VDEF:ctavg=conntrack,AVERAGE",
+		"GPRINT:ctmax:" . sprintf("%15s\\: %%5.0lf", $Lang::tr{'maximum'}),
+		"GPRINT:ctmin:" . sprintf("%15s\\: %%5.0lf", $Lang::tr{'minimum'}),
+		"GPRINT:ctavg:" . sprintf("%15s\\: %%5.0lf", $Lang::tr{'average'}) . "\\n",
+		"--color=BACK" . $color{"color21"},
+	);
+
+	RRDs::graph(@command);
+	$ERROR = RRDs::error;
+
+	print STDERR "Error in RRD::Graph for conntrack: " . $ERROR . "\n" if $ERROR;
 }

@@ -1,7 +1,7 @@
 ###############################################################################
 #                                                                             #
 # IPFire.org - A linux based firewall                                         #
-# Copyright (C) 2007-2015  IPFire Team  <info@ipfire.org>                     #
+# Copyright (C) 2007-2018  IPFire Team  <info@ipfire.org>                     #
 #                                                                             #
 # This program is free software: you can redistribute it and/or modify        #
 # it under the terms of the GNU General Public License as published by        #
@@ -33,9 +33,9 @@ DIR_APP    = $(DIR_SRC)/$(THISAPP)
 TARGET     = $(DIR_INFO)/$(THISAPP)
 SUP_ARCH   = x86_64 i586
 PROG       = cpufrequtils
-PAK_VER    = 7
+PAK_VER    = 9
 
-DEPS       = ""
+DEPS       =
 
 CFLAGS    += -fno-PIC
 
@@ -82,5 +82,9 @@ $(TARGET) : $(patsubst %,$(DIR_DL)/%,$(objects))
 	@rm -rf $(DIR_APP) && cd $(DIR_SRC) && tar jxf $(DIR_DL)/$(DL_FILE)
 	cd $(DIR_APP) && make
 	cd $(DIR_APP) && make install
+
+	#install initscripts
+	$(call INSTALL_INITSCRIPT,cpufreq)
+
 	@rm -rf $(DIR_APP)
 	@$(POSTBUILD)

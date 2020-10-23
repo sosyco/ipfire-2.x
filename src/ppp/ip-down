@@ -22,13 +22,10 @@
 . /etc/sysconfig/rc
 . $rc_functions
 
-eval $(/usr/local/bin/readhash /var/ipfire/ppp/settings)
-
-rm -f /var/ipfire/red/active
+rm -f /var/ipfire/red/active \
+	/var/run/dns1 /var/run/dns2
 
 run_subdir ${rc_base}/init.d/networking/red.down/
-
-[ -e "/var/ipfire/ppp/nobeeps" ] || /etc/rc.d/init.d/beep down
 
 [ -e "/var/ipfire/red/keepconnected" ] && \
 		/etc/rc.d/init.d/connectd reconnect &

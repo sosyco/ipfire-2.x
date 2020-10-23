@@ -1,0 +1,302 @@
+#!/bin/bash
+
+. /etc/sysconfig/rc
+. ${rc_functions}
+
+# Set PATH to find our own executables
+export PATH=/usr/local/sbin:/usr/local/bin:${PATH}
+
+# AWS supports an MTU of up to 9001 bytes
+DEFAULT_MTU=9001
+
+get() {
+	local file="${1}"
+
+	wget -qO - "http://169.254.169.254/latest/${file}"
+}
+
+to_address() {
+	local n="${1}"
+
+	local o1=$(( (n & 0xff000000) >> 24 ))
+	local o2=$(( (n & 0xff0000) >> 16 ))
+	local o3=$(( (n & 0xff00) >> 8 ))
+	local o4=$(( (n & 0xff) ))
+
+	printf "%d.%d.%d.%d\n" "${o1}" "${o2}" "${o3}" "${o4}"
+}
+
+to_integer() {
+	local address="${1}"
+
+	local integer=0
+
+	local i
+	for i in ${address//\./ }; do
+		integer=$(( (integer << 8) + i ))
+	done
+
+	printf "%d\n" "${integer}"
+}
+
+prefix2netmask() {
+	local prefix=${1}
+
+	local zeros=$(( 32 - prefix ))
+	local netmask=0
+
+	local i
+	for (( i=0; i<${zeros}; i++ )); do
+		netmask=$(( (netmask << 1) ^ 1 ))
+	done
+
+	to_address "$(( netmask ^ 0xffffffff ))"
+}
+
+import_aws_configuration() {
+	local instance_id="$(get meta-data/instance-id)"
+
+	boot_mesg "Importing AWS configuration for instance ${instance_id}..."
+
+	# Store instance ID
+	echo "${instance_id}" > /var/run/aws-instance-id
+
+	# Initialise system settings
+	local hostname=$(get meta-data/local-hostname)
+
+	# Set hostname
+	if ! grep -q "^HOSTNAME=" /var/ipfire/main/settings; then
+		echo "HOSTNAME=${hostname%%.*}" >> /var/ipfire/main/settings
+	fi
+
+	# Set domainname
+	if ! grep -q "^DOMAINNAME=" /var/ipfire/main/settings; then
+		echo "DOMAINNAME=${hostname#*.}" >> /var/ipfire/main/settings
+	fi
+
+	# Create setup user
+	if ! getent passwd setup &>/dev/null; then
+		useradd setup -s /usr/bin/run-setup -g nobody -m
+
+		# Unlock the account
+		usermod -p "x" setup
+	fi
+
+	# Import SSH keys for setup user
+	local line
+	for line in $(get "meta-data/public-keys/"); do
+		local key_no="${line%=*}"
+
+		local key="$(get meta-data/public-keys/${key_no}/openssh-key)"
+		if [ -n "${key}" ] && ! grep -q "^${key}$" "/home/setup/.ssh/authorized_keys" 2>/dev/null; then
+			mkdir -p "/home/setup/.ssh"
+			chmod 700 "/home/setup/.ssh"
+			chown setup.nobody "/home/setup/.ssh"
+
+			echo "${key}" >> "/home/setup/.ssh/authorized_keys"
+			chmod 600 "/home/setup/.ssh/authorized_keys"
+			chown setup.nobody "/home/setup/.ssh/authorized_keys"
+		fi
+	done
+
+	# Download the user-data script only on the first boot
+	if [ ! -e "/var/ipfire/main/firstsetup_ok" ]; then
+		# Download user-data
+		local user_data="$(get user-data)"
+
+		# Save user-data script to be executed later
+		if [ "${user_data:0:2}" = "#!" ]; then
+			echo "${user_data}" > /tmp/aws-user-data.script
+			chmod 700 /tmp/aws-user-data.script
+
+			# Run the user-data script
+			local now="$(date -u +"%s")"
+			/tmp/aws-user-data.script &>/var/log/user-data.log.${now}
+
+			# Delete the script right away
+			rm /tmp/aws-user-data.script
+		fi
+	fi
+
+	# Import network configuration
+	# After this, no network connectivity will be available from this script due to the
+	# renaming of the network interfaces for which they have to be shut down
+	local config_type=1
+	: > /var/ipfire/ethernet/settings
+
+	local mac
+	for mac in $(get meta-data/network/interfaces/macs/); do
+		# Remove trailing slash
+		mac="${mac//\//}"
+
+		local device_number="$(get "meta-data/network/interfaces/macs/${mac}/device-number")"
+		local interface_id="$(get "meta-data/network/interfaces/macs/${mac}/interface-id")"
+
+		# First IPv4 address
+		local ipv4_address="$(get "meta-data/network/interfaces/macs/${mac}/local-ipv4s" | head -n1)"
+		local ipv4_address_num="$(to_integer "${ipv4_address}")"
+
+		# Get VPC subnet
+		local vpc="$(get "meta-data/network/interfaces/macs/${mac}/vpc-ipv4-cidr-block")"
+		local vpc_netaddress="${vpc%/*}"
+		local vpc_netaddress_num="$(to_integer "${vpc_netaddress}")"
+
+		# Get subnet size
+		local subnet="$(get "meta-data/network/interfaces/macs/${mac}/subnet-ipv4-cidr-block")"
+
+		local prefix="${subnet#*/}"
+		local netmask="$(prefix2netmask "${prefix}")"
+		local netmask_num="$(to_integer "${netmask}")"
+
+		# Calculate the network and broadcast addresses
+		local netaddress="${subnet%/*}"
+		local netaddress_num="$(to_integer "${netaddress}")"
+		local broadcast="$(to_address $(( ipv4_address_num | (0xffffffff ^ netmask_num) )))"
+
+		case "${device_number}" in
+			# RED
+			0)
+				local interface_name="red0"
+
+				# The gateway is always the first IP address in the subnet
+				local gateway="$(to_address $(( netaddress_num + 1 )))"
+
+				(
+					echo "RED_TYPE=STATIC"
+					echo "RED_DEV=${interface_name}"
+					echo "RED_MACADDR=${mac}"
+					echo "RED_DESCRIPTION='${interface_id}'"
+					echo "RED_ADDRESS=${ipv4_address}"
+					echo "RED_NETMASK=${netmask}"
+					echo "RED_NETADDRESS=${netaddress}"
+					echo "RED_BROADCAST=${broadcast}"
+					echo "RED_MTU=1500"
+					echo "DEFAULT_GATEWAY=${gateway}"
+				) >> /var/ipfire/ethernet/settings
+
+				# Import aliases for RED
+				for alias in $(get "meta-data/network/interfaces/macs/${mac}/local-ipv4s" | tail -n +2); do
+					echo "${alias},on,"
+				done > /var/ipfire/ethernet/aliases
+				;;
+
+			# GREEN
+			1)
+				local interface_name="green0"
+
+				(
+					echo "GREEN_DEV=${interface_name}"
+					echo "GREEN_MACADDR=${mac}"
+					echo "GREEN_DESCRIPTION='${interface_id}'"
+					echo "GREEN_ADDRESS=${ipv4_address}"
+					echo "GREEN_NETMASK=${netmask}"
+					echo "GREEN_NETADDRESS=${netaddress}"
+					echo "GREEN_BROADCAST=${broadcast}"
+					echo "GREEN_MTU=${DEFAULT_MTU}"
+				) >> /var/ipfire/ethernet/settings
+				;;
+
+			# ORANGE
+			2)
+				local interface_name="orange0"
+				config_type=2
+
+				(
+					echo "ORANGE_DEV=${interface_name}"
+					echo "ORANGE_MACADDR=${mac}"
+					echo "ORANGE_DESCRIPTION='${interface_id}'"
+					echo "ORANGE_ADDRESS=${ipv4_address}"
+					echo "ORANGE_NETMASK=${netmask}"
+					echo "ORANGE_NETADDRESS=${netaddress}"
+					echo "ORANGE_BROADCAST=${broadcast}"
+					echo "ORANGE_MTU=${DEFAULT_MTU}"
+				) >> /var/ipfire/ethernet/settings
+				;;
+		esac
+	done
+
+	# Save CONFIG_TYPE
+	echo "CONFIG_TYPE=${config_type}" >> /var/ipfire/ethernet/settings
+
+	# Actions performed only on the very first start
+	if [ ! -e "/var/ipfire/main/firstsetup_ok" ]; then
+		# Disable using ISP nameservers
+		sed -e "s/^USE_ISP_NAMESERVERS=.*/USE_ISP_NAMESERVERS=off/" -i /var/ipfire/dns/settings
+
+		# Enable SSH
+		sed -e "s/ENABLE_SSH=.*/ENABLE_SSH=on/g" -i /var/ipfire/remote/settings
+
+		# Disable SSH password authentication
+		sed -e "s/^ENABLE_SSH_PASSWORDS=.*/ENABLE_SSH_PASSWORDS=off/" -i /var/ipfire/remote/settings
+
+		# Enable SSH key authentication
+		sed -e "s/^ENABLE_SSH_KEYS=.*/ENABLE_SSH_KEYS=on/" -i /var/ipfire/remote/settings
+
+		# Apply SSH settings
+		/usr/local/bin/sshctrl
+
+		# Mark SSH to start immediately (but not right now)
+		touch /var/ipfire/remote/enablessh
+		chown nobody:nobody /var/ipfire/remote/enablessh
+
+		# Firewall rules for SSH and WEBIF
+		(
+			echo "1,ACCEPT,INPUTFW,ON,std_net_src,ALL,ipfire,RED1,,TCP,,,ON,,,cust_srv,SSH,,,,,,,,,,,00:00,00:00,,AUTO,,dnat,,,,,second"
+			echo "2,ACCEPT,INPUTFW,ON,std_net_src,ALL,ipfire,RED1,,TCP,,,ON,,,TGT_PORT,444,,,,,,,,,,,00:00,00:00,,AUTO,,dnat,,,,,second"
+		) >> /var/ipfire/firewall/input
+
+		# This script has now completed the first steps of setup
+		touch /var/ipfire/main/firstsetup_ok
+	fi
+
+	# All done
+	echo_ok
+}
+
+case "${reason}" in
+	PREINIT)
+		# Bring up the interface
+		ip link set "${interface}" up
+		;;
+
+	BOUND|RENEW|REBIND|REBOOT)
+		# Remove any previous IP addresses
+		ip addr flush dev "${interface}"
+
+		# Add (or re-add) the new IP address
+		ip addr add "${new_ip_address}/${new_subnet_mask}" dev "${interface}"
+
+		# Add the default route
+		ip route add default via "${new_routers}"
+
+		# Setup DNS
+		for domain_name_server in ${new_domain_name_servers}; do
+			echo "nameserver ${domain_name_server}"
+		done > /etc/resolv.conf
+
+		# The system is online now
+		touch /var/ipfire/red/active
+
+		# Import AWS configuration
+		import_aws_configuration
+		;;
+
+	EXPIRE|FAIL|RELEASE|STOP)
+		# The system is no longer online
+		rm -f /var/ipfire/red/active
+
+		# Remove all IP addresses
+		ip addr flush dev "${interface}"
+
+		# Shut down the interface
+		ip link set "${interface}" down
+		;;
+
+	*)
+		echo "Unhandled reason: ${reason}" >&2
+		exit 2
+		;;
+esac
+
+# Terminate
+exit 0

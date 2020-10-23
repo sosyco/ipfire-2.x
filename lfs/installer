@@ -1,7 +1,7 @@
 ###############################################################################
 #                                                                             #
 # IPFire.org - A linux based firewall                                         #
-# Copyright (C) 2007-2012  IPFire Team  <info@ipfire.org>                     #
+# Copyright (C) 2007-2018  IPFire Team  <info@ipfire.org>                     #
 #                                                                             #
 # This program is free software: you can redistribute it and/or modify        #
 # it under the terms of the GNU General Public License as published by        #
@@ -31,7 +31,7 @@ DIR_APP    = $(DIR_SRC)/$(THISAPP)
 TARGET     = $(DIR_INFO)/$(THISAPP)
 
 SLOGAN     = An Open Source Firewall Solution
-DOWNLOAD_URL = http://downloads.ipfire.org/releases/ipfire-2.x/$(VERSION)-core$(CORE)/$(SNAME)-$(VERSION).$(MACHINE)-full-core$(CORE).iso
+DOWNLOAD_URL = https://downloads.ipfire.org/releases/ipfire-2.x/$(VERSION)-core$(CORE)/$(SNAME)-$(VERSION).$(BUILD_ARCH)-full-core$(CORE).iso
 
 ###############################################################################
 # Top-level Rules
@@ -59,6 +59,7 @@ $(TARGET) :
 		--with-distro-name="$(NAME)" \
 		--with-distro-sname="$(SNAME)" \
 		--with-distro-slogan="$(SLOGAN)" \
+		--with-distro-version="$(VERSION)-core$(CORE)" \
 		--with-config-root="$(CONFIG_ROOT)" \
 		--with-download-url="$(DOWNLOAD_URL)"
 

@@ -70,8 +70,8 @@ sub showmenu() {
 		print <<EOF;
 			<div id='traffic'>
 				<strong>Traffic:</strong>
-				In  <span id='rx_kbs'>--.-- Bit/s</span> &nbsp;
-				Out <span id='tx_kbs'>--.-- Bit/s</span>
+				In  <span id='rx_kbs'>--.-- bit/s</span> &nbsp;
+				Out <span id='tx_kbs'>--.-- bit/s</span>
 			</div>
 EOF
 	}
@@ -152,7 +152,7 @@ print <<END
 	<body>
 		<div id="header" class="fixed">
 			<div id="logo">
-				<a href="http://www.ipfire.org" style="text-decoration: none;">
+				<a href="https://www.ipfire.org" style="text-decoration: none;">
 					<img src="/themes/ipfire/images/tux2.png" style="float:left; margin-left: -3px; margin-top: -3px;"/>
 END
 ;
@@ -205,8 +205,8 @@ print <<END;
 
 	<div id="footer" class='bigbox fixed'>
 		<span class="pull-right">
-			<a href="http://www.ipfire.org/" target="_blank"><strong>IPFire.org</strong></a> &bull;
-			<a href="http://www.ipfire.org/donate" target="_blank">$Lang::tr{'support donation'}</a>
+			<a href="https://www.ipfire.org/" target="_blank"><strong>IPFire.org</strong></a> &bull;
+			<a href="https://www.ipfire.org/donate" target="_blank">$Lang::tr{'support donation'}</a>
 		</span>
 
 		<strong>$system_release</strong>

@@ -14,11 +14,6 @@
 
 #include "setup.h"
 
-#define DNS1 0
-#define DNS2 1
-#define DEFAULT_GATEWAY 2
-#define DNSGATEWAY_TOTAL 3
-
 extern FILE *flog;
 extern char *mylog;
 
@@ -56,7 +51,7 @@ int drivermenu(void);
 int changedrivers(void);
 int greenaddressmenu(void);
 int addressesmenu(void);
-int dnsgatewaymenu(void);
+int gatewaymenu(void);
 
 int handlenetworking(void)
 {
@@ -89,7 +84,7 @@ int handlenetworking(void)
 				break;
 			
 			case 4:
-				dnsgatewaymenu();
+				gatewaymenu();
 				break;
 				
 			case 0:
@@ -113,6 +108,8 @@ int handlenetworking(void)
 
 			runcommandwithstatus("/etc/rc.d/init.d/network start",
 				_("Networking"), _("Restarting network..."), NULL);
+			runcommandwithstatus("/etc/rc.d/init.d/unbound restart",
+				_("Networking"), _("Restarting unbound..."), NULL);
 		}
 	} else {
 		rename_nics();
@@ -142,9 +139,13 @@ int oktoleave(void)
 		strcpy(temp, ""); findkey(kv, "GREEN_DEV", temp);
 		if (!(strlen(temp)))
 		{
-			errorbox(_("No GREEN interface assigned."));
-			freekeyvalues(kv);
-			return 0;
+			rc = newtWinChoice(_("Error"), _("OK"), _("Ignore"),
+				_("No GREEN interface assigned."));
+			if (rc == 0 || rc == 1)
+			{
+				freekeyvalues(kv);
+				return 0;
+			}
 		}
 		if (!(interfacecheck(kv, "GREEN")))
 		{
@@ -179,9 +180,13 @@ int oktoleave(void)
 		strcpy(temp, ""); findkey(kv, "ORANGE_DEV", temp);
 		if (!(strlen(temp)))
 		{
-			errorbox(_("No ORANGE interface assigned."));
-			freekeyvalues(kv);
-			return 0;
+			rc = newtWinChoice(_("Error"), _("OK"), _("Ignore"),
+				_("No ORANGE interface assigned."));
+			if (rc == 0 || rc == 1)
+			{
+				freekeyvalues(kv);
+				return 0;
+			}
 		}
 		if (!(interfacecheck(kv, "ORANGE")))
 		{
@@ -195,9 +200,13 @@ int oktoleave(void)
 		strcpy(temp, ""); findkey(kv, "BLUE_DEV", temp);
 		if (!(strlen(temp)))
 		{
-			errorbox(_("No BLUE interface assigned."));
-			freekeyvalues(kv);
-			return 0;
+			rc = newtWinChoice(_("Error"), _("OK"), _("Ignore"),
+				_("No BLUE interface assigned."));
+			if (rc == 0 || rc == 1)
+			{
+				freekeyvalues(kv);
+				return 0;
+			}
 		}
 		if (!(interfacecheck(kv, "BLUE")))
 		{
@@ -210,13 +219,6 @@ int oktoleave(void)
 	strcpy(temp, ""); findkey(kv, "RED_TYPE", temp);
 	if ((configtype == 0) || (strcmp(temp, "STATIC") == 0))
 	{
-		strcpy(temp, ""); findkey(kv, "DNS1", temp);
-		if (!(strlen(temp)))
-		{
-                       errorbox(_("Missing DNS."));
-			freekeyvalues(kv);
-			return 0;
-		}
 		strcpy(temp, ""); findkey(kv, "DEFAULT_GATEWAY", temp);
 		if (!(strlen(temp)))
 		{
@@ -236,7 +238,7 @@ int firstmenu(void)
 		_("Network configuration type"),
 		_("Drivers and card assignments"),
 		_("Address settings"),
-		_("DNS and Gateway settings"),
+		_("Gateway settings"),
 		NULL
 	};
 	int rc;
@@ -694,14 +696,14 @@ int addressesmenu(void)
 	return 0;
 }
 
-/* DNS and default gateway.... */
-int dnsgatewaymenu(void)
+/* default gateway.... */
+int gatewaymenu(void)
 {
 	struct keyvalue *kv = initkeyvalues();
 	char message[1000];
 	char temp[STRING_SIZE] = "0";
-	struct newtWinEntry entries[DNSGATEWAY_TOTAL+1];
-	char *values[DNSGATEWAY_TOTAL];         /* pointers for the values. */
+	struct newtWinEntry entries[2];
+	char* values[1];         /* pointers for the values. */
 	int error;
 	int configtype;
 	int rc;
@@ -713,92 +715,50 @@ int dnsgatewaymenu(void)
 		return 0;
 	}
 
-	entries[DNS1].text = _("Primary DNS:");
-	strcpy(temp, ""); findkey(kv, "DNS1", temp);
-	values[DNS1] = strdup(temp);
-	entries[DNS1].value = &values[DNS1];
-	entries[DNS1].flags = 0;
-	
-	entries[DNS2].text = _("Secondary DNS:");
-	strcpy(temp, ""); findkey(kv, "DNS2", temp);
-	values[DNS2] = strdup(temp);
-	entries[DNS2].value = &values[DNS2];
-	entries[DNS2].flags = 0;
-	
-	entries[DEFAULT_GATEWAY].text = _("Default gateway:");
+	entries[0].text = _("Default gateway:");
 	strcpy(temp, ""); findkey(kv, "DEFAULT_GATEWAY", temp);
-	values[DEFAULT_GATEWAY] = strdup(temp);
-	entries[DEFAULT_GATEWAY].value = &values[DEFAULT_GATEWAY];
-	entries[DEFAULT_GATEWAY].flags = 0;
+	values[0] = strdup(temp);
+	entries[0].value = &values[0];
+	entries[0].flags = 0;
 	
-	entries[DNSGATEWAY_TOTAL].text = NULL;
-	entries[DNSGATEWAY_TOTAL].value = NULL;
-	entries[DNSGATEWAY_TOTAL].flags = 0;
+	entries[1].text = NULL;
+	entries[1].value = NULL;
+	entries[1].flags = 0;
 	
 	do
 	{
 		error = 0;
 		
-		rc = newtWinEntries(_("DNS and Gateway settings"),
-			_("Enter the DNS and gateway information. "
-			"These settings are used only with Static IP (and DHCP if DNS set) on the RED interface."),
+		rc = newtWinEntries(_("Gateway settings"),
+			_("Enter the gateway information. "
+			"These settings are used only with Static IP on the RED interface."),
 			50, 5, 5, 18, entries, _("OK"), _("Cancel"), NULL);
 		if (rc == 0 || rc == 1)
 		{
-			strcpy(message, _("The following fields are invalid:"));
-			strcpy(message, "\n\n");
-			if (strlen(values[DNS1]))
+			if (strlen(values[0]))
 			{
-				if (inet_addr(values[DNS1]) == INADDR_NONE)
-				{
-					strcat(message, _("Primary DNS"));
-					strcat(message, "\n");
-					error = 1;
-				}
-			}
-			if (strlen(values[DNS2]))
-			{
-				if (inet_addr(values[DNS2]) == INADDR_NONE)
-				{
-					strcat(message, _("Secondary DNS"));
-					strcat(message, "\n");
-					error = 1;
-				}
-			}
-			if (strlen(values[DEFAULT_GATEWAY]))
-			{
-				if (inet_addr(values[DEFAULT_GATEWAY]) == INADDR_NONE)
+				if (inet_addr(values[0]) == INADDR_NONE)
 				{
 					strcat(message, _("Default gateway"));
 					strcat(message, "\n");
 					error = 1;
 				}
 			}
-			if (!strlen(values[DNS1]) && strlen(values[DNS2]))
-			{
-				strcpy(message, _("Secondary DNS specified without a Primary DNS"));
-				strcat(message, "\n");
-				error = 1;
-			}
 
 			if (error)
 				errorbox(message);
 			else
 			{
-				replacekeyvalue(kv, "DNS1", values[DNS1]);
-				replacekeyvalue(kv, "DNS2", values[DNS2]);
-				replacekeyvalue(kv, "DEFAULT_GATEWAY", values[DEFAULT_GATEWAY]);
+				replacekeyvalue(kv, "DEFAULT_GATEWAY", values[0]);
 				netaddresschange = 1;
-				free(values[DNS1]);
-				free(values[DNS2]);
-				free(values[DEFAULT_GATEWAY]);
+				free(values[0]);
 				writekeyvalues(kv, CONFIG_ROOT "/ethernet/settings");
 			}
 		}
 	}
 	while (error);
-	
+
 	freekeyvalues(kv);
-	
+
 	return 1;
 }			

@@ -1,7 +1,7 @@
 ###############################################################################
 #                                                                             #
 # IPFire.org - A linux based firewall                                         #
-# Copyright (C) 2007-2015  IPFire Team  <info@ipfire.org>                     #
+# Copyright (C) 2007-2020  IPFire Team  <info@ipfire.org>                     #
 #                                                                             #
 # This program is free software: you can redistribute it and/or modify        #
 # it under the terms of the GNU General Public License as published by        #
@@ -24,17 +24,37 @@
 
 include Config
 
-VER        = 2.00
+VER        = 2.04
 
 THISAPP    = grub-$(VER)
 DL_FILE    = $(THISAPP).tar.xz
 DL_FROM    = $(URL_IPFIRE)
 DIR_APP    = $(DIR_SRC)/$(THISAPP)
 TARGET     = $(DIR_INFO)/$(THISAPP)
-SUP_ARCH   = x86_64 i586
+SUP_ARCH   = aarch64 x86_64 i586
 
-CFLAGS     =
-CXXFLAGS   =
+# Build for which platforms?
+ifeq "$(BUILD_ARCH)" "i586"
+	BUILD_PC = 1
+endif
+
+ifeq "$(BUILD_ARCH)" "x86_64"
+	BUILD_PC = 1
+endif
+
+BUILD_EFI = $(EFI)
+
+DIR_APP_PC  = $(DIR_APP)-pc
+DIR_APP_EFI = $(DIR_APP)-efi
+
+# Don't use our CFLAGS for boot code
+export HOST_CFLAGS  = $(CFLAGS)
+export HOST_LDFLAGS = $(LDFLAGS)
+
+CONFIGURE_ARGS = \
+	--prefix=/usr \
+	--sysconfdir=/etc \
+	--disable-werror
 
 ###############################################################################
 # Top-level Rules
@@ -46,7 +66,7 @@ objects = $(DL_FILE) \
 $(DL_FILE) = $(DL_FROM)/$(DL_FILE)
 unifont-7.0.03.pcf.gz = $(DL_FROM)/unifont-7.0.03.pcf.gz
 
-$(DL_FILE)_MD5 = a1043102fbc7bcedbf53e7ee3d17ab91
+$(DL_FILE)_MD5 = 5aaca6713b47ca2456d8324a58755ac7
 unifont-7.0.03.pcf.gz_MD5 = f6903ac8c1caeeb30c1e9a2975028401
 
 install : $(TARGET)
@@ -76,38 +96,42 @@ $(subst %,%_MD5,$(objects)) :
 
 $(TARGET) : $(patsubst %,$(DIR_DL)/%,$(objects))
 	@$(PREBUILD)
-	@rm -rf $(DIR_APP) && cd $(DIR_SRC) && tar axf $(DIR_DL)/$(DL_FILE)
-	cd $(DIR_APP) && patch -Np1 < $(DIR_SRC)/src/patches/grub-2.00_disable_vga_fallback.patch
-	cd $(DIR_APP) && patch -Np1 < $(DIR_SRC)/src/patches/0001-Fix-CVE-2015-8370-Grub2-user-pass-vulnerability.patch
-	cd $(DIR_APP) && \
-		./configure \
-			--prefix=/usr \
-			--sysconfdir=/etc \
-			--with-platform=pc \
-			--with-grubdir=grub \
-			--program-transform-name=s,grub,grub, \
-			--disable-grub-mount \
-			--disable-werror
-	cd $(DIR_APP) && make $(MAKETUNING)
-	cd $(DIR_APP) && make install
+	@rm -rf $(DIR_APP) $(DIR_APP_EFI) && cd $(DIR_SRC) && tar axf $(DIR_DL)/$(DL_FILE)
 
+	cd $(DIR_APP) && patch -Np1 < $(DIR_SRC)/src/patches/grub/grub-2.04-BootHole.patch
+	cd $(DIR_APP) && patch -Np1 < $(DIR_SRC)/src/patches/grub-2.02_disable_vga_fallback.patch
+	cd $(DIR_APP) && autoreconf -vfi
+
+	# Install unifont
+	cp -v $(DIR_DL)/unifont-7.0.03.pcf.gz $(DIR_APP)/unifont.pcf.gz
+
+ifeq "$(BUILD_EFI)" "1"
+	cp -r $(DIR_APP) $(DIR_APP_EFI)
+	cd $(DIR_APP_EFI) && ./configure $(CONFIGURE_ARGS) \
+		--with-platform=efi CFLAGS= LDFLAGS=
+	cd $(DIR_APP_EFI) && make $(MAKETUNING)
+	cd $(DIR_APP_EFI) && make install
+endif
+
+ifeq "$(BUILD_PC)" "1"
+	cp -r $(DIR_APP) $(DIR_APP_PC)
+	cd $(DIR_APP_PC) && ./configure $(CONFIGURE_ARGS) \
+		--with-platform=pc --disable-efiemu CFLAGS= LDFLAGS=
+	cd $(DIR_APP_PC) && make $(MAKETUNING)
+	cd $(DIR_APP_PC) && make install
+
+	# Install empty configuration file
 	-mkdir -pv /boot/grub
 	touch /boot/grub/grub.cfg
-	ln -svf ../boot/grub/grub.cfg /etc/grub2.cfg
+endif
+
+	# Install background image
+	-mkdir -pv /boot/grub
 	install -m 644 $(DIR_SRC)/config/grub2/splash.png /boot/grub/splash.png
 
+	# Install default configuration
 	-mkdir -pv /etc/default
 	install -m 644 $(DIR_SRC)/config/grub2/default /etc/default/grub
 
-	# Disable hardening.
-	paxctl -mpes /usr/sbin/grub-bios-setup /usr/sbin/grub-probe
-
-	# We don't need to install unifont just to generate a grub2 compatible
-	# font archive for the graphical boot menu. The following command only
-	# converts Latin-1, Latin Extended A+B, Arrows, Box and Block characters.
-	/usr/bin/grub-mkfont --output /boot/grub/unifont.pf2 \
-		--range=0x0000-0x0241,0x2190-0x21FF,0x2500-0x259f \
-		$(DIR_DL)/unifont-7.0.03.pcf.gz
-
-	@rm -rf $(DIR_APP)
+	@rm -rf $(DIR_APP) $(DIR_APP_PC) $(DIR_APP_EFI)
 	@$(POSTBUILD)

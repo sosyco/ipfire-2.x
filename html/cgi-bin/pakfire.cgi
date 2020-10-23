@@ -30,25 +30,23 @@ require "${General::swroot}/lang.pl";
 require "${General::swroot}/header.pl";
 require "/opt/pakfire/lib/functions.pl";
 
-my %pakfiresettings=();
+my %cgiparams=();
 my $errormessage = '';
 my %color = ();
+my %pakfiresettings = ();
 my %mainsettings = ();
 
 &Header::showhttpheaders();
 
-$pakfiresettings{'ACTION'} = '';
-$pakfiresettings{'VALID'} = '';
+$cgiparams{'ACTION'} = '';
+$cgiparams{'VALID'} = '';
 
-$pakfiresettings{'INSPAKS'} = '';
-$pakfiresettings{'DELPAKS'} = '';
-$pakfiresettings{'AUTOUPDATE'} = 'off';
-$pakfiresettings{'HEALTHCHECK'} = 'on';
-$pakfiresettings{'UUID'} = 'on';
+$cgiparams{'INSPAKS'} = '';
+$cgiparams{'DELPAKS'} = '';
 
 sub refreshpage{&Header::openbox( 'Waiting', 1, "<meta http-equiv='refresh' content='1;'>" );print "<center><img src='/images/clock.gif' alt='' /><br/><font color='red'>$Lang::tr{'pagerefresh'}</font></center>";&Header::closebox();}
 
-&Header::getcgihash(\%pakfiresettings);
+&Header::getcgihash(\%cgiparams);
 
 &General::readhash("${General::swroot}/main/settings", \%mainsettings);
 &General::readhash("/srv/web/ipfire/html/themes/".$mainsettings{'THEME'}."/include/colors.txt", \%color);
@@ -56,17 +54,17 @@ sub refreshpage{&Header::openbox( 'Waiting', 1, "<meta http-equiv='refresh' cont
 &Header::openpage($Lang::tr{'pakfire configuration'}, 1);
 &Header::openbigbox('100%', 'left', '', $errormessage);
 
-if ($pakfiresettings{'ACTION'} eq 'install'){
-	$pakfiresettings{'INSPAKS'} =~ s/\|/\ /g;
-	if ("$pakfiresettings{'FORCE'}" eq "on") {
-		my $command = "/usr/local/bin/pakfire install --non-interactive --no-colors $pakfiresettings{'INSPAKS'} &>/dev/null &";
+if ($cgiparams{'ACTION'} eq 'install'){
+	$cgiparams{'INSPAKS'} =~ s/\|/\ /g;
+	if ("$cgiparams{'FORCE'}" eq "on") {
+		my $command = "/usr/local/bin/pakfire install --non-interactive --no-colors $cgiparams{'INSPAKS'} &>/dev/null &";
 		system("$command");
 		system("/bin/sleep 1");
 	} else {
 		&Header::openbox("100%", "center", $Lang::tr{'request'});
-  	my @output = `/usr/local/bin/pakfire resolvedeps --no-colors $pakfiresettings{'INSPAKS'}`;
+		my @output = `/usr/local/bin/pakfire resolvedeps --no-colors $cgiparams{'INSPAKS'}`;
 		print <<END;
-		<table><tr><td colspan='2'>$Lang::tr{'pakfire install package'}.$pakfiresettings{'INSPAKS'}.$Lang::tr{'pakfire possible dependency'}
+		<table><tr><td colspan='2'>$Lang::tr{'pakfire install package'}.$cgiparams{'INSPAKS'}.$Lang::tr{'pakfire possible dependency'}
 		<pre>
 END
 		foreach (@output) {
@@ -78,7 +76,7 @@ END
 		<tr><td colspan='2'>$Lang::tr{'pakfire accept all'}
 		<tr><td colspan='2'>&nbsp;
 		<tr><td align='right'><form method='post' action='$ENV{'SCRIPT_NAME'}'>
-							<input type='hidden' name='INSPAKS' value='$pakfiresettings{'INSPAKS'}' />
+							<input type='hidden' name='INSPAKS' value='$cgiparams{'INSPAKS'}' />
 							<input type='hidden' name='FORCE' value='on' />
 							<input type='hidden' name='ACTION' value='install' />
 							<input type='image' alt='$Lang::tr{'install'}' title='$Lang::tr{'install'}' src='/images/go-next.png' />
@@ -95,18 +93,18 @@ END
 		&Header::closepage();
 		exit;
 	}
-} elsif ($pakfiresettings{'ACTION'} eq 'remove') {
+} elsif ($cgiparams{'ACTION'} eq 'remove') {
 
-	$pakfiresettings{'DELPAKS'} =~ s/\|/\ /g;
-	if ("$pakfiresettings{'FORCE'}" eq "on") {
-		my $command = "/usr/local/bin/pakfire remove --non-interactive --no-colors $pakfiresettings{'DELPAKS'} &>/dev/null &";
+	$cgiparams{'DELPAKS'} =~ s/\|/\ /g;
+	if ("$cgiparams{'FORCE'}" eq "on") {
+		my $command = "/usr/local/bin/pakfire remove --non-interactive --no-colors $cgiparams{'DELPAKS'} &>/dev/null &";
 		system("$command");
 		system("/bin/sleep 1");
 	} else {
 		&Header::openbox("100%", "center", $Lang::tr{'request'});
-  	my @output = `/usr/local/bin/pakfire resolvedeps --no-colors $pakfiresettings{'DELPAKS'}`;
+		my @output = `/usr/local/bin/pakfire resolvedeps --no-colors $cgiparams{'DELPAKS'}`;
 		print <<END;
-		<table><tr><td colspan='2'>$Lang::tr{'pakfire uninstall package'}.$pakfiresettings{'DELPAKS'}.$Lang::tr{'pakfire possible dependency'}
+		<table><tr><td colspan='2'>$Lang::tr{'pakfire uninstall package'}.$cgiparams{'DELPAKS'}.$Lang::tr{'pakfire possible dependency'}
 		<pre>
 END
 		foreach (@output) {
@@ -115,10 +113,10 @@ END
 		}
 		print <<END;
 		</pre>
-		<tr><td colspan='2'>$Lang::tr{'pakfire accept all'}
+		<tr><td colspan='2'>$Lang::tr{'pakfire uninstall all'}
 		<tr><td colspan='2'>&nbsp;
 		<tr><td align='right'><form method='post' action='$ENV{'SCRIPT_NAME'}'>
-							<input type='hidden' name='DELPAKS' value='$pakfiresettings{'DELPAKS'}' />
+							<input type='hidden' name='DELPAKS' value='$cgiparams{'DELPAKS'}' />
 							<input type='hidden' name='FORCE' value='on' />
 							<input type='hidden' name='ACTION' value='remove' />
 							<input type='image' alt='$Lang::tr{'uninstall'}' title='$Lang::tr{'uninstall'}' src='/images/go-next.png' />
@@ -136,23 +134,28 @@ END
 		exit;
 	}
 
-} elsif ($pakfiresettings{'ACTION'} eq 'update') {
+} elsif ($cgiparams{'ACTION'} eq 'update') {
 
 	system("/usr/local/bin/pakfire update --force --no-colors &>/dev/null &");
 	system("/bin/sleep 1");
-} elsif ($pakfiresettings{'ACTION'} eq 'upgrade') {
+} elsif ($cgiparams{'ACTION'} eq 'upgrade') {
 	my $command = "/usr/local/bin/pakfire upgrade -y --no-colors &>/dev/null &";
 	system("$command");
 	system("/bin/sleep 1");
-} elsif ($pakfiresettings{'ACTION'} eq "$Lang::tr{'save'}") {
+} elsif ($cgiparams{'ACTION'} eq "$Lang::tr{'save'}") {
+	$pakfiresettings{"TREE"} = $cgiparams{"TREE"};
 
-	if ($pakfiresettings{'AUTOUPDATE'} eq 'on') {
-		system("/usr/local/bin/pakfire enable updates >/dev/null 2>&1");
-	} else {
-		system("/usr/local/bin/pakfire disable updates  >/dev/null 2>&1");
+	# Check for valid input
+	if ($pakfiresettings{"TREE"} !~ m/^(stable|testing|unstable)$/) {
+		$errormessage .= $Lang::tr{'pakfire invalid tree'};
 	}
 
-	&General::writehash("${General::swroot}/pakfire/settings", \%pakfiresettings);
+	unless ($errormessage) {
+		&General::writehash("${General::swroot}/pakfire/settings", \%pakfiresettings);
+
+		# Update lists
+		system("/usr/local/bin/pakfire update --force --no-colors &>/dev/null &");
+	}
 }
 
 &General::readhash("${General::swroot}/pakfire/settings", \%pakfiresettings);
@@ -160,15 +163,11 @@ END
 my %selected=();
 my %checked=();
 
-$checked{'AUTOUPDATE'}{'off'} = '';
-$checked{'AUTOUPDATE'}{'on'} = '';
-$checked{'AUTOUPDATE'}{$pakfiresettings{'AUTOUPDATE'}} = "checked='checked'";
-$checked{'HEALTHCHECK'}{'off'} = '';
-$checked{'HEALTHCHECK'}{'on'} = '';
-$checked{'HEALTHCHECK'}{$pakfiresettings{'HEALTHCHECK'}} = "checked='checked'";
-$checked{'UUID'}{'off'} = '';
-$checked{'UUID'}{'on'} = '';
-$checked{'UUID'}{$pakfiresettings{'UUID'}} = "checked='checked'";
+$selected{"TREE"} = ();
+$selected{"TREE"}{"stable"} = "";
+$selected{"TREE"}{"testing"} = "";
+$selected{"TREE"}{"unstable"} = "";
+$selected{"TREE"}{$pakfiresettings{"TREE"}} = "selected";
 
 # DPC move error message to top so it is seen!
 if ($errormessage) {
@@ -286,19 +285,26 @@ END
 &Header::openbox("100%", "center", "$Lang::tr{'settings'}");
 
 print <<END;
-	<form method='post' action='$ENV{'SCRIPT_NAME'}'>
+	<form method='POST' action='$ENV{'SCRIPT_NAME'}'>
 		<table width='95%'>
-			<tr><td colspan='2' bgcolor='$color{'color20'}'><b>$Lang::tr{'basic options'}</b></td></tr>
-			<tr><td align='left' width='45%'>$Lang::tr{'pakfire update daily'}</td><td width="55%" align="left">
-          on <input type='radio' name='AUTOUPDATE' value='on' $checked{'AUTOUPDATE'}{'on'} /> |
-          <input type='radio' name='AUTOUPDATE' value='off' $checked{'AUTOUPDATE'}{'off'} /> off </td></tr>
-			<tr><td align='left' width='45%'>$Lang::tr{'pakfire health check'}</td><td align="left">
-          on <input type='radio' name='HEALTHCHECK' value='on' $checked{'HEALTHCHECK'}{'on'} /> |
-          <input type='radio' name='HEALTHCHECK' value='off' $checked{'HEALTHCHECK'}{'off'} /> off </td></tr>          
-			<tr><td align='left' width='45%'>$Lang::tr{'pakfire register'}</td><td align="left">
-          on <input type='radio' name='UUID' value='on' $checked{'UUID'}{'on'} /> |
-          <input type='radio' name='UUID' value='off' $checked{'UUID'}{'off'} /> off </td></tr>
-			<tr><td colspan="2" align="center"><input type="submit" name="ACTION" value="$Lang::tr{'save'}" /></td></tr>
+			<tr>
+				<td align='left' width='45%'>$Lang::tr{'pakfire tree'}</td>
+				<td width="55%" align="left">
+					<select name="TREE">
+						<option value="stable" $selected{"TREE"}{"stable"}>$Lang::tr{'pakfire tree stable'}</option>
+						<option value="testing" $selected{"TREE"}{"testing"}>$Lang::tr{'pakfire tree testing'}</option>
+						<option value="unstable" $selected{"TREE"}{"unstable"}>$Lang::tr{'pakfire tree unstable'}</option>
+					</select>
+				</td>
+			</tr>
+			<tr>
+				<td colspan="2">&nbsp;</td>
+			</tr>
+			<tr>
+				<td colspan="2" align="center">
+					<input type="submit" name="ACTION" value="$Lang::tr{'save'}" />
+				</td>
+			</tr>
 		</table>
 	</form>
 END

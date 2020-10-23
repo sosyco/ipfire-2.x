@@ -30,12 +30,54 @@
 #                                                                             #
 ###############################################################################
 
+# Cleanup environment from any variables
+unexport BUILD_ARCH BUILD_PLATFORM BUILDTARGET CROSSTARGET TOOLCHAIN TOOLS_DIR
+unexport XZ_OPT
+
+PARALLELISM = $(shell echo $$( \
+	if [ -n "$(MAX_PARALLELISM)" ] && [ $(MAX_PARALLELISM) -lt $(DEFAULT_PARALLELISM) ]; then \
+		echo $(MAX_PARALLELISM); \
+	else \
+		echo $(DEFAULT_PARALLELISM); \
+	fi) \
+)
+
+MAKETUNING = -j$(PARALLELISM)
+
+ifeq "$(BUILD_ARCH)" "aarch64"
+	IS_64BIT = 1
+endif
+
+ifeq "$(BUILD_ARCH)" "armv7hl"
+	IS_32BIT = 1
+endif
+
+ifeq "$(BUILD_ARCH)" "armv5tel"
+	IS_32BIT = 1
+endif
+
+ifeq "$(BUILD_ARCH)" "x86_64"
+	IS_64BIT = 1
+endif
+
+ifeq "$(BUILD_ARCH)" "i586"
+	IS_32BIT = 1
+endif
+
+ifeq "$(TOOLCHAIN)" "1"
+	PREFIX = $(TOOLS_DIR)
+else
+	PREFIX = /usr
+endif
+
+TAR_OPTIONS = --xz
+
 # URLs that are common sources of downloads.  If you're having trouble with
 # a site you should change its URL to that of a suitable mirror site.
 #
-URL_IPFIRE  = http://source.ipfire.org/source-2.x
-URL_TOOLCHAIN = http://source.ipfire.org/toolchains
-URL_SOURCE = source.ipfire.org:/pub/source/source-2.x
+URL_IPFIRE  = https://source.ipfire.org/source-2.x
+URL_TOOLCHAIN = https://source.ipfire.org/toolchains
+URL_SOURCE = git.ipfire.org:/pub/sources/source-2.x
 
 # Don't change this; it will be overridden by other makefiles where necessary.
 #
@@ -56,6 +98,36 @@ DIR_CHK     = $(LFS_BASEDIR)/cache/check
 DIR_CONF    = $(LFS_BASEDIR)/config
 DIR_INFO    = $(LFS_BASEDIR)/log
 DIR_TMP     = /tmp
+DIR_TMP_PAK = $(DIR_TMP)/package-$(PROG)
+
+# Add the compiler location and version and specs to the ccache hash
+CCACHE_COMPILERCHECK += $(shell gcc -dumpspecs 2>/dev/null | md5sum | cut -d ' ' -f1)
+
+# We support EFI on x86_64 and aarch64
+ifeq "$(BUILD_ARCH)" "x86_64"
+	EFI = 1
+	EFI_ARCH = x64
+	GRUB_ARCH = $(BUILD_ARCH)
+endif
+
+ifeq "$(BUILD_ARCH)" "aarch64"
+	EFI = 1
+	EFI_ARCH = aa64
+	GRUB_ARCH = arm64
+endif
+
+# Go
+export GOARCH
+export GOOS   = linux
+export GOPATH = $(HOME)/gopath
+
+ifeq "$(BUILD_ARCH)" "x86_64"
+	GOARCH = amd64
+endif
+
+ifeq "$(BUILD_ARCH)" "aarch64"
+	GOARCH = arm64
+endif
 
 ###############################################################################
 # Common Macro Definitions
@@ -66,9 +138,9 @@ DIR_TMP     = /tmp
 #
 define FIND_FILES
 	cd $(ROOT)/ && find -mount \
-		\( -path './tools' -or -path './tmp' -or -path './usr/src' \
+		\( -path '.$(TOOLS_DIR)' -or -path './tmp' -or -path './usr/src' \
 		-or -path './run' -or -path './dev' -or -path './proc' \
-		-or -path './install' \) -prune -or -print | sort
+		-or -path './install' -or -path '.*/__pycache__' \) -prune -or -print | sort
 endef
 
 # This is common starting logic for builds.
@@ -98,6 +170,7 @@ define POSTBUILD
 	@echo "Updating linker cache..."
 	@type -p ldconfig >/dev/null && ldconfig || :
 	@echo "Install done; saving file list to $(TARGET) ..."
+	@rm -rf $(GOPATH)
 	@$(FIND_FILES) > $(DIR_SRC)/lsalrnew
 	@diff $(DIR_SRC)/lsalr $(DIR_SRC)/lsalrnew | grep '^> ' | sed 's/^> //' > $(TARGET)_diff
 	@cp -f $(DIR_SRC)/lsalrnew $(DIR_SRC)/lsalr
@@ -114,13 +187,13 @@ define POSTBUILD
 	if [ -s "$(TARGET)_diff" ]; then \
 		LFS_SCRIPT=$(firstword $(MAKEFILE_LIST))$(KCFG); \
 		echo $(LFS_SCRIPT); \
-		ROOTFILE=$$(find $(DIR_SRC)/config/rootfiles/{common,packages}/{$(MACHINE),} -maxdepth 1 -type f -name $$LFS_SCRIPT 2>/dev/null | head -1); \
+		ROOTFILE=$$(find -L $(DIR_SRC)/config/rootfiles/{common,packages}/{$(BUILD_ARCH),} -maxdepth 1 -type f -name $$LFS_SCRIPT 2>/dev/null | head -1); \
 		if [ "$$ROOTFILE" = "" ]; then \
 			touch $(TARGET)_missing_rootfile; \
 			ROOTFILE=$(TARGET)_missing_rootfile ; \
 			echo "error $$LFS_SCRIPT not found in config/rootfiles"; \
 		fi; \
-		sed -e "s/BUILDTARGET/$(BUILDTARGET)/g" -e "s/KVER/$(KVER)/g" -e "s/MACHINE/$(MACHINE)/g" $$ROOTFILE > $(TARGET)_rootfile; \
+		sed -e "s/BUILDTARGET/$(BUILDTARGET)/g" -e "s/KVER/$(KVER)/g" -e "s/xxxMACHINExxx/$(BUILD_ARCH)/g" $$ROOTFILE > $(TARGET)_rootfile; \
 		for line in `cat $(TARGET)_diff`; do \
 			if grep -qG "^#$$line$$" $(TARGET)_rootfile; then echo "#$$line" >> $(TARGET); \
 			elif grep -qG "^$$line$$" $(TARGET)_rootfile ; then echo "$$line" >> $(TARGET); \
@@ -161,45 +234,80 @@ define MD5
 	# error mean file signature don't match the one in lfs script
 	[ "$($@_MD5)" = `md5sum $(DIR_DL)/$@ | awk '{ print $$1 }'` ]
 	echo "$@ checksum OK"
-	echo "$@" >>$(DIR_INFO)/_build.othersrc-list.log
 endef
 
 define PAK
 	# Bringing the files to their right place.
-	@rm -rf /install/packages/package
-	@mkdir -p /install/packages/package/tmp
+	@rm -rf $(DIR_TMP_PAK) && mkdir -p $(DIR_TMP_PAK)
 	if [ -e "/usr/src/src/paks/$(PROG)" ]; then \
 		cp -f /usr/src/src/paks/$(PROG)/{,un}install.sh /usr/src/src/paks/$(PROG)/update.sh \
-		/install/packages/package; \
+		$(DIR_TMP_PAK); \
 	else \
 		cp -f /usr/src/src/paks/default/{,un}install.sh /usr/src/src/paks/default/update.sh \
-		/install/packages/package; \
+		$(DIR_TMP_PAK); \
 	fi
-	for i in $(DIR_SRC)/config/rootfiles/packages/{$(MACHINE),}/$(PROG); do \
+	for i in $(DIR_SRC)/config/rootfiles/packages/{$(BUILD_ARCH),}/$(PROG); do \
 		if [ -e "$${i}" ]; then \
-			cp -v $${i} /install/packages/package/ROOTFILES; \
+			cp -v $${i} $(DIR_TMP_PAK)/ROOTFILES; \
 			break; \
 		fi; \
 	done
-	sed -e 's/BUILDTARGET/$(BUILDTARGET)/g' -e 's/KVER/$(KVER)/g' -e 's/MACHINE/$(MACHINE)/g' -i /install/packages/package/ROOTFILES
-	sed -e 's/xxxKVERxxx/$(KVER)/g' -i /install/packages/package/install.sh
-	chmod 755 /install/packages/package/{{,un}install,update}.sh
-	cd / && tar cf /install/packages/package/files.tmp --files-from=/install/packages/package/ROOTFILES --exclude='#*' \
-		-p --numeric-owner
-	# Double tar to remove double files
-	tar xf /install/packages/package/files.tmp -C /install/packages/package/tmp/ \
-		-p --numeric-owner
-	rm -f /install/packages/package/files.tmp
-	cd /install/packages/package/tmp/ && tar -c -p --numeric-owner -J -f /install/packages/package/files.tar.xz * 		
-	rm -r /install/packages/package/tmp
-	-cat /install/packages/package/ROOTFILES | grep -v "#" > /install/packages/package/ROOTFILES.tmp
-	mv /install/packages/package/ROOTFILES.tmp /install/packages/package/ROOTFILES
-	cd /install/packages/package && tar cf ../$(PROG)-$(VER)-$(PAK_VER).ipfire --files-from=/usr/src/src/paks/files
-	rm -rf /install/packages/package
-	sed -e s/NAME/$(PROG)/g \
-			-e s/VER/$(VER)/g \
-			-e s/RELEASE/$(PAK_VER)/g \
-			-e s/DEPS/$(DEPS)/g \
-			-e s/SIZE/`ls -l \/install\/packages\/$(PROG)-$(VER)-$(PAK_VER).ipfire | awk '{ print $$5 }'`/g \
+
+	# Replace variables in rootfiles
+	sed -i $(DIR_TMP_PAK)/ROOTFILES \
+		-e 's/BUILDTARGET/$(BUILDTARGET)/g' \
+		-e 's/KVER/$(KVER)/g' \
+		-e 's/xxxMACHINExxx/$(BUILD_ARCH)/g'
+
+	# Replace variables in scripts
+	sed -i $(DIR_TMP_PAK)/install.sh \
+		-e 's/xxxKVERxxx/$(KVER)/g'
+
+	# Make scripts executable
+	chmod 754 $(DIR_TMP_PAK)/{{,un}install,update}.sh
+
+	# Collect all files
+	rm -rf $(DIR_TMP_PAK)/root && mkdir -p $(DIR_TMP_PAK)/root
+	tar -c --exclude='#*' --exclude='proc/*' --exclude='dev/pts/*' --exclude='tmp/*' \
+		--exclude='__pycache__' \
+		-C / --files-from=$(DIR_TMP_PAK)/ROOTFILES | tar -x -C $(DIR_TMP_PAK)/root
+
+	# Compress tarball
+	cd $(DIR_TMP_PAK)/root && tar cf - * | xz $(XZ_OPT) > $(DIR_TMP_PAK)/files.tar.xz
+
+	# Cleanup temporary files
+	rm -rf $(DIR_TMP_PAK)/root
+
+	# Remove any commented lines
+	sed -i $(DIR_TMP_PAK)/ROOTFILES -e "/^#/d"
+
+	# Make package
+	cd $(DIR_TMP_PAK) && tar cf /install/packages/$(PROG)-$(VER)-$(PAK_VER).ipfire *
+
+	# Cleanup
+	rm -rf $(DIR_TMP_PAK)
+
+	# Create meta file
+	sed \
+		-e "s/NAME/$(PROG)/g" \
+		-e "s/VER/$(VER)/g" \
+		-e "s/RELEASE/$(PAK_VER)/g" \
+		-e "s/DEPS/$(DEPS)/g" \
+		-e "s/SIZE/$$(stat --format=%s /install/packages/$(PROG)-$(VER)-$(PAK_VER).ipfire)/g" \
 	  < /usr/src/src/pakfire/meta > /install/packages/meta-$(PROG)
 endef
+
+define INSTALL_INITSCRIPT
+	install -m 754 -v $(DIR_SRC)/src/initscripts/packages/$(1)  /etc/rc.d/init.d/$(1)
+endef
+
+ifeq "$(BUILD_ARCH)" "aarch64"
+define UPDATE_AUTOMAKE
+	for i in $$(find $(DIR_APP) -name config.guess -o -name config.sub); do \
+		cp -vf /usr/share/automake*/$$(basename $${i}) $${i}; \
+	done
+endef
+endif
+
+test:
+	$(call INSTALL_INITSCRIPT,hostapd)

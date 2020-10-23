@@ -1,7 +1,7 @@
 ###############################################################################
 #                                                                             #
 # IPFire.org - A linux based firewall                                         #
-# Copyright (C) 2007  Michael Tremer & Christian Schmidt                      #
+# Copyright (C) 2007-2018  IPFire Team  <info@ipfire.org>                     #
 #                                                                             #
 # This program is free software: you can redistribute it and/or modify        #
 # it under the terms of the GNU General Public License as published by        #
@@ -39,7 +39,7 @@ else
 	TARGET     = $(DIR_INFO)/$(THISAPP)-ldap
 endif
 
-DEPS       = ""
+DEPS       =
 
 ###############################################################################
 # Top-level Rules
@@ -82,6 +82,7 @@ $(subst %,%_MD5,$(objects)) :
 $(TARGET) : $(patsubst %,$(DIR_DL)/%,$(objects))
 	@$(PREBUILD)
 	@rm -rf $(DIR_APP) && cd $(DIR_SRC) && tar zxf $(DIR_DL)/$(DL_FILE)
+	$(UPDATE_AUTOMAKE)
 	cd $(DIR_APP) && sed -i '/sasl_global/s/^static //' lib/client.c
 	cd $(DIR_APP) && sed -i 's/cat8/man8/' saslauthd/Makefile.am
 	cd $(DIR_APP) && autoconf
@@ -90,12 +91,17 @@ ifeq "$(PASS)" ""
 	cd $(DIR_APP) && ./configure --prefix=/usr --sysconfdir=/etc \
 		            --with-dbpath=/var/lib/sasl/sasldb2 \
 		            --with-saslauthd=/var/run/saslauthd \
-		            --with-des=no --with-rc4=no
+		            --with-des=no --with-rc4=no \
+		            --disable-otp
 	cd $(DIR_APP) && make
 	cd $(DIR_APP) && make install
 	install -v -m700 -d /var/lib/sasl
 	-mkdir /var/run/saslauthd
 	cp -vf $(DIR_SRC)/config/cyrus-sasl/smtpd.conf /usr/lib/sasl2/
+
+	#install initscripts
+	$(call INSTALL_INITSCRIPT,cyrus-sasl)
+
 else
 	# WITH LDAP SUPPORT AT THIS TIME
 	cd $(DIR_APP) && ./configure --prefix=/usr --sysconfdir=/etc \

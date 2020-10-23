@@ -31,7 +31,7 @@ HOME=/
 */5 * * * *	[ -f "/var/ipfire/red/active" ] && /usr/bin/ddns update-all
 
 # Logwatch
-01 0 * * *	/usr/local/bin/logwatch > /var/log/logwatch/`date -I -d yesterday`; \
+05 0 * * *	/usr/local/bin/logwatch > /var/log/logwatch/`date -I -d yesterday`; \
 		LOGWATCH_KEEP=$(sed -ne 's/^LOGWATCH_KEEP=\([0-9]\+\)$/\1/p' /var/ipfire/logging/settings); \
 		find /var/log/logwatch/ -ctime +${LOGWATCH_KEEP=56} -exec rm -f '{}' ';'
 
@@ -59,11 +59,20 @@ HOME=/
 00 3 * 3 0          /usr/local/bin/timezone-transition /usr/local/bin/firewallctrl
 00 2 * 10-11 0      /usr/local/bin/timezone-transition /usr/local/bin/firewallctrl
 
-# Update GeoIP database once a month.
-%monthly,random * * * [ -f "/var/ipfire/red/active" ] && /usr/local/bin/xt_geoip_update >/dev/null 2>&1
+# Update location database
+%hourly,random * [ -f "/var/ipfire/red/active" ] && /usr/local/bin/update-location-database >/dev/null 2>&1
 
 # Retry sending spooled mails regularly
 %hourly * /usr/sbin/dma -q
 
+# Cleanup captive clients
+%hourly * /usr/bin/captive-cleanup
+
+# Reload captive firewall rules
+%nightly * 23-1   /usr/local/bin/captivectrl >/dev/null
+
 # Cleanup the mail spool directory
 %weekly * * /usr/sbin/dma-cleanup-spool
+
+# Update DNS trust anchor
+%daily,random * * @runas(nobody) /usr/sbin/unbound-anchor -a /var/lib/unbound/root.key -c /etc/unbound/icannbundle.pem

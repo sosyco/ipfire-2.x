@@ -1,7 +1,7 @@
 ###############################################################################
 #                                                                             #
 # IPFire.org - A linux based firewall                                         #
-# Copyright (C) 2007-2011  IPFire Team  <info@ipfire.org>                     #
+# Copyright (C) 2007-2018  IPFire Team  <info@ipfire.org>                     #
 #                                                                             #
 # This program is free software: you can redistribute it and/or modify        #
 # it under the terms of the GNU General Public License as published by        #
@@ -27,7 +27,12 @@ include Config
 VER        = ipfire
 
 THISAPP    = cleanup-toolchain
-TARGET     = $(DIR_INFO)/$(THISAPP)-$(PASS)-tools
+
+ifeq "$(TOOLCHAIN)" "1"
+	TARGET = $(DIR_INFO)/$(THISAPP)-tools
+else
+	TARGET = $(DIR_INFO)/$(THISAPP)
+endif
 
 GCC_VER    = 4.1.2
 
@@ -51,40 +56,33 @@ md5 :
 
 $(TARGET) : $(patsubst %,$(DIR_DL)/%,$(objects))
 	@$(PREBUILD)
-ifeq "$(PASS)" "1"
-	SPECS=$$(dirname $$(/tools/bin/$(CROSSTARGET)-gcc -print-libgcc-file-name))/specs; \
-	/tools/bin/$(CROSSTARGET)-gcc -dumpspecs | sed \
-		-e 's@/lib\(64\)\?/ld@/tools&@g' \
-		-e "/^\*cpp:$$/{n;s,$$, -isystem /tools/include,}" > $$SPECS
-endif
 
-ifeq "$(PASS)" "2"
+ifeq "$(TOOLCHAIN)" "1"
 	# Remove the first cross compiler which is not needed anymore.
-	find /tools/ -name "$(CROSSTARGET)*" | xargs rm -rfv
+	find $(TOOLS_DIR)/ -name "$(CROSSTARGET)*" | xargs rm -rfv
 
 	# Remove man and info pages.
-	rm -rfv /tools/{,share}/{info,man}
-
-	# Strip all binaries.
-	STRIP="/usr/bin/strip" $(DIR_SRC)/src/stripper /tools/
+	rm -rfv $(TOOLS_DIR)/{,share}/{info,man}
 
 	# Fix ownership of the toolchain.
-	chown -R root:root /tools/
+	chown -R root:root $(TOOLS_DIR)/
 
 	# Update/create linker cache.
-	/tools/sbin/ldconfig
-endif
+	$(TOOLS_DIR)/sbin/ldconfig
 
-ifeq "$(PASS)" "3"
-	mv -v /tools/bin/{ld,ld-old}
-	mv -v /tools/$(BUILDTARGET)/bin/{ld,ld-old}
-	mv -v /tools/bin/{ld-new,ld}
-	ln -sv /tools/bin/ld /tools/$(BUILDTARGET)/bin/ld
+	# Set a marker when the toolchain was successfully built
+	touch $(TOOLS_DIR)/.toolchain-successful
+else
+	mv -v $(TOOLS_DIR)/bin/{ld,ld-old}
+	mv -v $(TOOLS_DIR)/$(BUILDTARGET)/bin/{ld,ld-old}
+	mv -v $(TOOLS_DIR)/bin/{ld-new,ld}
+	ln -sv $(TOOLS_DIR)/bin/ld $(TOOLS_DIR)/$(BUILDTARGET)/bin/ld
 
 	gcc -dumpspecs | sed \
-		-e 's@/tools@@g' \
+		-e 's@$(TOOLS_DIR)@@g' \
 		-e '/\*startfile_prefix_spec:/{n;s@.*@/usr/lib/ @}' \
 		-e '/\*cpp:/{n;s@$$@ -isystem /usr/include@}' > \
 		$$(dirname $$(gcc -print-libgcc-file-name))/specs
 endif
+
 	@$(POSTBUILD)

@@ -27,18 +27,19 @@
 #define ERR_ANY 1
 #define ERR_SETTINGS 2    /* error in settings file */
 #define ERR_ETC 3         /* error with /etc permissions */
-#define ERR_CONFIG 4      /* error updated sshd_config */
+#define ERR_CONFIG 4      /* error updating syslogd config */
 #define ERR_SYSLOG 5      /* error restarting syslogd */
 
 int main(void)
 {
-   char buffer[STRING_SIZE], command[STRING_SIZE], hostname[STRING_SIZE];
+   char buffer[STRING_SIZE], command[STRING_SIZE], hostname[STRING_SIZE], protocol[STRING_SIZE];
    char varmessages[STRING_SIZE], asynclog[STRING_SIZE];
    int config_fd,rc,fd,pid;
    struct stat st;
    struct keyvalue *kv = NULL;
    memset(buffer, 0, STRING_SIZE);
    memset(hostname, 0, STRING_SIZE);
+   memset(protocol, 0, STRING_SIZE);
    memset(varmessages, 0, STRING_SIZE);
    memset(asynclog, 0, STRING_SIZE);
 
@@ -67,17 +68,10 @@ int main(void)
       exit(ERR_SETTINGS);
    }
 
-   if (!findkey(kv, "ENABLE_ASYNCLOG", asynclog))
+   if (!findkey(kv, "REMOTELOG_PROTOCOL", protocol))
    {
-      fprintf(stderr, "Cannot read ENABLE_ASYNCLOG\n");
-      exit(ERR_SETTINGS);
-   }
-
-   
-   if (!findkey(kv, "VARMESSAGES", varmessages))
-   {
-      fprintf(stderr, "Cannot read VARMESSAGES\n");
-      exit(ERR_SETTINGS);
+      /* fall back to UDP if no protocol was given */
+      strcpy(protocol, "udp");
    }
 
    if (strspn(hostname, VALID_FQDN) != strlen(hostname))
@@ -119,9 +113,24 @@ int main(void)
    }
 
    if (!strcmp(buffer,"on"))
-      snprintf(buffer, STRING_SIZE - 1, "/bin/sed -e 's/^#\\?\\(\\*\\.\\*[[:blank:]]\\+@\\).\\+$/\\1%s/' /etc/syslog.conf >&%d", hostname, config_fd );
+   {
+      /* check which transmission protocol was given */
+      if (strcmp(protocol, "tcp") == 0)
+      {
+         /* write line for TCP */
+         snprintf(buffer, STRING_SIZE - 1, "/bin/sed -e 's/^#\\?\\(\\*\\.\\*[[:blank:]]\\+\\)@@\\?.\\+$/\\1@@%s/' /etc/syslog.conf >&%d", hostname, config_fd);
+      }
+      else
+      {
+         /* write line for UDP */
+         snprintf(buffer, STRING_SIZE - 1, "/bin/sed -e 's/^#\\?\\(\\*\\.\\*[[:blank:]]\\+\\)@@\\?.\\+$/\\1@%s/' /etc/syslog.conf >&%d", hostname, config_fd);
+      }
+   }
    else
-      snprintf(buffer, STRING_SIZE - 1, "/bin/sed -e 's/^#\\?\\(\\*\\.\\*[[:blank:]]\\+@.\\+\\)$/#\\1/' /etc/syslog.conf >&%d", config_fd );
+   {
+      /* if remote syslog has been disabled */
+      snprintf(buffer, STRING_SIZE - 1, "/bin/sed -e 's/^#\\?\\(\\*\\.\\*[[:blank:]]\\+@@\\?.\\+\\)$/#\\1/' /etc/syslog.conf >&%d", config_fd );
+   }
 
      /* if the return code isn't 0 failsafe */
    if ((rc = unpriv_system(buffer,99,99)) != 0)
@@ -133,16 +142,6 @@ int main(void)
    }
    close(config_fd);
    
-   /* Replace the logging option*/
-     safe_system("grep -v '/var/log/messages' < /etc/syslog.conf.new > /etc/syslog.conf.tmp && mv /etc/syslog.conf.tmp /etc/syslog.conf.new");
-   
-   if (!strcmp(asynclog,"on"))
-     snprintf(command, STRING_SIZE - 1, "printf '%s     -/var/log/messages' >> /etc/syslog.conf.new", varmessages );
-   else
-     snprintf(command, STRING_SIZE - 1, "printf '%s     /var/log/messages' >> /etc/syslog.conf.new", varmessages );
-
-     safe_system(command);
-
    if (rename("/etc/syslog.conf.new", "/etc/syslog.conf") == -1)
    {
       perror("Unable to replace old config file");

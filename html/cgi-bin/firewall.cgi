@@ -23,6 +23,7 @@ use strict;
 use Sort::Naturally;
 use utf8;
 use feature 'unicode_strings';
+use experimental 'smartmatch';
 
 no warnings 'uninitialized';
 
@@ -34,7 +35,7 @@ require '/var/ipfire/general-functions.pl';
 require '/var/ipfire/network-functions.pl';
 require "${General::swroot}/lang.pl";
 require "${General::swroot}/header.pl";
-require "${General::swroot}/geoip-functions.pl";
+require "${General::swroot}/location-functions.pl";
 require "/usr/lib/firewall/firewall-lib.pl";
 
 unless (-d "${General::swroot}/firewall")			{ system("mkdir ${General::swroot}/firewall"); }
@@ -49,7 +50,7 @@ my %defaultNetworks=();
 my %netsettings=();
 my %customhost=();
 my %customgrp=();
-my %customgeoipgrp=();
+my %customlocationgrp=();
 my %customnetworks=();
 my %customservice=();
 my %customservicegrp=();
@@ -77,7 +78,7 @@ my $color;
 my $confignet		= "${General::swroot}/fwhosts/customnetworks";
 my $confighost		= "${General::swroot}/fwhosts/customhosts";
 my $configgrp 		= "${General::swroot}/fwhosts/customgroups";
-my $configgeoipgrp	= "${General::swroot}/fwhosts/customgeoipgrp";
+my $configlocationgrp	= "${General::swroot}/fwhosts/customlocationgrp";
 my $configsrv 		= "${General::swroot}/fwhosts/customservices";
 my $configsrvgrp	= "${General::swroot}/fwhosts/customservicegrp";
 my $configccdnet 	= "${General::swroot}/ovpn/ccd.conf";
@@ -240,10 +241,6 @@ if ($fwdfwsettings{'ACTION'} eq 'saverule')
 		if ( &General::IpInSubnet($sip,$netsettings{'ORANGE_ADDRESS'},$netsettings{'ORANGE_NETMASK'})){
 			$checkorange='on';
 		}
-	}
-	#check useless rules
-	if(	($fwdfwsettings{$fwdfwsettings{'grp1'}} eq 'ORANGE' || $checkorange eq 'on') && $fwdfwsettings{'grp2'} eq 'ipfire'){
-		$errormessage.=$Lang::tr{'fwdfw useless rule'}."<br>";
 	}
 	#check if we try to break rules
 	if(	$fwdfwsettings{'grp1'} eq 'ipfire_src' && $fwdfwsettings{'grp2'} eq 'ipfire'){
@@ -539,16 +536,6 @@ sub checktarget
 	#check DNAT settings (has to be single Host and single Port or portrange)
 	if ($fwdfwsettings{'USE_NAT'} eq 'ON' && $fwdfwsettings{'nat'} eq 'dnat'){
 		if($fwdfwsettings{'grp2'} eq 'tgt_addr' || $fwdfwsettings{'grp2'} eq 'cust_host_tgt' || $fwdfwsettings{'grp2'} eq 'ovpn_host_tgt'){
-			#check if manual ip is a single Host (if set)
-			if ($fwdfwsettings{'grp2'} eq 'tgt_addr'){
-				my @tmp= split (/\./,$fwdfwsettings{$fwdfwsettings{'grp2'}});
-				my @tmp1= split ("/",$tmp[3]);
-				if (($tmp1[0] eq "0") || ($tmp1[0] eq "255"))
-				{
-					$errormessage=$Lang::tr{'fwdfw dnat error'}."<br>";
-					return $errormessage;
-				}
-			}
 			#check if Port is a single Port or portrange
 			if ($fwdfwsettings{'nat'} eq 'dnat' &&  $fwdfwsettings{'grp3'} eq 'TGT_PORT'){
 				if(($fwdfwsettings{'PROT'} ne 'TCP'|| $fwdfwsettings{'PROT'} ne 'UDP') && $fwdfwsettings{'TGT_PORT'} eq ''){
@@ -1084,41 +1071,41 @@ END
 		}
 		print"</select></td>";
 	}
-	# geoip locations / groups.
-	my @geoip_locations = &fwlib::get_geoip_locations();
+	# Locations / groups.
+	my @locations = &fwlib::get_locations();
 
 	print "<tr>\n";
-	print "<td valign='top'><input type='radio' name='$grp' id='cust_geoip_$srctgt' value='cust_geoip_$srctgt' $checked{$grp}{'cust_geoip_'.$srctgt}></td>\n";
-	print "<td>$Lang::tr{'geoip'}</td>\n";
-	print "<td align='right'><select name='cust_geoip_$srctgt' style='width:200px;'>\n";
+	print "<td valign='top'><input type='radio' name='$grp' id='cust_location_$srctgt' value='cust_location_$srctgt' $checked{$grp}{'cust_location_'.$srctgt}></td>\n";
+	print "<td>$Lang::tr{'location'}</td>\n";
+	print "<td align='right'><select name='cust_location_$srctgt' style='width:200px;'>\n";
 
-	# Add GeoIP groups to dropdown.
-	if (!-z $configgeoipgrp) {
-		print "<optgroup label='$Lang::tr{'fwhost cust geoipgroup'}'>\n";
-		foreach my $key (sort { ncmp($customgeoipgrp{$a}[0],$customgeoipgrp{$b}[0]) } keys %customgeoipgrp) {
+	# Add Location groups to dropdown.
+	if (!-z $configlocationgrp) {
+		print "<optgroup label='$Lang::tr{'fwhost cust locationgroup'}'>\n";
+		foreach my $key (sort { ncmp($customlocationgrp{$a}[0],$customlocationgrp{$b}[0]) } keys %customlocationgrp) {
 			my $selected;
 
 			# Generate stored value for select detection.
-			my $stored = join(':', "group",$customgeoipgrp{$key}[0]);
+			my $stored = join(':', "group",$customlocationgrp{$key}[0]);
 
 			# Only show a group once and group with elements.
-			if($helper ne $customgeoipgrp{$key}[0] && $customgeoipgrp{$key}[2] ne 'none') {
+			if($helper ne $customlocationgrp{$key}[0] && $customlocationgrp{$key}[2] ne 'none') {
 				# Mark current entry as selected.
 				if ($fwdfwsettings{$fwdfwsettings{$grp}} eq $stored) {
 					$selected = "selected='selected'";
 				}
-                                print"<option $selected value='group:$customgeoipgrp{$key}[0]'>$customgeoipgrp{$key}[0]</option>\n";
+                                print"<option $selected value='group:$customlocationgrp{$key}[0]'>$customlocationgrp{$key}[0]</option>\n";
                         }
-                        $helper=$customgeoipgrp{$key}[0];
+                        $helper=$customlocationgrp{$key}[0];
                 }
 		print "</optgroup>\n";
 	}
 
 	# Add locations.
-	print "<optgroup label='$Lang::tr{'fwhost cust geoiplocation'}'>\n";
-	foreach my $location (@geoip_locations) {
+	print "<optgroup label='$Lang::tr{'fwhost cust location'}'>\n";
+	foreach my $location (@locations) {
 		# Get country name.
-		my $country_name = &GeoIP::get_full_country_name($location);
+		my $country_name = &Location::Functions::get_full_country_name($location);
 
 		# Mark current entry as selected.
 		my $selected;
@@ -1129,7 +1116,7 @@ END
 	}
 	print "</optgroup>\n";
 
-	# Close GeoIP dropdown.
+	# Close Locations dropdown.
 	print "</select></td>\n";
 
 	#End left table. start right table (vpn)
@@ -1171,11 +1158,31 @@ END
 	#IPsec netze
 	foreach my $key (sort { ncmp($ipsecconf{$a}[1],$ipsecconf{$b}[1]) } keys %ipsecconf) {
 		if ($ipsecconf{$key}[3] eq 'net' || ($optionsfw{'SHOWDROPDOWN'} eq 'on' && $ipsecconf{$key}[3] ne 'host')){
-			print"<tr><td valign='top'><input type='radio' name='$grp' value='ipsec_net_$srctgt' $checked{$grp}{'ipsec_net_'.$srctgt}></td><td >$Lang::tr{'fwhost ipsec net'}</td><td align='right'><select name='ipsec_net_$srctgt' style='width:200px;'>" if ($show eq '');
+			print"<tr><td valign='top'><input type='radio' name='$grp' id='ipsec_net_$srctgt' value='ipsec_net_$srctgt' $checked{$grp}{'ipsec_net_'.$srctgt}></td><td >$Lang::tr{'fwhost ipsec net'}</td><td align='right'><select name='ipsec_net_$srctgt' style='width:200px;'>" if ($show eq '');
 			$show='1';
+
+			#Check if we have more than one REMOTE subnet in config
+			my @arr1 = split /\|/, $ipsecconf{$key}[11];
+			my $cnt1 += @arr1;
+
 			print "<option ";
-			print "selected='selected'" if ($fwdfwsettings{$fwdfwsettings{$grp}} eq $ipsecconf{$key}[1]);
-			print ">$ipsecconf{$key}[1]</option>";
+			print "value=$ipsecconf{$key}[1]";
+			print " selected " if ($fwdfwsettings{$fwdfwsettings{$grp}} eq "$ipsecconf{$key}[1]");
+			print ">$ipsecconf{$key}[1] ";
+			print "($Lang::tr{'fwdfw all subnets'})" if $cnt1 > 1; #If this Conenction has more than one subnet, print one option for all subnets
+			print "</option>";
+
+			if ($cnt1 > 1){
+				foreach my $val (@arr1){
+					#normalize subnet to cidr notation
+					my ($val1,$val2) = split /\//, $val;
+					my $val3 = &General::iporsubtocidr($val2);
+					print "<option ";
+					print "value='$ipsecconf{$key}[1]|$val1/$val3'";
+					print "selected " if ($fwdfwsettings{$fwdfwsettings{$grp}} eq "$ipsecconf{$key}[1]|$val1/$val3");
+					print ">$ipsecconf{$key}[1] ($val1/$val3)</option>";
+				}
+			}
 		}
 	}
 	if($optionsfw{'SHOWDROPDOWN'} eq 'on' && $show eq ''){
@@ -1469,7 +1476,7 @@ sub newrule
 	&General::readhasharray("$confighost", \%customhost);
 	&General::readhasharray("$configccdhost", \%ccdhost);
 	&General::readhasharray("$configgrp", \%customgrp);
-	&General::readhasharray("$configgeoipgrp", \%customgeoipgrp);
+	&General::readhasharray("$configlocationgrp", \%customlocationgrp);
 	&General::readhasharray("$configipsec", \%ipsecconf);
 	&General::get_aliases(\%aliases);
 	my %checked=();
@@ -1712,6 +1719,7 @@ END
 						<td width='25%' align='right'><span class='snat'>$Lang::tr{'snat new source ip address'}:</span></td>
 						<td width='30%'>
 							<select name='snat' class='snat' style='width: 100%;'>
+								<option value='RED' $selected{'snat'}{'RED'}>$Lang::tr{'red1'} ($redip)</option>
 END
 
 		foreach my $alias (sort keys %aliases) {
@@ -2585,6 +2593,11 @@ END
 			#SOURCE
 			my $ipfireiface;
 			&getcolor($$hash{$key}[3],$$hash{$key}[4],\%customhost);
+			# Check SRC Host and replace "|" with space
+			if ($$hash{$key}[4] =~ /\|/){
+				$$hash{$key}[4] =~ s/\|/ (/g;
+				$$hash{$key}[4] = $$hash{$key}[4].")";
+			}
 			print"<td align='center' width='30%' $tdcolor>";
 			if ($$hash{$key}[3] eq 'ipfire_src'){
 				$ipfireiface=$Lang::tr{'fwdfw iface'};
@@ -2598,12 +2611,12 @@ END
 				}else{
 					print $$hash{$key}[4];
 				}
-			}elsif ($$hash{$key}[3] eq 'cust_geoip_src') {
+			}elsif ($$hash{$key}[3] eq 'cust_location_src') {
 				my ($split1,$split2) = split(":", $$hash{$key}[4]);
 				if ($split2) {
 					print "$split2\n";
 				}else{
-					print "$Lang::tr{'geoip'}: $$hash{$key}[4]\n";
+					print "$Lang::tr{'location'}: $$hash{$key}[4]\n";
 				}
 			}elsif ($$hash{$key}[4] eq 'RED1'){
 				print "$ipfireiface $Lang::tr{'fwdfw red'}";
@@ -2650,6 +2663,11 @@ END
 			print<<END;
 					<td align='center' $tdcolor>
 END
+			# Check TGT Host and replace "|" with space
+			if ($$hash{$key}[6] =~ /\|/){
+				$$hash{$key}[6] =~ s/\|/ (/g;
+				$$hash{$key}[6] = $$hash{$key}[6].")";
+			}
 			#Is this a DNAT rule?
 			my $natstring;
 			if ($$hash{$key}[31] eq 'dnat' && $$hash{$key}[28] eq 'ON'){
@@ -2681,12 +2699,12 @@ END
 				}else{
 					print $$hash{$key}[6];
 				}
-			}elsif ($$hash{$key}[5] eq 'cust_geoip_tgt') {
+			}elsif ($$hash{$key}[5] eq 'cust_location_tgt') {
 				my ($split1,$split2) = split(":", $$hash{$key}[6]);
 				if ($split2) {
 					print "$split2\n";
 				}else{
-					print "$Lang::tr{'geoip'}: $$hash{$key}[6]\n";
+					print "$Lang::tr{'location'}: $$hash{$key}[6]\n";
 				}
 			}elsif ($$hash{$key}[5] eq 'tgt_addr'){
 				my ($split1,$split2) = split("/",$$hash{$key}[6]);

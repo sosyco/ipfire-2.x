@@ -1,7 +1,7 @@
 ###############################################################################
 #                                                                             #
 # IPFire.org - A linux based firewall                                         #
-# Copyright (C) 2007-2013  IPFire Team <info@ipfire.org>                      #
+# Copyright (C) 2007-2018  IPFire Team  <info@ipfire.org>                     #
 #                                                                             #
 # This program is free software: you can redistribute it and/or modify        #
 # it under the terms of the GNU General Public License as published by        #
@@ -38,7 +38,7 @@ DIR_APP    = $(DIR_SRC)/$(THISAPP)
 PROG       = alsa
 PAK_VER    = 12
 
-DEPS       = ""
+DEPS       =
 
 TARGET     = $(DIR_INFO)/$(THISAPP)
 
@@ -99,5 +99,7 @@ $(TARGET) : $(patsubst %,$(DIR_DL)/%,$(objects))
 	cd $(DIR_SRC)/alsa-firmware-$(FVER) && ./configure
 	cd $(DIR_SRC)/alsa-firmware-$(FVER) && make $(MAKETUNING) $(EXTRA_MAKE)
 	cd $(DIR_SRC)/alsa-firmware-$(FVER) && make install
+	# install initscript
+	$(call INSTALL_INITSCRIPT,alsa)
 	@rm -rf $(DIR_SRC)/alsa*
 	@$(POSTBUILD)

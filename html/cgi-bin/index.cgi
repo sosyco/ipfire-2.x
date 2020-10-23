@@ -200,30 +200,46 @@ END
 END
 	}
 
-	my @dns_servers = ();
-	foreach my $f ("${General::swroot}/red/dns1", "${General::swroot}/red/dns2") {
-		open(DNS, "<$f");
-		my $dns_server = <DNS>;
-		close(DNS);
+	if (&General::RedIsWireless()) {
+		my $iface = $netsettings{"RED_DEV"} || "red0";
 
-		chomp($dns_server);
-		if ($dns_server) {
-			push(@dns_servers, $dns_server);
-		}
+		my $essid        = &Network::wifi_get_essid($iface);
+		my $frequency    = &Network::wifi_get_frequency($iface);
+		my $access_point = &Network::wifi_get_access_point($iface);
+		my $bit_rate     = &Network::wifi_get_bit_rate($iface);
+		my $link_quality = &Network::wifi_get_link_quality($iface);
+		my $signal_level = &Network::wifi_get_signal_level($iface);
+
+		print <<END;
+			<tr>
+				<td>
+					<strong>$Lang::tr{'wireless network'}:</strong>
+				</td>
+				<td style="text-align: center">
+					$essid
+				</td>
+				<td style="text-align: center">
+					$access_point @ $frequency
+				</td>
+			</tr>
+			<tr>
+				<td>
+					<strong>
+						$Lang::tr{'uplink bit rate'}:
+					</strong>
+				</td>
+				<td style="text-align: center">
+					$bit_rate
+				</td>
+				<td style="text-align: center">
+					$link_quality% @ $signal_level
+				</td>
+			</tr>
+END
 	}
-	my $dns_servers_str = join(", ", @dns_servers);
 
 	print <<END;
-		<tr>
-			<td>
-				<b>$Lang::tr{'dns servers'}:</b>
-			</td>
-			<td style='text-align:center;'>
-				$dns_servers_str
-			</td>
-			<td></td>
-		</tr>
-	</table>
+		</table>
 END
 
 #Dial profiles
@@ -332,13 +348,12 @@ END
 	}
 #check if IPSEC is running
 if ( $vpnsettings{'ENABLED'} eq 'on' || $vpnsettings{'ENABLED_BLUE'} eq 'on' ) {
-	my $ipsecip = $vpnsettings{'VPN_IP'};
 print<<END;
 		<tr>
 			<td style='width:25%; text-align:center; background-color:$Header::colourvpn;'>
 				<a href='/cgi-bin/vpnmain.cgi' style='color:white'><b>$Lang::tr{'ipsec'}</b></a>
 			</td>
-			<td style='width:30%; text-align:center;'>$ipsecip</td>
+			<td style='width:30%; text-align:center;'></td>
 			<td style='width:45%; text-align:center; color:$Header::colourgreen;'>Online</td>
 		</tr>
 END
@@ -409,9 +424,16 @@ END
 		foreach my $key (sort { uc($vpnconfig{$a}[1]) cmp uc($vpnconfig{$b}[1]) } keys %vpnconfig) {
 			if ($vpnconfig{$key}[0] eq 'on' && $vpnconfig{$key}[3] ne 'host') {
 				$count++;
-				my ($vpnip,$vpnsub) = split("/",$vpnconfig{$key}[11]);
-				$vpnsub=&General::iporsubtocidr($vpnsub);
-				$vpnip="$vpnip/$vpnsub";
+
+				my @n = ();
+
+				my @networks = split(/\|/, $vpnconfig{$key}[11]);
+				foreach my $network (@networks) {
+					my ($vpnip, $vpnsub) = split("/", $network);
+					$vpnsub = &Network::convert_netmask2prefix($vpnsub) || $vpnsub;
+					push(@n, "$vpnip/$vpnsub");
+				}
+
 				if ($count % 2){
 					$col = $color{'color22'};
 				}else{
@@ -419,10 +441,14 @@ END
 				}
 				print "<tr>";
 				print "<td style='text-align:left; color:white; background-color:$Header::colourvpn;'>$vpnconfig{$key}[1]</td>";
-				print "<td style='text-align:center; background-color:$col'>$vpnip</td>";
+				print "<td style='text-align:center; background-color:$col'>" . join("<br>", @n) . "</td>";
 
 				my $activecolor = $Header::colourred;
 				my $activestatus = $Lang::tr{'capsclosed'};
+				if ($vpnconfig{$key}[33] eq "add") {
+					$activecolor = ${Header::colourorange};
+					$activestatus = $Lang::tr{'vpn wait'};
+				}
 				if ($vpnconfig{$key}[0] eq 'off') {
 					$activecolor = $Header::colourblue;
 					$activestatus = $Lang::tr{'capsclosed'};
@@ -431,6 +457,12 @@ END
 						if (($line =~ /\"$vpnconfig{$key}[1]\".*IPsec SA established/) || ($line =~/$vpnconfig{$key}[1]\{.*INSTALLED/ )){
 							$activecolor = $Header::colourgreen;
 							$activestatus = $Lang::tr{'capsopen'};
+						} elsif ($line =~ /$vpnconfig{$key}[1]\[.*CONNECTING/) {
+							$activecolor = $Header::colourorange;
+							$activestatus = $Lang::tr{'vpn connecting'};
+						} elsif ($line =~ /$vpnconfig{$key}[1]\{.*ROUTED/) {
+							$activecolor = $Header::colourorange;
+							$activestatus = $Lang::tr{'vpn on-demand'};
 						}
 					}
 				}
@@ -503,9 +535,20 @@ END
 &Header::closebox();
 }
 
+my $dnssec_status = &General::dnssec_status();
+if ($dnssec_status eq "off") {
+	$warnmessage .= "<li>$Lang::tr{'dnssec disabled warning'}</li>";
+}
+
 # Fireinfo
 if ( ! -e "/var/ipfire/main/send_profile") {
 	$warnmessage .= "<li><a style='color: white;' href='fireinfo.cgi'>$Lang::tr{'fireinfo please enable'}</a></li>";
+}
+
+# Legacy architecture
+my ($sysname, $nodename, $release, $version, $machine) = &POSIX::uname();
+if ($machine =~ m/^i.86$/) {
+	$warnmessage .= "<li>$Lang::tr{'legacy architecture warning'}</li>";
 }
 
 # Memory usage warning
@@ -554,13 +597,6 @@ foreach my $file (@files) {
 	if (`/bin/grep "SAVE ALL DATA" $file`) {
 		$warnmessage .= "<li>$Lang::tr{'smartwarn1'} /dev/$disk $Lang::tr{'smartwarn2'} !</li>";
 	}
-}
-
-# Reiser4 warning
-my @files = `mount | grep " reiser4 (" 2>/dev/null`;
-foreach my $disk (@files) {
-	chomp ($disk);
-	$warnmessage .= "<li>$disk - $Lang::tr{'deprecated fs warn'}</li>";
 }
 
 if ($warnmessage) {

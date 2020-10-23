@@ -1,6 +1,6 @@
 ###############################################################################
 # IPFire.org    - An Open Source Firewall Solution                            #
-# Copyright (C) - IPFire Development Team <info@ipfire.org>                   #
+# Copyright (C) 2007-2018  IPFire Team  <info@ipfire.org>                     #
 ###############################################################################
 
 ###############################################################################
@@ -19,7 +19,7 @@ TARGET     = $(DIR_INFO)/$(THISAPP)
 PROG       = sysbench
 PAK_VER    = 1
 
-DEPS       = ""
+DEPS       =
 
 ###############################################################################
 # Top-level Rules

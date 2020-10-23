@@ -1,0 +1,185 @@
+#!/bin/sh
+########################################################################
+# Begin $rc_base/init.d/leds
+#
+# Description : Script to setup leds at boot.
+#
+########################################################################
+
+. /etc/sysconfig/rc
+. ${rc_functions}
+
+if [ -e /etc/init.d/leds.user ]; then
+	/etc/init.d/leds.user $*
+	exit ${?}
+fi
+
+# Load ethernet settings
+eval $(/usr/local/bin/readhash /var/ipfire/ethernet/settings)
+
+case "${RED_TYPE}" in
+	PPPOE)
+		RED_DEV="ppp0"
+		;;
+esac
+
+# setup_netdev_trigger LED DEVICE MODE
+setup_netdev_trigger ()
+{
+	if [ -d "/sys/class/leds/$1" ]; then
+		modprobe -q ledtrig-netdev 2>&1 > /dev/null
+		echo "netdev" > /sys/class/leds/$1/trigger
+		echo "$2" >     /sys/class/leds/$1/device_name
+		echo "$3 $4" >  /sys/class/leds/$1/mode
+	fi
+}
+
+# setup_netdev_trigger LED
+setup_heartbeat_trigger ()
+{
+	if [ -d "/sys/class/leds/$1" ]; then
+		modprobe -q ledtrig-heartbeat 2>&1 > /dev/null
+		echo "heartbeat" >  /sys/class/leds/$1/trigger
+	fi
+}
+
+# disable_led_trigger LED
+disable_led_trigger ()
+{
+	if [ -d "/sys/class/leds/$1" ]; then
+		echo "none" >     /sys/class/leds/$1/trigger
+		echo "0" >        /sys/class/leds/$1/brightness
+	fi
+}
+
+# enable LED
+enable_led ()
+{
+	if [ -d "/sys/class/leds/$1" ]; then
+		echo "1" >        /sys/class/leds/$1/brightness
+	fi
+}
+
+#Handle new APU ACPI Leds introduced on APU2 with bios 4.10.0.0
+if [ -e /sys/class/leds/apu1:green:led1 ]; then
+	APULED="apu1:green:led";
+else if [ -e /sys/class/leds/apu2:green:led1 ]; then
+	APULED="apu2:green:led";
+else if [ -e /sys/class/leds/apu3:green:led1 ]; then
+	APULED="apu3:green:led";
+else if [ -e /sys/class/leds/apu4:green:led1 ]; then
+	APULED="apu4:green:led";
+else if [ -e /sys/class/leds/apu5:green:led1 ]; then
+	APULED="apu5:green:led";
+else
+	APULED="apu:";
+fi
+fi
+fi
+fi
+fi
+
+case "${1}" in
+	start)
+		# Alix LED start
+		setup_heartbeat_trigger alix:1
+		setup_netdev_trigger alix:2 ${RED_DEV} rx
+		setup_netdev_trigger alix:3 ${RED_DEV} tx
+
+		# Apu LED start
+		setup_heartbeat_trigger ${APULED}1
+		setup_netdev_trigger ${APULED}2 ${RED_DEV} rx
+		setup_netdev_trigger ${APULED}3 ${RED_DEV} tx
+
+		# Geos LED start
+		setup_heartbeat_trigger geos:1
+		setup_netdev_trigger geos:2 ${RED_DEV} rx
+		setup_netdev_trigger geos:3 ${RED_DEV} tx
+
+		# Dreamplug
+		setup_netdev_trigger dreamplug:green:wifi ${GREEN_DEV} tx rx
+		setup_netdev_trigger dreamplug:green:wifi_ap ${BLUE_DEV} tx rx
+		setup_netdev_trigger dreamplug:blue:bluetooth ${RED_DEV} tx rx
+
+		# Iomega iConnect start
+		setup_heartbeat_trigger iconnect:blue:otb
+		setup_netdev_trigger iconnect:blue:power ${RED_DEV} rx
+		setup_netdev_trigger iconnect:red:power ${RED_DEV} tx
+		setup_netdev_trigger iconnect:blue:usb_2 ${GREEN_DEV} tx rx
+		setup_netdev_trigger iconnect:blue:usb_3 ${BLUE_DEV} tx rx
+		setup_netdev_trigger iconnect:blue:usb_4 ${ORANGE_DEV} tx rx
+
+		# ICY Box LED start
+		setup_netdev_trigger nas6210:red:power ${RED_DEV} tx rx
+		setup_netdev_trigger nas6210:red:usb_copy ${GREEN_DEV} tx rx
+
+		# Mirabox start
+		setup_heartbeat_trigger mirabox:green:pwr
+		setup_netdev_trigger mirabox:green:stat ${GREEN_DEV} tx rx
+		setup_netdev_trigger mirabox:blue:stat ${BLUE_DEV} tx rx
+
+		# Nanopi R1 start
+		setup_heartbeat_trigger nanopi-r1:red:status
+		setup_netdev_trigger nanopi-r1:green:wan ${RED_DEV} tx rx
+		setup_netdev_trigger nanopi-r1:green:lan ${GREEN_DEV} tx rx
+
+		exit 0
+	;;
+
+	stop)
+		# Alix LED stop
+		disable_led_trigger alix:1
+		enable_led alix:1
+		disable_led_trigger alix:2
+		disable_led_trigger alix:3
+
+		# Apu LED stop
+		disable_led_trigger ${APULED}1
+		enable_led ${APULED}1
+		disable_led_trigger ${APULED}2
+		disable_led_trigger ${APULED}3
+
+		# Geos LED stop
+		disable_led_trigger geos:1
+		enable_led geos:1
+		disable_led_trigger geos:2
+		disable_led_trigger geos:3
+
+		# Dreamplug
+		disable_led_trigger dreamplug:green:wifi
+		disable_led_trigger dreamplug:green:wifi_ap
+		disable_led_trigger dreamplug:blue:bluetooth
+
+		# Iomega iConnect stop (heartbeat will leave on)
+		disable_led_trigger iconnect:blue:power
+		disable_led_trigger iconnect:red:power
+		disable_led_trigger iconnect:blue:usb_2
+		disable_led_trigger iconnect:blue:usb_3
+		disable_led_trigger iconnect:blue:usb_4
+
+		# ICY Box LED stop
+		disable_led_trigger nas6210:red:power
+		disable_led_trigger nas6210:red:usb_copy
+
+		# Mirabox stop
+		disable_led_trigger mirabox:green:pwr
+		enable_led mirabox:green:pwr
+		disable_led_trigger mirabox:green:stat
+		disable_led_trigger mirabox:blue:stat
+
+		# Nanopi R1 stop
+		disable_led_trigger nanopi-r1:red:status
+		enable_led nanopi-r1:red:status
+		disable_led_trigger nanopi-r1:green:wan
+		disable_led_trigger nanopi-r1:green:lan
+
+		exit 0
+	;;
+
+	*)
+		echo "Usage: ${0} {start|stop}"
+		exit 1
+	;;
+esac
+
+# End $rc_base/init.d/leds

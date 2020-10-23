@@ -1,7 +1,7 @@
 ###############################################################################
 #                                                                             #
 # IPFire.org - A linux based firewall                                         #
-# Copyright (C) 2007  Michael Tremer & Christian Schmidt                      #
+# Copyright (C) 2007-2018  IPFire Team  <info@ipfire.org>                     #
 #                                                                             #
 # This program is free software: you can redistribute it and/or modify        #
 # it under the terms of the GNU General Public License as published by        #
@@ -71,8 +71,9 @@ $(TARGET) : $(patsubst %,$(DIR_DL)/%,$(objects))
 	@rm -rf $(DIR_APP) && cd $(DIR_SRC) && tar zxf  $(DIR_DL)/$(DL_FILE)
 	cd $(DIR_APP) && patch -Np1 < $(DIR_SRC)/src/patches/oinkmaster-2.0-add_community_rules.patch
 	cd $(DIR_APP) && chown nobody:nobody oinkmaster.pl
-	cd $(DIR_APP) && cp -f oinkmaster.conf /var/ipfire/snort/
-	cd /var/ipfire/snort && patch -Np1 < $(DIR_SRC)/src/patches/oinkmaster-tmp.patch
+	cd $(DIR_APP) && install -m 0644 $(DIR_SRC)/config/oinkmaster/oinkmaster.conf \
+		/var/ipfire/suricata/
+	cd /var/ipfire/suricata && patch -Np1 < $(DIR_SRC)/src/patches/oinkmaster-tmp.patch
 	cd $(DIR_APP) && install -m 0755 oinkmaster.pl /usr/local/bin/
 	@rm -rf $(DIR_APP)
 	@$(POSTBUILD)

@@ -1,0 +1,31 @@
+#!/bin/bash
+
+# Exit if firstsetup was already done...
+if [ -e /var/ipfire/main/firstsetup_ok ]; then
+	exit 0;
+fi
+
+# disable consoles if tty are not present
+openvt -f -w -- /bin/sh -c echo > /dev/null 2>&1
+if [ ! "${?}" == "0" ]; then
+	# Disable console on tty2-6
+	sed -i -e "s|2:2345:respawn:|#2:2345:respawn:|g" /etc/inittab
+	sed -i -e "s|3:2345:respawn:|#3:2345:respawn:|g" /etc/inittab
+	sed -i -e "s|4:2345:respawn:|#4:2345:respawn:|g" etc/inittab
+	sed -i -e "s|5:2345:respawn:|#5:2345:respawn:|g" /etc/inittab
+	sed -i -e "s|6:2345:respawn:|#6:2345:respawn:|g" /etc/inittab
+fi
+
+# reload inittab
+/sbin/init q
+#
+/etc/init.d/sysklogd start
+export LANG=en_US.utf8
+/usr/sbin/setup /dev/tty2 INSTALL
+if [ "${?}" == "1" ]; then
+	echo Setup not finished. Rebooting ...
+	reboot -f
+fi
+
+/etc/init.d/sysklogd stop
+touch /var/ipfire/main/firstsetup_ok

@@ -1,7 +1,7 @@
 ###############################################################################
 #                                                                             #
 # IPFire.org - A linux based firewall                                         #
-# Copyright (C) 2007  Michael Tremer & Christian Schmidt                      #
+# Copyright (C) 2007-2020  IPFire Team  <info@ipfire.org>                     #
 #                                                                             #
 # This program is free software: you can redistribute it and/or modify        #
 # it under the terms of the GNU General Public License as published by        #
@@ -64,18 +64,18 @@ $(TARGET) :
 	# Symlink /var/run -> /run.
 	ln -svf ../run /var/run
 
-ifeq "$(MACHINE)" "x86_64"
+ifeq "$(IS_64BIT)" "1"
 	ln -svf lib /lib64
 	ln -svf lib /usr/lib64
 endif
 
 	# Symlinks
 	# for this reason, stage2 rebuild will broke the iso:perl, grubbatch
-	-ln -sv /tools/bin/{bash,cat,echo,pwd,stty} /bin
-	-ln -sv /tools/bin/perl /usr/bin
-	-ln -sv /tools/lib/libgcc_s.so{,.1} /usr/lib
-	-ln -sv /tools/lib/libstdc++.so{,.6} /usr/lib
-	sed 's/tools/usr/' /tools/lib/libstdc++.la > /usr/lib/libstdc++.la
+	-ln -sv $(TOOLS_DIR)/bin/{bash,cat,echo,pwd,stty} /bin
+	-ln -sv $(TOOLS_DIR)/bin/perl /usr/bin
+	-ln -sv $(TOOLS_DIR)/lib/libgcc_s.so{,.1} /usr/lib
+	-ln -sv $(TOOLS_DIR)/lib/libstdc++.so{,.6} /usr/lib
+	sed 's@$(TOOLS_DIR)@/usr@' $(TOOLS_DIR)/lib/libstdc++.la > /usr/lib/libstdc++.la
 	-ln -sv bash /bin/sh
 
 	# Config files
@@ -105,8 +105,10 @@ endif
 	done
 
 	# Move script to correct place.
+	mv -vf /usr/local/bin/openvpn-metrics /usr/sbin/
 	mv -vf /usr/local/bin/ovpn-ccd-convert /usr/sbin/
 	mv -vf /usr/local/bin/ovpn-collectd-convert /usr/sbin/
+	mv -vf /usr/local/bin/captive-cleanup /usr/bin/
 	
 	# Install firewall scripts.
 	mkdir -pv /usr/lib/firewall
@@ -114,8 +116,8 @@ endif
 		/usr/lib/firewall/rules.pl
 	install -m 644 $(DIR_SRC)/config/firewall/firewall-lib.pl \
 		/usr/lib/firewall/firewall-lib.pl
-	install -m 755 $(DIR_SRC)/config/firewall/ipsec-block \
-		/usr/lib/firewall/ipsec-block
+	install -m 755 $(DIR_SRC)/config/firewall/ipsec-policy \
+		/usr/lib/firewall/ipsec-policy
 
 	# Nobody user
 	-mkdir -p /home/nobody
@@ -126,7 +128,8 @@ endif
 	-mkdir -pv /var/{opt,cache,lib/{misc,locate},local}
 	-mkdir -pv /var/log/{counter,calamaris}
 	chown nobody.nobody /var/log/calamaris
-	touch /var/log/{btmp,lastlog,wtmp,net-traffic.log}
+	touch /var/log/{btmp,lastlog,wtmp}
+	chmod -v 600 /var/log/btmp
 	chgrp -v utmp /var/log/lastlog
 	chmod -v 664 /var/log/lastlog
 
@@ -143,8 +146,17 @@ endif
 	# System release
 	echo "$(SYSTEM_RELEASE)" > /etc/system-release
 
+	# OS release
+	: >/etc/os-release
+	echo "NAME=\"$(NAME)\"" >> /etc/os-release
+	echo "VERSION=\"$(VERSION)\"" >> /etc/os-release
+	echo "ID=$(SNAME)" >> /etc/os-release
+	echo "VERSION_ID=2" >> /etc/os-release
+	echo "PRETTY_NAME=\"$(SYSTEM_RELEASE)\"" >> /etc/os-release
+	echo "ANSI_COLOR=\"0:31\"" >> /etc/os-release
+
 	# Pakfire
 	-mkdir -pv /opt/pakfire/db/core
-	echo "$(PAKFIRE_CORE)" > /opt/pakfire/db/core/mine
+	echo "$(CORE)" > /opt/pakfire/db/core/mine
 
 	@$(POSTBUILD)

@@ -20,6 +20,8 @@
 ###############################################################################
 
 use strict;
+use experimental 'smartmatch';
+
 no warnings 'uninitialized';
 
 package fwlib;
@@ -27,7 +29,7 @@ package fwlib;
 my %customnetwork=();
 my %customhost=();
 my %customgrp=();
-my %customgeoipgrp=();
+my %customlocationgrp=();
 my %customservice=();
 my %customservicegrp=();
 my %ccdnet=();
@@ -39,11 +41,12 @@ my %ovpnsettings=();
 my %aliases=();
 
 require '/var/ipfire/general-functions.pl';
+require '/var/ipfire/location-functions.pl';
 
 my $confignet		= "${General::swroot}/fwhosts/customnetworks";
 my $confighost		= "${General::swroot}/fwhosts/customhosts";
 my $configgrp 		= "${General::swroot}/fwhosts/customgroups";
-my $configgeoipgrp 	= "${General::swroot}/fwhosts/customgeoipgrp";
+my $configlocationgrp 	= "${General::swroot}/fwhosts/customlocationgrp";
 my $configsrv 		= "${General::swroot}/fwhosts/customservices";
 my $configsrvgrp	= "${General::swroot}/fwhosts/customservicegrp";
 my $configccdnet 	= "${General::swroot}/ovpn/ccd.conf";
@@ -61,13 +64,16 @@ my $netsettings		= "${General::swroot}/ethernet/settings";
 &General::readhasharray("$confignet", \%customnetwork);
 &General::readhasharray("$confighost", \%customhost);
 &General::readhasharray("$configgrp", \%customgrp);
-&General::readhasharray("$configgeoipgrp", \%customgeoipgrp);
+&General::readhasharray("$configlocationgrp", \%customlocationgrp);
 &General::readhasharray("$configccdnet", \%ccdnet);
 &General::readhasharray("$configccdhost", \%ccdhost);
 &General::readhasharray("$configipsec", \%ipsecconf);
 &General::readhasharray("$configsrv", \%customservice);
 &General::readhasharray("$configsrvgrp", \%customservicegrp);
 &General::get_aliases(\%aliases);
+
+# Get all available locations.
+my @available_locations = &get_locations();
 
 sub get_srv_prot
 {
@@ -150,6 +156,9 @@ sub get_ipsec_net_ip
 	my $val=shift;
 	my $field=shift;
 	foreach my $key (sort {$a <=> $b} keys %ipsecconf){
+		#adapt $val to reflect real name without subnet (if rule with only one ipsec subnet is created)
+		my @tmpval = split (/\|/, $val);
+		$val = $tmpval[0];
 		if($ipsecconf{$key}[1] eq $val){
 			return $ipsecconf{$key}[$field];
 		}
@@ -162,6 +171,15 @@ sub get_ipsec_host_ip
 	foreach my $key (sort {$a <=> $b} keys %ipsecconf){
 		if($ipsecconf{$key}[1] eq $val){
 			return $ipsecconf{$key}[$field];
+		}
+	}
+}
+sub get_ipsec_id {
+	my $val = shift;
+
+	foreach my $key (keys %ipsecconf) {
+		if ($ipsecconf{$key}[1] eq $val) {
+			return $key;
 		}
 	}
 }
@@ -303,11 +321,11 @@ sub get_addresses
 				}
 			}
 		}
-	}elsif ($addr_type ~~ ["cust_geoip_src", "cust_geoip_tgt"] && $value =~ "group:") {
+	}elsif ($addr_type ~~ ["cust_location_src", "cust_location_tgt"] && $value =~ "group:") {
 		$value=substr($value,6);
-		foreach my $grp (sort {$a <=> $b} keys %customgeoipgrp) {
-			if ($customgeoipgrp{$grp}[0] eq $value) {
-				my @address = &get_address($addr_type, $customgeoipgrp{$grp}[2], $type);
+		foreach my $grp (sort {$a <=> $b} keys %customlocationgrp) {
+			if ($customlocationgrp{$grp}[0] eq $value) {
+				my @address = &get_address($addr_type, $customlocationgrp{$grp}[2], $type);
 
 				if (@address) {
 					push(@addresses, @address);
@@ -390,10 +408,22 @@ sub get_address
 
 	# IPsec networks.
 	} elsif ($key ~~ ["ipsec_net_src", "ipsec_net_tgt", "IpSec Network"]) {
-		my $network_address = &get_ipsec_net_ip($value, 11);
-		my @nets = split(/\|/, $network_address);
-		foreach my $net (@nets) {
-			push(@ret, [$net, ""]);
+		#Check if we have multiple subnets and only want one of them
+		if ( $value =~ /\|/ ){
+			my @parts = split(/\|/, $value);
+			push(@ret, [$parts[1], ""]);
+		}else{
+			my $interface_mode = &get_ipsec_net_ip($value, 36);
+			if ($interface_mode ~~ ["gre", "vti"]) {
+				my $id = &get_ipsec_id($value);
+				push(@ret, ["0.0.0.0/0", "${interface_mode}${id}"]);
+			} else {
+				my $network_address = &get_ipsec_net_ip($value, 11);
+				my @nets = split(/\|/, $network_address);
+				foreach my $net (@nets) {
+					push(@ret, [$net, ""]);
+				}
+			}
 		}
 
 	# The firewall's own IP addresses.
@@ -429,19 +459,25 @@ sub get_address
 			}
 		}
 
-	# Handle rule options with GeoIP as source.
-	} elsif ($key eq "cust_geoip_src") {
-		# Get external interface.
-		my $external_interface = &get_external_interface();
+	# Handle rule options with a location as source.
+	} elsif ($key eq "cust_location_src") {
+		# Check if the given location is available.
+		if(&location_is_available($value)) {
+			# Get external interface.
+			my $external_interface = &get_external_interface();
 
-		push(@ret, ["-m geoip --src-cc $value", "$external_interface"]);
+			push(@ret, ["-m geoip --src-cc $value", "$external_interface"]);
+		}
 
-	# Handle rule options with GeoIP as target.
-	} elsif ($key eq "cust_geoip_tgt") {
-		# Get external interface.
-		my $external_interface = &get_external_interface();
+	# Handle rule options with a location as target.
+	} elsif ($key eq "cust_location_tgt") {
+		# Check if the given location is available.
+		if(&location_is_available($value)) {
+			# Get external interface.
+			my $external_interface = &get_external_interface();
 
-		push(@ret, ["-m geoip --dst-cc $value", "$external_interface"]);
+			push(@ret, ["-m geoip --dst-cc $value", "$external_interface"]);
+		}
 
 	# If nothing was selected, we assume "any".
 	} else {
@@ -581,37 +617,27 @@ sub get_internal_firewall_ip_address
 	return 0;
 }
 
-sub get_geoip_locations() {
-	# Path to the directory which contains the binary geoip
-	# databases.
-	my $directory="/usr/share/xt_geoip/LE";
+sub get_locations() {
+	return &Location::Functions::get_locations();
+}
 
-	# Array to store the final country list.
-	my @country_codes = ();
+# Function to check if a database of a given location is
+# available.
+sub location_is_available($) {
+	my ($requested_location) = @_;
 
-	# Open location and do a directory listing.
-	opendir(DIR, "$directory");
-	my @locations = readdir(DIR);
-	closedir(DIR);
-
-	# Loop through the directory listing, and cut of the file extensions.
-	foreach my $location (sort @locations) {
-		# skip . and ..
-		next if($location =~ /^\.$/);
-		next if($location =~ /^\.\.$/);
-
-		# Remove whitespaces.
-		chomp($location);
-
-		# Cut-off file extension.
-		my ($country_code, $extension) = split(/\./, $location);
-
-		# Add country code to array.
-		push(@country_codes, $country_code);
+	# Loop through the global array of available locations.
+	foreach my $location (@available_locations) {
+		# Check if the current processed location is the searched one.
+		if($location eq $requested_location) {
+			# If it is part of the array, return "1" - True.
+			return 1;
+		}
 	}
 
-	# Return final array.
-	return @country_codes;
+	# If we got here, the given location is not part of the array of available
+	# zones. Return nothing.
+	return;
 }
 
 return 1;

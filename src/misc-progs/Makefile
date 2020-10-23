@@ -24,14 +24,15 @@ LIBS    = -lsmooth -lnewt
 
 PROGS = iowrap
 SUID_PROGS = squidctrl sshctrl ipfirereboot \
-	ipsecctrl timectrl dhcpctrl snortctrl \
+	ipsecctrl timectrl dhcpctrl suricatactrl \
 	applejuicectrl rebuildhosts backupctrl collectdctrl \
-	logwatch openvpnctrl firewallctrl \
+	logwatch wioscan wiohelper openvpnctrl firewallctrl \
 	wirelessctrl getipstat qosctrl launch-ether-wake \
 	redctrl syslogdctrl extrahdctrl sambactrl upnpctrl \
 	smartctrl clamavctrl addonctrl pakfire mpfirectrl wlanapctrl \
 	setaliases urlfilterctrl updxlratorctrl fireinfoctrl rebuildroutes \
-	getconntracktable wirelessclient dnsmasqctrl torctrl ddnsctrl
+	getconntracktable wirelessclient torctrl ddnsctrl unboundctrl \
+	captivectrl
 SUID_UPDX = updxsetperms
 
 OBJS = $(patsubst %,%.o,$(PROGS) $(SUID_PROGS))

@@ -1,7 +1,7 @@
 ###############################################################################
 #                                                                             #
 # IPFire.org - A linux based firewall                                         #
-# Copyright (C) 2007-2015  IPFire Team  <info@ipfire.org>                     #
+# Copyright (C) 2007-2020  IPFire Team  <info@ipfire.org>                     #
 #                                                                             #
 # This program is free software: you can redistribute it and/or modify        #
 # it under the terms of the GNU General Public License as published by        #
@@ -24,59 +24,68 @@
 
 include Config
 
-VER        = 2.22
+VER        = 2.35.1
 
 THISAPP    = binutils-$(VER)
-DL_FILE    = $(THISAPP).tar.bz2
+DL_FILE    = $(THISAPP).tar.xz
 DL_FROM    = $(URL_IPFIRE)
 DIR_APP    = $(DIR_SRC)/$(THISAPP)
 
-# Normal build or /tools build.
+# Normal build or $(TOOLS_DIR) build.
 #
 ifeq "$(ROOT)" ""
   TARGET = $(DIR_INFO)/$(THISAPP)
   EXTRA_CONFIG = \
 	--prefix=/usr \
 	--enable-shared \
-	--disable-nls
+	--with-system-zlib \
+	--enable-plugins \
+	--enable-ld=default \
+	--disable-gold
   EXTRA_MAKE = tooldir=/usr
   EXTRA_INSTALL = tooldir=/usr
 else
 ifeq "$(PASS)" "1"
   CFLAGS := $(patsubst -march=%,,$(CFLAGS))
+  CFLAGS := $(patsubst -mfpu=%,,$(CFLAGS))
   CFLAGS := $(patsubst -mfloat-abi=%,,$(CFLAGS))
+  CFLAGS := $(patsubst -mindirect-branch=%,,$(CFLAGS))
+  CFLAGS := $(patsubst -mfunction-return=%,,$(CFLAGS))
+  CFLAGS := $(patsubst -fstack-clash-protection,,$(CFLAGS))
+  CFLAGS := $(patsubst -fcf-protection,,$(CFLAGS))
+
   TARGET = $(DIR_INFO)/$(THISAPP)-tools1
   EXTRA_CONFIG = \
 	--target=$(CROSSTARGET) \
-	--prefix=/tools \
-	--disable-nls \
-	--disable-werror
+	--prefix=$(TOOLS_DIR) \
+	--with-sysroot=$(ROOT) \
+	--with-lib-path=$(TOOLS_DIR)/lib
   EXTRA_MAKE =
   EXTRA_INSTALL = 
 else
   TARGET = $(DIR_INFO)/$(THISAPP)-tools2
   EXTRA_ENV = \
-	CC="$(CROSSTARGET)-gcc -B/tools/lib/" \
+	CC="$(CROSSTARGET)-gcc" \
 	AR="$(CROSSTARGET)-ar" \
 	RANLIB="$(CROSSTARGET)-ranlib"
   EXTRA_CONFIG = \
 	--host=$(BUILDTARGET) \
 	--build=$(BUILDTARGET) \
-	--prefix=/tools \
-	--with-lib-path=/tools/lib \
-	--disable-nls
+	--prefix=$(TOOLS_DIR) \
+	--with-lib-path=$(TOOLS_DIR)/lib
   EXTRA_MAKE = 
   EXTRA_INSTALL = 
 endif
 endif
 
-ifeq "$(MACHINE_TYPE)" "arm"
+ifeq "$(BUILD_ARCH)" "armv5tel"
 	EXTRA_CONFIG += \
 		--with-abi=aapcs-linux \
 		--with-float=soft
 endif
 
 EXTRA_CONFIG += \
+	--disable-werror \
 	--enable-64-bit-bfd
 
 ###############################################################################
@@ -87,7 +96,7 @@ objects = $(DL_FILE)
 
 $(DL_FILE) = $(DL_FROM)/$(DL_FILE)
 
-$(DL_FILE)_MD5 = ee0f10756c84979622b992a4a61ea3f5
+$(DL_FILE)_MD5 = 7126f370ffbd46c08fcc5ce7aee2805d
 
 install : $(TARGET)
 
@@ -116,29 +125,26 @@ $(subst %,%_MD5,$(objects)) :
 
 $(TARGET) : $(patsubst %,$(DIR_DL)/%,$(objects))
 	@$(PREBUILD)
-	@rm -rf $(DIR_APP) $(DIR_SRC)/binutils-build && cd $(DIR_SRC) && tar jxf $(DIR_DL)/$(DL_FILE)
-	cd $(DIR_APP) && patch -Np1 < $(DIR_SRC)/src/patches/binutils-2.22-pt-pax-flags-20111121.patch
-
-	# texinfo 5 syntax-fix.
-	cd $(DIR_APP) && sed -i -e "s/@colophon/@@colophon/" \
-				-e "s/doc@cygnus/doc@@cygnus/" bfd/doc/bfd.texinfo
-
+	@rm -rf $(DIR_APP) $(DIR_SRC)/binutils-build && cd $(DIR_SRC) && tar axf $(DIR_DL)/$(DL_FILE)
 	@mkdir $(DIR_SRC)/binutils-build
 
 	# Prevent installing libiberty to lib64.
 	cd $(DIR_APP) && sed -i 's%\(^MULTIOSDIR = \).*%\1 ../lib%' libiberty/Makefile.in
 
-	cd $(DIR_SRC)/binutils-build && $(EXTRA_ENV) MACHINE= $(DIR_APP)/configure $(EXTRA_CONFIG)
-	cd $(DIR_SRC)/binutils-build && make $(EXTRA_MAKE) $(MAKETUNING) MACHINE= 
-	cd $(DIR_SRC)/binutils-build && make $(EXTRA_INSTALL) install MACHINE= 
+	cd $(DIR_SRC)/binutils-build && $(EXTRA_ENV) $(DIR_APP)/configure $(EXTRA_CONFIG)
+	cd $(DIR_SRC)/binutils-build && make $(EXTRA_MAKE) $(MAKETUNING)
+	cd $(DIR_SRC)/binutils-build && make $(EXTRA_INSTALL) install
 ifeq "$(ROOT)" ""
 	cp -v $(DIR_APP)/include/libiberty.h /usr/include
-else
-ifeq "$(PASS)" "2"
-	cd $(DIR_SRC)/binutils-build && make -C ld clean MACHINE=
-	cd $(DIR_SRC)/binutils-build && make -C ld LIB_PATH=/usr/lib:/lib MACHINE=
-	cd $(DIR_SRC)/binutils-build && cp -v ld/ld-new /tools/bin
 endif
+
+ifeq "$(TOOLCHAIN)" "1"
+ ifeq "$(PASS)" "2"
+	cd $(DIR_SRC)/binutils-build && make -C ld clean
+	cd $(DIR_SRC)/binutils-build && make -C ld LIB_PATH=/usr/lib:/lib
+	cd $(DIR_SRC)/binutils-build && cp -v ld/ld-new $(TOOLS_DIR)/bin
+ endif
 endif
+
 	@rm -rf $(DIR_APP) $(DIR_SRC)/binutils-build
 	@$(POSTBUILD)

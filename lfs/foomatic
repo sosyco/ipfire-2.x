@@ -1,7 +1,7 @@
 ###############################################################################
 #                                                                             #
 # IPFire.org - A linux based firewall                                         #
-# Copyright (C) 2007  Michael Tremer & Christian Schmidt                      #
+# Copyright (C) 2007-2019  IPFire Team  <info@ipfire.org>                     #
 #                                                                             #
 # This program is free software: you can redistribute it and/or modify        #
 # it under the terms of the GNU General Public License as published by        #
@@ -35,9 +35,11 @@ DL_FROM    = $(URL_IPFIRE)
 DIR_APP    = $(DIR_SRC)/foomatic-filters-$(VER_FILTERS)
 TARGET     = $(DIR_INFO)/$(THISAPP)
 PROG       = foomatic
-PAK_VER    = 2
+PAK_VER    = 5
 
-DEPS       = "cups ghostscript libtiff hplip"
+DEPS       = cups ghostscript libtiff hplip
+
+CFLAGS    += -fcommon
 
 export LIB_CUPS=/usr/lib/cups
 export CUPS_BACKENDS=/usr/lib/cups/backends
@@ -113,10 +115,6 @@ $(TARGET) : $(patsubst %,$(DIR_DL)/%,$(objects))
 
 	-mkdir -pv /etc/foomatic
 	echo "cups" > /etc/foomatic/defaultspooler
-
-	-mkdir -pv /usr/lib/cups/filter
-	ln -svf ../../../bin/foomatic-rip /usr/lib/cups/filter/foomatic-rip
-	ln -svf ../../../bin/foomatic-ppdfile /usr/lib/cups/filter/foomatic-ppdfile
 
 	@rm -rf $(DIR_SRC)/foomatic-*
 	@$(POSTBUILD)

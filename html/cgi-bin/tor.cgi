@@ -2,7 +2,7 @@
 ###############################################################################
 #                                                                             #
 # IPFire.org - A linux based firewall                                         #
-# Copyright (C) 2013  IPFire Team  <info@ipfire.org>                          #
+# Copyright (C) 2013-2019  IPFire Team  <info@ipfire.org>                     #
 #                                                                             #
 # This program is free software: you can redistribute it and/or modify        #
 # it under the terms of the GNU General Public License as published by        #
@@ -20,26 +20,28 @@
 ###############################################################################
 
 use strict;
-use Locale::Codes::Country;
 
 # enable only the following on debugging purpose
-use warnings;
-use CGI::Carp 'fatalsToBrowser';
+#use warnings;
+#use CGI::Carp 'fatalsToBrowser';
 
 require '/var/ipfire/general-functions.pl';
-require "${General::swroot}/geoip-functions.pl";
+require "${General::swroot}/location-functions.pl";
 require "${General::swroot}/lang.pl";
 require "${General::swroot}/header.pl";
+
+# Init libloc database connection.
+my $db_handle = &Location::Functions::init();
 
 #workaround to suppress a warning when a variable is used only once
 my @dummy = ( ${Header::colouryellow} );
 undef (@dummy);
 
 my @bandwidth_limits = (
-	1000 * 1024, # 1G
+	1000 * 1024, # 1 GBit/s
 	 500 * 1024,
 	 200 * 1024,
-	 100 * 1024, # 100M
+	 100 * 1024, # 100 MBit/s
 	  64 * 1024,
 	  50 * 1024,
 	  25 * 1024,
@@ -49,10 +51,7 @@ my @bandwidth_limits = (
 	   8 * 1024,
 	   4 * 1024,
 	   2 * 1024,
-	       1024, # 1M
-	        512,
-	        256,
-	        160
+	       1024  # 1 MBit/s
 );
 my @accounting_periods = ('daily', 'weekly', 'monthly');
 
@@ -106,7 +105,7 @@ if (&Header::blue_used()) {
 }
 
 $settings{'TOR_RELAY_ENABLED'} = 'off';
-$settings{'TOR_RELAY_MODE'} = 'exit';
+$settings{'TOR_RELAY_MODE'} = 'relay';
 $settings{'TOR_RELAY_ADDRESS'} = '';
 $settings{'TOR_RELAY_PORT'} = 9001;
 $settings{'TOR_RELAY_DIRPORT'} = 0;
@@ -323,11 +322,14 @@ END
 					<select name='TOR_EXIT_COUNTRY'>
 						<option value=''>- $Lang::tr{'tor exit country any'} -</option>
 END
-
-		my @country_names = Locale::Codes::Country::all_country_names();
-		foreach my $country_name (sort @country_names) {
-			my $country_code = Locale::Codes::Country::country2code($country_name);
+		my @country_codes = &Location::database_countries($db_handle);
+		foreach my $country_code (@country_codes) {
+			# Convert country code into upper case format.
 			$country_code = uc($country_code);
+
+			# Get country name.
+			my $country_name = &Location::Functions::get_full_country_name($country_code);
+
 			print "<option value='$country_code'";
 
 			if ($settings{'TOR_EXIT_COUNTRY'} eq $country_code) {
@@ -432,9 +434,9 @@ END
 
 	foreach (@bandwidth_limits) {
 		if ($_ >= 1024) {
-			print "<option value='$_' $selected{'TOR_RELAY_BANDWIDTH_RATE'}{$_}>". $_ / 1024 ." MBit/s</option>\n";
+			print "<option value='$_' $selected{'TOR_RELAY_BANDWIDTH_RATE'}{$_}>". $_ / 1024 ." Mbit/s</option>\n";
 		} else {
-			print "<option value='$_' $selected{'TOR_RELAY_BANDWIDTH_RATE'}{$_}>$_ kBit/s</option>\n";
+			print "<option value='$_' $selected{'TOR_RELAY_BANDWIDTH_RATE'}{$_}>$_ kbit/s</option>\n";
 		}
 	}
 
@@ -455,9 +457,9 @@ END
 
 	foreach (@bandwidth_limits) {
 		if ($_ >= 1024) {
-			print "<option value='$_' $selected{'TOR_RELAY_BANDWIDTH_BURST'}{$_}>". $_ / 1024 ." MBit/s</option>\n";
+			print "<option value='$_' $selected{'TOR_RELAY_BANDWIDTH_BURST'}{$_}>". $_ / 1024 ." Mbit/s</option>\n";
 		} else {
-			print "<option value='$_' $selected{'TOR_RELAY_BANDWIDTH_BURST'}{$_}>$_ kBit/s</option>\n";
+			print "<option value='$_' $selected{'TOR_RELAY_BANDWIDTH_BURST'}{$_}>$_ kbit/s</option>\n";
 		}
 	}
 	print <<END;
@@ -519,7 +521,7 @@ END
 					<tr>
 						<td width='40%' class='base'>$Lang::tr{'tor relay fingerprint'}:</td>
 						<td width='60%'>
-							<a href='https://atlas.torproject.org/#details/$fingerprint' target='_blank'>$fingerprint</a>
+							<a href='https://metrics.torproject.org/rs.html#details/$fingerprint' target='_blank'>$fingerprint</a>
 						</td>
 					</tr>
 END
@@ -612,7 +614,7 @@ END
 				print <<END;
 					<tr>
 						<td width='40%'>
-							<a href='https://atlas.torproject.org/#details/$node->{'fingerprint'}' target='_blank'>
+							<a href='https://metrics.torproject.org/rs.html#details/$node->{'fingerprint'}' target='_blank'>
 								$node->{'name'}
 							</a>
 						</td>
@@ -621,7 +623,7 @@ END
 
 				if (exists($node->{'country_code'})) {
 					# Get the flag icon of the country.
-					my $flag_icon = &GeoIP::get_flag_icon($node->{'country_code'});
+					my $flag_icon = &Location::Functions::get_flag_icon($node->{'country_code'});
 
 					# Check if a flag for the given country is available.
 					if ($flag_icon) {
@@ -978,7 +980,7 @@ sub FormatBytes() {
 sub FormatBitsPerSecond() {
 	my $bits = shift;
 
-	my @units = ("Bit/s", "KBit/s", "MBit/s", "GBit/s", "TBit/s");
+	my @units = ("bit/s", "kbit/s", "Mbit/s", "Gbit/s", "Tbit/s");
 	my $units_index = 0;
 
 	while (($units_index <= $#units) && ($bits >= 1024)) {
