@@ -28,13 +28,11 @@ use strict;
 require '/var/ipfire/general-functions.pl';
 require "${General::swroot}/lang.pl";
 require "${General::swroot}/header.pl";
-require "${General::swroot}/net-traffic/net-traffic-admin.pl";
-require "${General::swroot}/net-traffic/net-traffic-lib.pl";
 
 my %color = ();
 my %mainsettings = ();
 &General::readhash("${General::swroot}/main/settings", \%mainsettings);
-&General::readhash("/srv/web/ipfire/html/themes/".$mainsettings{'THEME'}."/include/colors.txt", \%color);
+&General::readhash("/srv/web/ipfire/html/themes/ipfire/include/colors.txt", \%color);
 
 my %cgiparams;
 my %pppsettings;
@@ -57,12 +55,12 @@ display_vnstat($netsettings{'GREEN_DEV'});
 
 # Display external network / check if it is PPP or ETH
 # and dont display if RED_DEV=GREEN_DEV (green only mode)
-if ($netsettings{'RED_TYPE'} ne 'PPPOE') {
-    if ($netsettings{'RED_DEV'} ne $netsettings{'GREEN_DEV'}) {
-	display_vnstat($netsettings{'RED_DEV'});
-    }
-} else {
-    display_vnstat("ppp0");
+if ($netsettings{'RED_DEV'} ne $netsettings{'GREEN_DEV'}) {
+	# Omit the red interface name.
+	my $red_iface = &General::get_red_interface();
+
+	# Display the red stats if a device could be grabbed.
+	display_vnstat($red_iface) if ($red_iface);
 }
 
 # Check config and display aditional Networks (BLUE and ORANGE)
@@ -88,20 +86,24 @@ sub display_vnstat
 	if ( $testdata =~ 'enough') {
 		print"No data for $device !<br>";
 	} else {
-	    system("/usr/bin/vnstati -c 5 -s -i $device -o /srv/web/ipfire/html/graphs/vnstat-s-$device.png");
+	    # Summary
+	    &General::system("/usr/bin/vnstati", "-c", "1", "-s", "-i", "$device", "-o", "/srv/web/ipfire/html/graphs/vnstat-s-$device.png");
+	    # 5-minute graphs
+	    &General::system("/usr/bin/vnstati", "-c", "1", "-5", "-i", "$device", "-o", "/srv/web/ipfire/html/graphs/vnstat-5-$device.png");
 	    # Hour graph
-	    system("/usr/bin/vnstati -c 5 -h -i $device -o /srv/web/ipfire/html/graphs/vnstat-h-$device.png");
+	    &General::system("/usr/bin/vnstati", "-c", "1", "-h", "-i", "$device", "-o", "/srv/web/ipfire/html/graphs/vnstat-h-$device.png");
 	    # Day graph
-	    system("/usr/bin/vnstati -c 5 -d -i $device -o /srv/web/ipfire/html/graphs/vnstat-d-$device.png");
+	    &General::system("/usr/bin/vnstati", "-c", "1", "-d", "-i", "$device", "-o", "/srv/web/ipfire/html/graphs/vnstat-d-$device.png");
 	    # Month graph
-	    system("/usr/bin/vnstati -c 5 -m -i $device -o /srv/web/ipfire/html/graphs/vnstat-m-$device.png");
+	    &General::system("/usr/bin/vnstati", "-c", "1", "-m", "-i", "$device", "-o", "/srv/web/ipfire/html/graphs/vnstat-m-$device.png");
 	    # Top10 graph
-	    system("/usr/bin/vnstati -c 5 -t -i $device -o /srv/web/ipfire/html/graphs/vnstat-t-$device.png");
+	    &General::system("/usr/bin/vnstati", "-c", "1", "-t", "-i", "$device", "-o", "/srv/web/ipfire/html/graphs/vnstat-t-$device.png");
 
 # Generate HTML-Table with the graphs
 print <<END
 <table>
 <tr><td><img src="/graphs/vnstat-s-$device.png"></td></tr>
+<tr><td><img src="/graphs/vnstat-5-$device.png"></td></tr>
 <tr><td><img src="/graphs/vnstat-h-$device.png"></td></tr>
 <tr><td><img src="/graphs/vnstat-d-$device.png"></td></tr>
 <tr><td><img src="/graphs/vnstat-m-$device.png"></td></tr>

@@ -1,7 +1,7 @@
 ###############################################################################
 #                                                                             #
 # IPFire.org - A linux based firewall                                         #
-# Copyright (C) 2013 IPFire Development Team                                  #
+# Copyright (C) 2007-2025  IPFire Team  <info@ipfire.org>                     #
 #                                                                             #
 # This program is free software: you can redistribute it and/or modify        #
 # it under the terms of the GNU General Public License as published by        #
@@ -24,7 +24,7 @@
 
 include Config
 
-VER        = 3.0.4
+VER        = 3.3
 
 THISAPP    = gperf-$(VER)
 DL_FILE    = $(THISAPP).tar.gz
@@ -39,7 +39,7 @@ objects = $(DL_FILE)
 
 $(DL_FILE) = $(DL_FROM)/$(DL_FILE)
 
-$(DL_FILE)_MD5 = c1f1db32fb6598d6a93e6e88796a8632
+$(DL_FILE)_BLAKE2 = 76fd532c4443d27031c8b2dbceaa985d0d3eed8d66f2ba2d128d027ecec0175717ab1468236b0b0405445e7457076a802458e326d5023ce28869e478ca622fa9
 
 install : $(TARGET)
 
@@ -47,10 +47,10 @@ check : $(patsubst %,$(DIR_CHK)/%,$(objects))
 
 download :$(patsubst %,$(DIR_DL)/%,$(objects))
 
-md5 : $(subst %,%_MD5,$(objects))
+b2 : $(subst %,%_BLAKE2,$(objects))
 
 ###############################################################################
-# Downloading, checking, md5sum
+# Downloading, checking, b2sum
 ###############################################################################
 
 $(patsubst %,$(DIR_CHK)/%,$(objects)) :
@@ -59,8 +59,8 @@ $(patsubst %,$(DIR_CHK)/%,$(objects)) :
 $(patsubst %,$(DIR_DL)/%,$(objects)) :
 	@$(LOAD)
 
-$(subst %,%_MD5,$(objects)) :
-	@$(MD5)
+$(subst %,%_BLAKE2,$(objects)) :
+	@$(B2SUM)
 
 ###############################################################################
 # Installation Details
@@ -69,7 +69,9 @@ $(subst %,%_MD5,$(objects)) :
 $(TARGET) : $(patsubst %,$(DIR_DL)/%,$(objects))
 	@$(PREBUILD)
 	@rm -rf $(DIR_APP) && cd $(DIR_SRC) && tar axf $(DIR_DL)/$(DL_FILE)
-	cd $(DIR_APP) && ./configure --prefix=/usr --disable-nls
+	cd $(DIR_APP) && ./configure \
+				--prefix=/usr \
+				--disable-nls
 	cd $(DIR_APP) && make $(MAKETUNING)
 	cd $(DIR_APP) && make install
 	@rm -rf $(DIR_APP)

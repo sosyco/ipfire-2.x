@@ -32,7 +32,6 @@ int handleadminpassword(void);
 
 /* misc.c */
 int writehostsfiles(void);
-int handleisdn(void);
 
 /* keymap.c */
 int handlekeymap(void);
@@ -54,6 +53,8 @@ int handletimezone(void);
 #define _RED_CARD_ 1
 #define _ORANGE_CARD_ 2
 #define _BLUE_CARD_ 3
+
+#define MAX_NICS 20
 
 struct nic
 {

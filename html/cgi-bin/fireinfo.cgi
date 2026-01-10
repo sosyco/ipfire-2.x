@@ -2,7 +2,7 @@
 ###############################################################################
 #                                                                             #
 # IPFire.org - A linux based firewall                                         #
-# Copyright (C) 2011  IPFire Team  <info@ipfire.org>                          #
+# Copyright (C) 2011-2025  IPFire Team  <info@ipfire.org>                     #
 #                                                                             #
 # This program is free software: you can redistribute it and/or modify        #
 # it under the terms of the GNU General Public License as published by        #
@@ -21,13 +21,14 @@
 
 use strict;
 
-# enable only the following on debugging purpose
-use warnings;
-use CGI::Carp 'fatalsToBrowser';
+# only enable the following for debugging purposes
+#use warnings;
+#use CGI::Carp 'fatalsToBrowser';
 
 require '/var/ipfire/general-functions.pl';
 require "${General::swroot}/lang.pl";
 require "${General::swroot}/header.pl";
+require '/opt/pakfire/lib/functions.pl';
 
 my $configfile = "/var/ipfire/main/send_profile";
 
@@ -48,14 +49,18 @@ if ( -e "$configfile" ) {
 if ("$fireinfosettings{'ACTION'}" eq "trigger") {
 	if ($fireinfosettings{'ENABLE_FIREINFO'} eq 'off') 	{
 		&General::log($Lang::tr{'fireinfo is enabled'});
-		system ('/usr/bin/touch', $configfile);
+
+		# Write empty configfile.
+		open(FILE, ">$configfile");
+		close(FILE);
+
 		$fireinfosettings{'ENABLE_FIREINFO'} = 'on';
 	} else {
 		&General::log($Lang::tr{'fireinfo is disabled'});
 		unlink "$configfile";
 		$fireinfosettings{'ENABLE_FIREINFO'} = 'off';
 	}
-	system("/usr/local/bin/fireinfoctrl &");
+	&General::system_background("/usr/local/bin/fireinfoctrl");
 }
 
 &Header::openpage('Fireinfo', 1, '');
@@ -67,7 +72,7 @@ if ($fireinfosettings{'ENABLE_FIREINFO'} ne "on") {
 <font color="$Header::colourred">
 	<p>
 		$Lang::tr{'fireinfo why descr1'}
-		$Lang::tr{'fireinfo why descr2'}<a href="http://fireinfo.ipfire.org" target="_blank">$Lang::tr{'fireinfo why read more'}</a>
+		$Lang::tr{'fireinfo why descr2'}<a href="https://fireinfo.ipfire.org" target="_blank">$Lang::tr{'fireinfo why read more'}</a>
 	</p>
 </font>
 END
@@ -83,36 +88,44 @@ if ($errormessage) {
 	&Header::closebox();
 }
 
-my $ipfire_version = `cat /etc/system-release`;
-my $pakfire_version = `cat /opt/pakfire/etc/pakfire.conf | grep "version =" | cut -d\\" -f2`;
-my $kernel_version = `uname -a`;
+# Get IPFire version string.
+open(FILE, "/etc/system-release");
+my $ipfire_version = <FILE>;
+close(FILE);
+
+my $pakfire_version = &Pakfire::make_version();
+my @kernel_version = &General::system_output("uname", "-a");
 
 &Header::openbox('100%', 'left', $Lang::tr{'fireinfo system version'});
 print <<END;
-	<table width="100%">
+	<table cellspacing='1' cellpadding='0' class='tbl'>
 		<tr>
-			<td>$Lang::tr{'fireinfo ipfire version'}:</td>
-			<td>$ipfire_version</td>
+			<td align='center' bgcolor='#F0F0F0' width='15%'>$Lang::tr{'fireinfo ipfire version'}</td>
+			<td bgcolor='#F0F0F0'><code>$ipfire_version</code></td>
 		</tr>
 		<tr>
-			<td>$Lang::tr{'fireinfo pakfire version'}:</td>
-			<td>$pakfire_version</td>
+			<td align='center' bgcolor='#D6D6D6' width='15%'>$Lang::tr{'fireinfo pakfire version'}</td>
+			<td bgcolor='#D6D6D6'><code>$pakfire_version</code></td>
 		</tr>
 		<tr>
-			<td>$Lang::tr{'fireinfo kernel version'}:</td>
-			<td>$kernel_version</td>
+			<td align='center' bgcolor='#F0F0F0' width='15%'>$Lang::tr{'fireinfo kernel version'}</td>
+			<td bgcolor='#F0F0F0'><code>@kernel_version</code></td>
 		</tr>
 	</table>
 END
 &Header::closebox();
 
 # Read pregenerated profile data
-my $profile = `cat /var/ipfire/fireinfo/profile`;
+open(FILE, "/var/ipfire/fireinfo/profile");
+my @profile = <FILE>;
+close(FILE);
 
 print "<form method='post' action='$ENV{'SCRIPT_NAME'}'>\n";
 
 # Read profile ID from file
-my $profile_id = `cat /var/ipfire/fireinfo/public_id`;
+open(FILE, "/var/ipfire/fireinfo/public_id");
+my $profile_id = <FILE>;
+close(FILE);
 chomp($profile_id);
 
 &Header::openbox('100%', 'left', $Lang::tr{'fireinfo settings'});
@@ -122,7 +135,7 @@ print <<END;
 	<tr>
 		<td>$Lang::tr{'fireinfo your profile id'}:</td>
 		<td>
-			<a href="http://fireinfo.ipfire.org/profile/$profile_id" target="_blank">$profile_id</a>
+			<a href="https://fireinfo.ipfire.org/profile/$profile_id" target="_blank">$profile_id</a>
 		</td>
 	</tr>
 	<tr>
@@ -156,7 +169,7 @@ print <<END;
 	</tr>
 	<tr>
 		<td colspan='2'>
-			<textarea rows="25" cols="75" readonly="readonly">$profile</textarea>
+			<textarea rows="25" cols="75" readonly="readonly">@profile</textarea>
 		</td>
 	</tr>
 </table>

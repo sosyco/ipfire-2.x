@@ -5,10 +5,10 @@
  *
  * (c) Mark Wormgoor, 2001
  * Simple program intended to be installed setuid(0) that can be used for
- * restarting SSHd. 
- * 
+ * restarting SSHd.
+ *
  * $Id: sshctrl.c,v 1.3 2003/12/11 10:57:34 riddles Exp $
- * 
+ *
  */
 
 #include <stdio.h>
@@ -24,7 +24,7 @@
 
 #define BUFFER_SIZE 1024
 
-char command[BUFFER_SIZE]; 
+char command[BUFFER_SIZE];
 
 int main(int argc, char *argv[])
 {
@@ -67,14 +67,19 @@ int main(int argc, char *argv[])
 						strlcat(command, "s/^PasswordAuthentication .*$/PasswordAuthentication yes/;", STRING_SIZE - 1 );
 
 				if(findkey(kv, "ENABLE_SSH_PORTFW", buffer) && !strcmp(buffer,"on"))
-						strlcat(command, "s/^AllowTcpForwarding .*$/AllowTcpForwarding yes/;", STRING_SIZE - 1 );
+						strlcat(command, "s/^AllowTcpForwarding .*$/AllowTcpForwarding yes/;"	"s/^PermitOpen .*$/PermitOpen any/;", STRING_SIZE - 1 );
 				else
-						strlcat(command, "s/^AllowTcpForwarding .*$/AllowTcpForwarding no/;", STRING_SIZE - 1 );
-						
+						strlcat(command, "s/^AllowTcpForwarding .*$/AllowTcpForwarding no/;"	"s/^PermitOpen .*$/PermitOpen none/;", STRING_SIZE - 1 );
+
 				if(findkey(kv, "SSH_PORT", buffer) && !strcmp(buffer,"on"))
-						strlcat(command, "s/^Port .*$/Port 22/", STRING_SIZE - 1 );
+						strlcat(command, "s/^Port .*$/Port 22/;", STRING_SIZE - 1 );
 				else
-						strlcat(command, "s/^Port .*$/Port 222/", STRING_SIZE - 1 );
+						strlcat(command, "s/^Port .*$/Port 222/;", STRING_SIZE - 1 );
+
+				if(findkey(kv, "SSH_AGENT_FORWARDING", buffer) && !strcmp(buffer,"on"))
+						strlcat(command, "s/^AllowAgentForwarding .*$/AllowAgentForwarding yes/;", STRING_SIZE - 1 );
+				else
+						strlcat(command, "s/^AllowAgentForwarding .*$/AllowAgentForwarding no/;", STRING_SIZE - 1 );
 
 				freekeyvalues(kv);
 
@@ -128,11 +133,16 @@ int main(int argc, char *argv[])
 				return 0;
 	}
 	else if (strcmp(argv[1], "tempstart") == 0) {
+		if (!is_valid_argument_num(argv[2])) {
+			fprintf(stderr, "Invalid time '%s'\n", argv[2]);
+			exit(2);
+		}
+
 				safe_system("/usr/local/bin/sshctrl");
 				sleep(5);
 				unlink("/var/ipfire/remote/enablessh");
 				safe_system("cat /var/ipfire/remote/settings | sed 's/ENABLE_SSH=on/ENABLE_SSH=off/' > /var/ipfire/remote/settings2 && mv /var/ipfire/remote/settings2 /var/ipfire/remote/settings");
-        safe_system("chown nobody.nobody /var/ipfire/remote/settings");
+				safe_system("chown nobody:nobody /var/ipfire/remote/settings");
 				snprintf(command, BUFFER_SIZE-1, "sleep %s && /usr/local/bin/sshctrl &", argv[2]);
 				safe_system(command);
 	}

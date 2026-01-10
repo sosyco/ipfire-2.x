@@ -24,6 +24,7 @@
 . /opt/pakfire/lib/functions.sh
 extract_files
 restore_backup ${NAME}
+
 postalias /etc/aliases
 # Set postfix's hostname
 postconf -e "myhostname=$(hostname -f)"

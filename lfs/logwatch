@@ -1,7 +1,7 @@
 ###############################################################################
 #                                                                             #
 # IPFire.org - A linux based firewall                                         #
-# Copyright (C) 2015  Michael Tremer & Christian Schmidt                      #
+# Copyright (C) 2007-2024  IPFire Team  <info@ipfire.org>                     #
 #                                                                             #
 # This program is free software: you can redistribute it and/or modify        #
 # it under the terms of the GNU General Public License as published by        #
@@ -24,7 +24,7 @@
 
 include Config
 
-VER        = 7.4.1
+VER        = 7.11
 
 THISAPP    = logwatch-$(VER)
 DL_FILE    = $(THISAPP).tar.gz
@@ -40,7 +40,7 @@ objects = $(DL_FILE)
 
 $(DL_FILE) = $(DL_FROM)/$(DL_FILE)
 
-$(DL_FILE)_MD5 = a0c3d8721f877bdcd4a9089eb1b4691b
+$(DL_FILE)_BLAKE2 = 074b9b1d58bd199c82edc6fb40703b71f9488966e2acb8afc015fde93806740d11a3c8705303139716bbc50c353f3e8c3f4c0e9cf1d5f870cbb8599fbdd526d1
 
 install : $(TARGET)
 
@@ -48,10 +48,10 @@ check : $(patsubst %,$(DIR_CHK)/%,$(objects))
 
 download :$(patsubst %,$(DIR_DL)/%,$(objects))
 
-md5 : $(subst %,%_MD5,$(objects))
+b2 : $(subst %,%_BLAKE2,$(objects))
 
 ###############################################################################
-# Downloading, checking, md5sum
+# Downloading, checking, b2sum
 ###############################################################################
 
 $(patsubst %,$(DIR_CHK)/%,$(objects)) :
@@ -60,8 +60,8 @@ $(patsubst %,$(DIR_CHK)/%,$(objects)) :
 $(patsubst %,$(DIR_DL)/%,$(objects)) :
 	@$(LOAD)
 
-$(subst %,%_MD5,$(objects)) :
-	@$(MD5)
+$(subst %,%_BLAKE2,$(objects)) :
+	@$(B2SUM)
 
 ###############################################################################
 # Installation Details
@@ -71,10 +71,15 @@ $(TARGET) : $(patsubst %,$(DIR_DL)/%,$(objects))
 	@$(PREBUILD)
 	@rm -rf $(DIR_APP) && cd $(DIR_SRC) && tar zxf $(DIR_DL)/$(DL_FILE)
 	cd $(DIR_APP) && sed -e "s/^TEMPDIR=.*/TEMPDIR=\"\/tmp\"/g" -i install_logwatch.sh
-	cd $(DIR_APP)/lib && patch < $(DIR_SRC)/src/patches/logwatch-7.3.6-date_manip6.patch
+
+	cd $(DIR_APP)/lib && patch -i $(DIR_SRC)/src/patches/logwatch/logwatch-7.11-date_manip6.patch
+	cd $(DIR_APP) && patch -Np1 -i $(DIR_SRC)/src/patches/logwatch/logwatch-7.11-disable_iptables.patch
+	cd $(DIR_APP) && patch -Np1 -i $(DIR_SRC)/src/patches/logwatch/logwatch-7.11-enable-mdadm-sudo.patch
+	cd $(DIR_APP) && patch -Np1 -i $(DIR_SRC)/src/patches/logwatch/logwatch-7.11-Added-support-for-OpenSSH-9.8-sshd-session-and-port-number.patch
+
 	@cd $(DIR_APP) && chmod 755 install_logwatch.sh
 	cd $(DIR_APP) && yes "" | ./install_logwatch.sh
-	
+
 	#sed -i 's/^Print = .*$$/Print = Yes/' /etc/log.d/conf/logwatch.conf
 	# comment out line with unused example
 	#sed -i '/-zz-network/s/Service/#Service/' /etc/log.d/conf/logwatch.conf
@@ -93,13 +98,21 @@ $(TARGET) : $(patsubst %,$(DIR_DL)/%,$(objects))
 	#  done
 	cp -f $(DIR_SRC)/config/logwatch/dialup /usr/share/logwatch/scripts/services/dialup
 	cp -f $(DIR_SRC)/config/logwatch/dialup.conf /usr/share/logwatch/dist.conf/services/dialup.conf
-	
+
+	cp -f $(DIR_SRC)/config/logwatch/ipblocklist /usr/share/logwatch/scripts/services/ipblocklist
+	cp -f $(DIR_SRC)/config/logwatch/ipblocklist.conf /usr/share/logwatch/dist.conf/services/ipblocklist.conf
+
 	-mkdir -p /var/cache/logwatch
 	chmod -v 777 /var/cache/logwatch
 	-mkdir -p /var/log/logwatch
 	chmod -v 755 /var/log/logwatch
 	-rm -rf /etc/logwatch/conf
 	ln -vsf /usr/share/logwatch/default.conf /etc/logwatch/conf
-	
+
+	-mkdir -p /etc/sudoers.d
+	chmod -v 750 /etc/sudoers.d
+	install -v -m 640 $(DIR_SRC)/config/logwatch/sudoers/logwatch-mdadm \
+                /etc/sudoers.d/logwatch-mdadm
+
 	@rm -rf $(DIR_APP)
 	@$(POSTBUILD)

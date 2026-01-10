@@ -17,6 +17,7 @@ usr/bin/tickadj
 usr/bin/update-leap
 #usr/share/doc/ntp
 #usr/share/doc/ntp/html
+#usr/share/doc/ntp/html/.datecheck
 #usr/share/doc/ntp/html/access.html
 #usr/share/doc/ntp/html/accopt.html
 #usr/share/doc/ntp/html/assoc.html

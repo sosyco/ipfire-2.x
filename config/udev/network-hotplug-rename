@@ -19,6 +19,8 @@
 #                                                                             #
 ###############################################################################
 
+. /etc/rc.d/init.d/networking/functions.network
+
 # Check if all appropriate variables are set
 [ -n "${INTERFACE}" ] || exit 2
 
@@ -44,11 +46,18 @@ if [ ! -r "/var/ipfire/ethernet/settings" ]; then
 	exit 1
 fi
 
+# Change MAC addresses of QMI interface
+if [ -d "/sys/class/net/${INTERFACE}/qmi" ]; then
+	if ! qmi_assign_address "${INTERFACE}"; then
+		exit 1
+	fi
+fi
+
 # Read network settings
 eval $(/usr/local/bin/readhash /var/ipfire/ethernet/settings)
 
 # Standard zones
-ZONES="RED GREEN ORANGE BLUE"
+ZONES="RED GREEN ORANGE BLUE INTF0 INTF1 INTF2 INTF3"
 
 # Determine the address of INTERFACE
 ADDRESS="$(</sys/class/net/${INTERFACE}/address)"
@@ -57,16 +66,28 @@ ADDRESS="$(</sys/class/net/${INTERFACE}/address)"
 for zone in ${ZONES}; do
 	address="${zone}_MACADDR"
 	device="${zone}_DEV"
+	mode="${zone}_MODE"
+	slaves="${zone}_SLAVES"
 
-	# Skip if address or device is unset
-	[ -n "${!address}" -a -n "${!device}" ] || continue
-
-	# If a matching interface has been found we will
-	# print the name to which udev will rename it.
-	if [ "${ADDRESS}" = "${!address}" ]; then
+	# Return DEV when the address matches
+	if [ "${!address,,}" = "${ADDRESS,,}" ]; then
 		echo "${!device}"
 		exit 0
 	fi
+
+	# If a matching interface has been found we will
+	# print the name to which udev will rename it.
+	case "${!mode}" in
+		bond|bridge)
+			counter=0
+			for slave in ${!slaves}; do
+				if [ "${slave,,}" = "${ADDRESS,,}" ]; then
+					echo "${!device}p${counter}"
+				fi
+				(( counter += 1 ))
+			done
+			;;
+	esac
 done
 
 # If we get here we have not found a matching device,

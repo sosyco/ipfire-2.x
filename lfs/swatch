@@ -1,7 +1,7 @@
 ###############################################################################
 #                                                                             #
 # IPFire.org - A linux based firewall                                         #
-# Copyright (C) 2011  IPFire Team  <info@ipfire.org>                          #
+# Copyright (C) 2007-2019  IPFire Team  <info@ipfire.org>                     #
 #                                                                             #
 # This program is free software: you can redistribute it and/or modify        #
 # it under the terms of the GNU General Public License as published by        #
@@ -24,17 +24,21 @@
 
 include Config
 
-VER        = 3.2.3
+SUMMARY    = The Simple WATCHdog
 
-THISAPP    = swatch-$(VER)
+VER        = 3.2.4
+
+THISAPP    = swatchdog-$(VER)
 DL_FILE    = $(THISAPP).tar.gz
 DL_FROM    = $(URL_IPFIRE)
 DIR_APP    = $(DIR_SRC)/$(THISAPP)
 TARGET     = $(DIR_INFO)/$(THISAPP)
 PROG       = swatch
-PAK_VER    = 2
+PAK_VER    = 7
 
-DEPS       = "perl-File-Tail perl-Date-Calc perl-TimeDate perl-Date-Manip"
+DEPS       = perl-File-Tail perl-Date-Calc perl-Date-Manip
+
+SERVICES   =
 
 ###############################################################################
 # Top-level Rules
@@ -44,7 +48,7 @@ objects = $(DL_FILE)
 
 $(DL_FILE) = $(DL_FROM)/$(DL_FILE)
 
-$(DL_FILE)_MD5 = 1162f1024cf07fc750ed4960d61ac4e8
+$(DL_FILE)_BLAKE2 = 103491a231306cedad030fca8cc309ce89e8cbc8a3fcee63cd482efb733b91db8b29193bb1e9b9c5213261b150e3dc6be2b506dee83b2297d5af2f1451f596c8
 
 install : $(TARGET)
 
@@ -52,13 +56,13 @@ check : $(patsubst %,$(DIR_CHK)/%,$(objects))
 
 download :$(patsubst %,$(DIR_DL)/%,$(objects))
 
-md5 : $(subst %,%_MD5,$(objects))
+b2 : $(subst %,%_BLAKE2,$(objects))
 
-dist: 
+dist:
 	@$(PAK)
 
 ###############################################################################
-# Downloading, checking, md5sum
+# Downloading, checking, b2sum
 ###############################################################################
 
 $(patsubst %,$(DIR_CHK)/%,$(objects)) :
@@ -67,8 +71,8 @@ $(patsubst %,$(DIR_CHK)/%,$(objects)) :
 $(patsubst %,$(DIR_DL)/%,$(objects)) :
 	@$(LOAD)
 
-$(subst %,%_MD5,$(objects)) :
-	@$(MD5)
+$(subst %,%_BLAKE2,$(objects)) :
+	@$(B2SUM)
 
 ###############################################################################
 # Installation Details

@@ -2,7 +2,7 @@
 ###############################################################################
 #                                                                             #
 # IPFire.org - A linux based firewall                                         #
-# Copyright (C) 2010  IPFire Team                                             #
+# Copyright (C) 2010-2025  IPFire Team  <info@ipfire.org>                     #
 #                                                                             #
 # This program is free software: you can redistribute it and/or modify        #
 # it under the terms of the GNU General Public License as published by        #
@@ -23,6 +23,7 @@ require '/var/ipfire/general-functions.pl';
 require "${General::swroot}/lang.pl";
 require "${General::swroot}/header.pl";
 
+# only enable the following for debugging purposes
 #use warnings;
 #use CGI::Carp 'fatalsToBrowser';
 
@@ -43,8 +44,6 @@ my %netsettings = ();
 my %cgiparams=();
 
 &Header::getcgihash(\%cgiparams);
-
-system('/usr/local/bin/getipstat');
 
 &Header::showhttpheaders();
 &Header::openpage($Lang::tr{'ipts'}, 1, '');
@@ -84,11 +83,11 @@ print <<END
 END
 ;
 
-# We´ll open the txt files and extract each line, if the line
+# We´ll get iptables output and examine each line, if the line
 # start with an Chain the the name, start- and endline of the
 # chain is extracted into a hash
 
-	open (FILE, '/srv/web/ipfire/html/iptables.txt');
+	open (FILE, '/usr/local/bin/getipstat | ');
 	while (<FILE>){
 
 		$iplines[$lines] = $_;
@@ -102,7 +101,7 @@ END
 			}
 
 			$chainname = $chainstring[1];
-			$chains{$chainname."start"} = $lines; 
+			$chains{$chainname."start"} = $lines;
 		}
 
 		$lines++;
@@ -150,8 +149,8 @@ END
 	print "</tr>\n";
 
 	print "<tr>\n";
-	print "   <td width='0'></td>\n   <td width='35'></td>\n   <td width='35'></td>\n";
-	print "   <td width='130'></td>\n   <td width='30'></td>\n";
+	print "   <td width='0'></td>\n   <td width='60'></td>\n   <td width='60'></td>\n";
+	print "   <td width='150'></td>\n   <td width='30'></td>\n";
 	print "   <td width='30'></td>\n   <td width='40'></td>\n";
 	print "   <td width='40'></td>\n   <td width='95'></td>\n";
 	print "   <td width='95'></td>\n   <td width='260'></td>\n";
@@ -206,11 +205,11 @@ print <<END
 END
 ;
 
-# We´ll open the txt files and extract each line, if the line
+# We´ll get iptables output and examine each line, if the line
 # start with an Chain the the name, start- and endline of the
 # chain is extracted into a hash
 
-	open (FILE, '/srv/web/ipfire/html/iptablesmangle.txt');
+	open (FILE, '/usr/local/bin/getipstat -m | ');
 	while (<FILE>){
 
 		$ipmlines[$manlines] = $_;
@@ -224,11 +223,11 @@ END
 			}
 
 			$chainname = $chainstring[1];
-			$chainsman{$chainname."start"} = $manlines; 
+			$chainsman{$chainname."start"} = $manlines;
 		}
 
 		$manlines++;
-	   
+
 	}
 	$chainsman{$chainname."end"} = $manlines-1;
 	close (FILE);
@@ -272,8 +271,8 @@ END
 	print "</tr>\n";
 
 	print "<tr>\n";
-	print "   <td width='0'></td>\n   <td width='35'></td>\n   <td width='35'></td>\n";
-	print "   <td width='130'></td>\n   <td width='30'></td>\n";
+	print "   <td width='0'></td>\n   <td width='60'></td>\n   <td width='60'></td>\n";
+	print "   <td width='150'></td>\n   <td width='30'></td>\n";
 	print "   <td width='30'></td>\n   <td width='40'></td>\n";
 	print "   <td width='40'></td>\n   <td width='95'></td>\n";
 	print "   <td width='95'></td>\n   <td width='260'></td>\n";
@@ -333,11 +332,11 @@ print <<END
 END
 ;
 
-# We´ll open the txt files and extract each line, if the line
+# We´ll get iptables output and examine each line, if the line
 # start with an Chain the the name, start- and endline of the
 # chain is extracted into a hash
 
-	open (FILE, '/srv/web/ipfire/html/iptablesnat.txt');
+	open (FILE, '/usr/local/bin/getipstat -n | ');
 	while (<FILE>){
 
 		$ipnatlines[$natlines] = $_;
@@ -351,11 +350,11 @@ END
 			}
 
 			$chainname = $chainstring[1];
-			$chainsnat{$chainname."start"} = $natlines; 
+			$chainsnat{$chainname."start"} = $natlines;
 		}
 
 		$natlines++;
-	   
+
 	}
 	$chainsnat{$chainname."end"} = $natlines-1;
 	close (FILE);
@@ -399,8 +398,8 @@ END
 	print "</tr>\n";
 
 	print "<tr>\n";
-	print "   <td width='0'></td>\n   <td width='35'></td>\n   <td width='35'></td>\n";
-	print "   <td width='130'></td>\n   <td width='30'></td>\n";
+	print "   <td width='0'></td>\n   <td width='60'></td>\n   <td width='60'></td>\n";
+	print "   <td width='150'></td>\n   <td width='30'></td>\n";
 	print "   <td width='30'></td>\n   <td width='40'></td>\n";
 	print "   <td width='40'></td>\n   <td width='95'></td>\n";
 	print "   <td width='95'></td>\n   <td width='260'></td>\n";
@@ -433,7 +432,3 @@ print "</table></div><br />";
 &Header::closebox();
 &Header::closebigbox();
 &Header::closepage();
-
-system(rm -f "/srv/web/ipfire/html/iptables.txt");
-system(rm -f "/srv/web/ipfire/html/iptablesmangle.txt");
-system(rm -f "/srv/web/ipfire/html/iptablesnat.txt");

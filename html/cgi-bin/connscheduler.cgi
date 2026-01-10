@@ -34,7 +34,7 @@ require '/var/ipfire/connscheduler/lib.pl';
 my %color = ();
 my %mainsettings = ();
 &General::readhash("${General::swroot}/main/settings", \%mainsettings);
-&General::readhash("/srv/web/ipfire/html/themes/".$mainsettings{'THEME'}."/include/colors.txt", \%color);
+&General::readhash("/srv/web/ipfire/html/themes/ipfire/include/colors.txt", \%color);
 
 my $buttontext = $Lang::tr{'add'};
 my $hiddenvalue = 'add';
@@ -138,7 +138,7 @@ if ( $cgiparams{'ACTION'} eq 'toggle' )
   {
     $CONNSCHED::config[$cgiparams{'ID'}]{'ACTIVE'} = 'on';
   }
-  
+
   &CONNSCHED::WriteConfig;
 }
 
@@ -194,7 +194,7 @@ if ( ($cgiparams{'ACTION'} eq 'add') || ($cgiparams{'ACTION'} eq 'update') )
 if ( $cgiparams{'ACTION'} eq 'edit' )
 {
   $i = $cgiparams{'ID'};
-  
+
   $selected_hour = substr($CONNSCHED::config[$i]{'TIME'},0,2);
   $selected_minute = substr($CONNSCHED::config[$i]{'TIME'},3,2);
 
@@ -412,7 +412,7 @@ END
 my $col="";
 for my $id ( 0 .. $#CONNSCHED::config )
 {
-  if ( ($cgiparams{'ACTION'} eq 'edit') && ($id == $cgiparams{'ID'}) ) 
+  if ( ($cgiparams{'ACTION'} eq 'edit') && ($id == $cgiparams{'ID'}) )
   {
     print "<tr>";
     $col="bgcolor='${Header::colouryellow}'";
@@ -422,7 +422,7 @@ for my $id ( 0 .. $#CONNSCHED::config )
     print "<tr>";
     $col="bgcolor='$color{'color20'}'";
   }
-  else 
+  else
   {
     print "<tr>";
     $col="bgcolor='$color{'color22'}'";

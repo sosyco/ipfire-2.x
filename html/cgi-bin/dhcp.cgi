@@ -2,7 +2,7 @@
 ###############################################################################
 #                                                                             #
 # IPFire.org - A linux based firewall                                         #
-# Copyright (C) 2007  Michael Tremer & Christian Schmidt                      #
+# Copyright (C) 2007-2024  IPFire Team  <info@ipfire.org>                     #
 #                                                                             #
 # This program is free software: you can redistribute it and/or modify        #
 # it under the terms of the GNU General Public License as published by        #
@@ -20,6 +20,7 @@
 ###############################################################################
 
 use strict;
+use experimental 'smartmatch';
 
 # enable only the following on debugging purpose
 #use warnings;
@@ -46,8 +47,8 @@ my $warnNTPmessage = '';
 my @nosaved=();
 my %color = ();
 
-#Basic syntax allowed for new Option definition. Not implemented: RECORDS & array of RECORDS 
-our $OptionTypes = 'boolean|((un)?signed )?integer (8|16|32)|ip-address|text|string|encapsulate \w+|array of ip-address';
+#Basic syntax allowed for new Option definition. Not implemented: RECORDS & array of RECORDS
+our $OptionTypes = 'boolean|((un)?signed )?integer (8|16|32)|ip-address|text|string|encapsulate \w+|array of (ip-address|integer (8|16|32))';
 
 &Header::showhttpheaders();
 our @ITFs=('GREEN');
@@ -73,6 +74,7 @@ foreach my $itf (@ITFs) {
     $dhcpsettings{"DNS_UPDATE_KEY_NAME_${itf}"} = '';
     $dhcpsettings{"DNS_UPDATE_KEY_SECRET_${itf}"} = '';
     $dhcpsettings{"DNS_UPDATE_KEY_ALGO_${itf}"} = '';
+    $dhcpsettings{"DENY_KNOWN_CLIENTS_${itf}"} = 'off';
 }
 
 $dhcpsettings{'SORT_FLEASELIST'} = 'FIPADDR';
@@ -109,7 +111,7 @@ foreach my $itf (@ITFs) {
 &General::readhash("${General::swroot}/ethernet/settings", \%netsettings);
 &General::readhash("${General::swroot}/main/settings", \%mainsettings);
 &General::readhash("${General::swroot}/time/settings", \%timesettings);
-&General::readhash("/srv/web/ipfire/html/themes/".$mainsettings{'THEME'}."/include/colors.txt", \%color);
+&General::readhash("/srv/web/ipfire/html/themes/ipfire/include/colors.txt", \%color);
 
 #Get GUI values
 &Header::getcgihash(\%dhcpsettings);
@@ -128,6 +130,15 @@ open(FILE, "$filename2") or die 'Unable to open fixed leases file.';
 our @current2 = <FILE>;
 close(FILE);
 
+# Open and read-in file which contains the list of allowed advanced options.
+open(FILE, $filename3) or die "Could not open $filename3. $!\n";
+
+# Grab file content.
+my @advoptions_list = <FILE>;
+
+# Close file handle.
+close(FILE);
+
 # Check Settings1 first because they are needed by &buildconf
 if ($dhcpsettings{'ACTION'} eq $Lang::tr{'save'}) {
     foreach my $itf (@ITFs) {
@@ -142,14 +153,14 @@ if ($dhcpsettings{'ACTION'} eq $Lang::tr{'save'}) {
 		    $errormessage = "DHCP on ${itf}: " . $Lang::tr{'invalid end address'};
 		    goto ERROR;
 		}
-		if (! &General::IpInSubnet ( $dhcpsettings{"START_ADDR_${itf}"}, 
+		if (! &General::IpInSubnet ( $dhcpsettings{"START_ADDR_${itf}"},
 				    $netsettings{"${itf}_NETADDRESS"},
 				    $netsettings{"${itf}_NETMASK"})) {
 		    $errormessage = "DHCP on ${itf}: " . $Lang::tr{'invalid start address'};
 		    goto ERROR;
 		}
 	    }
-	    
+
 	    if ($dhcpsettings{"END_ADDR_${itf}"}) {
 		if (!(&General::validip($dhcpsettings{"END_ADDR_${itf}"}))) {
 		    $errormessage = "DHCP on ${itf}: " . $Lang::tr{'invalid end address'};
@@ -159,9 +170,9 @@ if ($dhcpsettings{'ACTION'} eq $Lang::tr{'save'}) {
 		    $errormessage = "DHCP on ${itf}: " . $Lang::tr{'invalid start address'};
 		    goto ERROR;
 		}
-		if (! &General::IpInSubnet ( $dhcpsettings{"END_ADDR_${itf}"}, 
+		if (! &General::IpInSubnet ( $dhcpsettings{"END_ADDR_${itf}"},
 				    $netsettings{"${itf}_NETADDRESS"},
-				    $netsettings{"${itf}_NETMASK"})) { 
+				    $netsettings{"${itf}_NETMASK"})) {
 		    $errormessage = "DHCP on ${itf}: " . $Lang::tr{'invalid end address'};
 		    goto ERROR;
 		}
@@ -171,6 +182,13 @@ if ($dhcpsettings{'ACTION'} eq $Lang::tr{'save'}) {
 		if ( $endoct[2]*256+$endoct[3] < $startoct[2]*256+$startoct[3] ) {
 		    ($dhcpsettings{"START_ADDR_${itf}"},$dhcpsettings{"END_ADDR_${itf}"}) =
 			($dhcpsettings{"END_ADDR_${itf}"},$dhcpsettings{"START_ADDR_${itf}"});
+		}
+	    }
+
+	    if ($dhcpsettings{"DENY_KNOWN_CLIENTS_${itf}"} eq 'on') {
+		if (($dhcpsettings{"START_ADDR_${itf}"}) eq '' && ($dhcpsettings{"END_ADDR_${itf}"}) eq '') {
+			$errormessage = "DHCP on ${itf}: " . $Lang::tr{'dhcp valid range required when deny known clients checked'};
+			goto ERROR;
 		}
 	    }
 
@@ -196,7 +214,7 @@ if ($dhcpsettings{'ACTION'} eq $Lang::tr{'save'}) {
 			goto ERROR;
 		}
 		if (! $dhcpsettings{"DNS1_${itf}"}) {
-			$errormessage = "DHCP on ${itf}: " . $Lang::tr{'cannot specify secondary dns without specifying primary'}; 
+			$errormessage = "DHCP on ${itf}: " . $Lang::tr{'cannot specify secondary dns without specifying primary'};
 			goto ERROR;
 		}
 	    }
@@ -215,7 +233,7 @@ if ($dhcpsettings{'ACTION'} eq $Lang::tr{'save'}) {
 		if (! $dhcpsettings{"WINS1_${itf}"} ) {
 			$errormessage = "DHCP on ${itf}: " . $Lang::tr{'cannot specify secondary wins without specifying primary'};
 			goto ERROR;
-		}		
+		}
 	    }
 	    if ($dhcpsettings{"NEXT_${itf}"}) {
 		if (!(&General::validip($dhcpsettings{"NEXT_${itf}"}))) {
@@ -277,14 +295,14 @@ if ($ENV{'QUERY_STRING'} =~ /^FETHER|^FIPADDR/ ) {
     &General::writehash($setting, \%dhcpsettings);
     &sortcurrent2;
     $dhcpsettings{'ACTION'} = 'SORT';			# create an 'ACTION'
-    map ($dhcpsettings{$_} = '',@nosaved,'KEY1','KEY2');# and reinit vars to empty 
+    map ($dhcpsettings{$_} = '',@nosaved,'KEY1','KEY2');# and reinit vars to empty
 }
 
 #Sorting of allocated leases
 &Header::CheckSortOrder;
 
 
-## Now manipulate the two multi-line list with Settings2. 
+## Now manipulate the two multi-line list with Settings2.
 #  '1' suffix is for ADVANCED OPTIONS
 #  '2' suffix is for FIXED LEASES
 
@@ -301,12 +319,12 @@ if ($dhcpsettings{'ACTION'} eq $Lang::tr{'toggle enable disable'}.'1') {
     open(FILE, ">$filename1") or die 'Unable to open dhcp advanced options file.';
     print FILE @current1;
     close(FILE);
-	
+
     #Write changes to dhcpd.conf.
     &buildconf;
 }
 
-    
+
 
 if ($dhcpsettings{'ACTION'} eq $Lang::tr{'add'}.'1' &&
 	$dhcpsettings{'SUBMIT'} ne $Lang::tr{'dhcp advopt help'}) {
@@ -316,7 +334,7 @@ if ($dhcpsettings{'ACTION'} eq $Lang::tr{'add'}.'1' &&
     if ($dhcpsettings{'ADVOPT_DATA'} eq '') {
 	$errormessage=$Lang::tr{'dhcp advopt blank value'};
     }
-    
+
     # Test for a new option definition string (join field name & data)
     if (ExistNewOptionDefinition ($dhcpsettings{'ADVOPT_NAME'} . ' ' . $dhcpsettings{'ADVOPT_DATA'})) {
 	#only edit permitted if option definition exists
@@ -329,12 +347,12 @@ if ($dhcpsettings{'ACTION'} eq $Lang::tr{'add'}.'1' &&
 	map ($dhcpsettings{"ADVOPT_SCOPE_$_"} = 'off', @ITFs);	# force global
     } elsif (ValidNewOption ($dhcpsettings{'ADVOPT_NAME'} . ' ' . $dhcpsettings{'ADVOPT_DATA'})) {
 	#was a new option
-    } elsif (! `grep "\$option $dhcpsettings{'ADVOPT_NAME'} " $filename3`) {
+    } elsif (! grep(/option $dhcpsettings{'ADVOPT_NAME'}/, @advoptions_list)) {
 	$errormessage=$Lang::tr{'dhcp advopt unknown'}.': '.$dhcpsettings{'ADVOPT_NAME'};
     }
 
     unless ($errormessage) {
-	
+
 	my $scope = '';
 	foreach my $itf (@ITFs) {  # buils "RED,GREEN,ORANGE,... based on selection
 	    $scope .= $dhcpsettings{"ADVOPT_SCOPE_${itf}"} eq 'on' ? "\t$itf" : "\toff" ;
@@ -369,7 +387,7 @@ if ($dhcpsettings{'ACTION'} eq $Lang::tr{'edit'}.'1') {
 	if ($itf ne 'off') # Only is an interface name is read
 	{
 	    $dhcpsettings{"ADVOPT_SCOPE_${itf}"} = 'on';
-	}    
+	}
     }
 }
 
@@ -398,7 +416,7 @@ if ($dhcpsettings{'ACTION'} eq $Lang::tr{'toggle enable disable'}.'2') {
     open(FILE, ">$filename2") or die 'Unable to open fixed leases file.';
     print FILE @current2;
     close(FILE);
-	
+
     #Write changes to dhcpd.conf.
     &buildconf;
 }
@@ -410,7 +428,7 @@ if ($dhcpsettings{'ACTION'} eq $Lang::tr{'add'}.'2') {
     if ($dhcpsettings{'FIX_NEXTADDR'}) {
         unless(&General::validip($dhcpsettings{'FIX_NEXTADDR'})) { $errormessage = $Lang::tr{'invalid fixed ip address'}; }
     }
-	
+
     my $key = 0;
     CHECK:foreach my $line (@current2) {
         my @temp = split(/\,/,$line);
@@ -420,13 +438,13 @@ if ($dhcpsettings{'ACTION'} eq $Lang::tr{'add'}.'2') {
 	    # Also it may be needed to put duplicate fixed lease in their right subnet definition..
 	    foreach my $itf (@ITFs) {
 		my $scoped = &General::IpInSubnet($dhcpsettings{'FIX_ADDR'},
-						  $netsettings{"${itf}_NETADDRESS"}, 
+						  $netsettings{"${itf}_NETADDRESS"},
 						  $netsettings{"${itf}_NETMASK"}) &&
 						  $dhcpsettings{"ENABLE_${itf}"} eq 'on';
 		if ( $scoped &&
 		    (lc($dhcpsettings{'FIX_MAC'}) eq lc($temp[0])) &&
 		    &General::IpInSubnet($temp[1],
-					 $netsettings{"${itf}_NETADDRESS"}, 
+					 $netsettings{"${itf}_NETADDRESS"},
 					 $netsettings{"${itf}_NETMASK"})) {
 		    $errormessage = "$Lang::tr{'mac address in use'} $dhcpsettings{'FIX_MAC'}";
 		    last CHECK;
@@ -443,18 +461,23 @@ if ($dhcpsettings{'ACTION'} eq $Lang::tr{'add'}.'2') {
 	$dhcpsettings{'FIX_ROOTPATH'} = &Header::cleanhtml($dhcpsettings{'FIX_ROOTPATH'});
 	if ($dhcpsettings{'KEY2'} eq '') { #add or edit ?
 	    unshift (@current2, "$dhcpsettings{'FIX_MAC'},$dhcpsettings{'FIX_ADDR'},$dhcpsettings{'FIX_ENABLED'},$dhcpsettings{'FIX_NEXTADDR'},$dhcpsettings{'FIX_FILENAME'},$dhcpsettings{'FIX_ROOTPATH'},$dhcpsettings{'FIX_REMARK'}\n");
+	    open(FILE, ">$filename2") or die 'Unable to open fixed lease file.';
+	    print FILE @current2;
+	    close(FILE);
 	    &General::log($Lang::tr{'fixed ip lease added'});
 
 	    # Enter edit mode
-	    $dhcpsettings{'KEY2'} = $key;
+	    $dhcpsettings{'KEY2'} = 0;
 	} else {
 	    @current2[$dhcpsettings{'KEY2'}] = "$dhcpsettings{'FIX_MAC'},$dhcpsettings{'FIX_ADDR'},$dhcpsettings{'FIX_ENABLED'},$dhcpsettings{'FIX_NEXTADDR'},$dhcpsettings{'FIX_FILENAME'},$dhcpsettings{'FIX_ROOTPATH'},$dhcpsettings{'FIX_REMARK'}\n";
 	    $dhcpsettings{'KEY2'} = '';       # End edit mode
 	    &General::log($Lang::tr{'fixed ip lease modified'});
+
+	    # sort newly added/modified entry
+	    &sortcurrent2;
 	}
 
         #Write changes to dhcpd.conf.
-        &sortcurrent2;    # sort newly added/modified entry
         &buildconf;       # before calling buildconf which use fixed lease file !
     }
 }
@@ -521,9 +544,11 @@ if ($dhcpsettings{'ACTION'} eq '' ) { # First launch from GUI
 	}
     }
     $dhcpsettings{'FIX_ENABLED'} = 'on';
-}
+    $dhcpsettings{'ADVOPT_ENABLED'} = 'on';
+    }
 
-&Header::openpage($Lang::tr{'dhcp configuration'}, 1, '');
+### START PAGE ###
+&Header::openpage($Lang::tr{'dhcp configuration'}, 1, $Header::extraHead);
 &Header::openbigbox('100%', 'left', '', $errormessage);
 
 if ($errormessage) {
@@ -542,6 +567,7 @@ foreach my $itf (@ITFs) {
     my %checked=();
     $checked{'ENABLE'}{'on'} = ( $dhcpsettings{"ENABLE_${itf}"} ne 'on') ? '' : "checked='checked'";
     $checked{'ENABLEBOOTP'}{'on'} = ( $dhcpsettings{"ENABLEBOOTP_${itf}"} ne 'on') ? '' : "checked='checked'";
+    $checked{'DENY_KNOWN_CLIENTS'}{'on'} = ( $dhcpsettings{"DENY_KNOWN_CLIENTS_${itf}"} ne 'on') ? '' : "checked='checked'";
 
     if ($netsettings{"${itf}_DEV"} ne '' ) { # Show only defined interface
 	my $lc_itf=lc($itf);
@@ -557,6 +583,9 @@ print <<END
     <td width='25%'><input type='text' name='START_ADDR_${itf}' value='$dhcpsettings{"START_ADDR_${itf}"}' /></td>
     <td width='25%' class='base'>$Lang::tr{'end address'}&nbsp;<img src='/blob.gif' alt='*' /></td>
     <td width='25%'><input type='text' name='END_ADDR_${itf}' value='$dhcpsettings{"END_ADDR_${itf}"}' /></td>
+</tr><tr>
+    <td class='base'>$Lang::tr{'dhcp deny known clients:'}</td>
+    <td><input type='checkbox' name='DENY_KNOWN_CLIENTS_${itf}' $checked{'DENY_KNOWN_CLIENTS'}{'on'} /></td>
 </tr><tr>
     <td class='base'>$Lang::tr{'default lease time'}&nbsp;<img src='/blob.gif' alt='*' /></td>
     <td><input type='text' name='DEFAULT_LEASE_TIME_${itf}' value='$dhcpsettings{"DEFAULT_LEASE_TIME_${itf}"}' /></td>
@@ -615,7 +644,7 @@ $checked{'DNS_UPDATE_ENABLED'}{'on'} = ( $dhcpsettings{'DNS_UPDATE_ENABLED'} ne 
 print <<END
 <table  width='100%'>
 	<tr>
-		<td width='25%' class='boldbase'>$Lang::tr{'dhcp dns enable update'}</td>
+		<td width='30%' class='boldbase'>$Lang::tr{'dhcp dns enable update'}</td>
 		<td class='base'><input type='checkbox' name='DNS_UPDATE_ENABLED' $checked{'DNS_UPDATE_ENABLED'}{'on'}>
 		</td>
 	<tr>
@@ -695,7 +724,20 @@ if ($dhcpsettings{'KEY1'} ne '') {
 }
 
 #search if the 'option' is in the list and print the syntax model
-my $opt = `grep "\$option $dhcpsettings{'ADVOPT_NAME'} " $filename3`;
+my $opt;
+
+# Check if a advanced option name is set.
+if ($dhcpsettings{'ADVOPT_NAME'}) {
+	# Check if the name is part of the list and grab syntax.
+	my @opt = grep(/option $dhcpsettings{'ADVOPT_NAME'}/, @advoptions_list);
+
+	# Assign array element to variable.
+	$opt = @opt[0];
+
+	# Remove newlines.
+	chomp($opt);
+}
+
 if ($opt ne '') {
    $opt =~ s/option $dhcpsettings{'ADVOPT_NAME'}/Syntax:/;  # "option xyz abc" => "syntax: abc"
    $opt =~ s/;//;
@@ -714,10 +756,10 @@ print <<END
 END
 ;
 
-# Put a checkbox for each interface. Checkbox visible disabled if interface is disabled  
+# Put a checkbox for each interface. Checkbox visible disabled if interface is disabled
 foreach my $itf (@ITFs) {
     my $lc_itf=lc($itf);
-    $checked{'ADVOPT_SCOPE_${itf}'}{'on'} = $dhcpsettings{"ADVOPT_SCOPE_${itf}"} ne 'on' ? '' : "checked='checked'";    
+    $checked{'ADVOPT_SCOPE_${itf}'}{'on'} = $dhcpsettings{"ADVOPT_SCOPE_${itf}"} ne 'on' ? '' : "checked='checked'";
     print "$Lang::tr{\"${lc_itf}\"} <input type='checkbox' name='ADVOPT_SCOPE_${itf}' $checked{'ADVOPT_SCOPE_${itf}'}{'on'} ";
     print $dhcpsettings{"ENABLE_${itf}"} eq 'on' ? "/>" : "disabled='disabled' />";
     print "&nbsp; &nbsp;";
@@ -759,6 +801,7 @@ if ($dhcpsettings{'SUBMIT'} eq $Lang::tr{'dhcp advopt help'}) {
     print "<tr><td colspan='2'><hr /></td></tr>\n";
     print '<tr><td>string type</td><td>"quoted string" or 00:01:FF...</td></tr>';
     print '<tr><td>ip-address type </td><td>10.0.0.1 | www.dot.com</td></tr>';
+    print '<tr><td>domain-list type </td><td>"example.com", "eng.example.com", "sales.example.com"</td></tr>';
     print '<tr><td>int,uint types</td><td>numbers</td></tr>';
     print '<tr><td>flag type</td><td>on | off</td></tr>';
     print '</table>';
@@ -771,7 +814,7 @@ if ($dhcpsettings{'SUBMIT'} eq $Lang::tr{'dhcp advopt help'}) {
     print '<tr><td>wpad</td><td>code 252=text</td></tr>';
     print '<tr><td>wpad</td><td>"http://www.server.fr/path-to/proxy.pac"</td></tr>';
     print '</table>';
- 
+
 }
 
 print <<END
@@ -797,15 +840,15 @@ foreach my $line (@current1) {
 	$gdesc = $Lang::tr{'click to disable'};
     } else {
 	$gif = 'off.gif';
-	$gdesc = $Lang::tr{'click to enable'}; 
+	$gdesc = $Lang::tr{'click to enable'};
     }
 
     if ($dhcpsettings{'KEY1'} eq $key) {
-	print "<tr bgcolor='${Header::colouryellow}'>";
+	print "<tr class='colouryellow'>";
     } elsif ($key % 2) {
-	print "<tr bgcolor='$color{'color22'}'>";
+	print "<tr class='color22'>";
     } else {
-	print "<tr bgcolor='$color{'color20'}'>"; 
+	print "<tr class='color20'>";
     }
 
     print <<END
@@ -826,8 +869,8 @@ END
     } else {
 	$global = $Lang::tr{'dhcp advopt scope global'};
     }
-    
-    
+
+
     # Print each checked interface
     for (my $key=0; $key<@ITFs; $key++) {
 	my $itf = $temp[3+$key];
@@ -978,26 +1021,34 @@ my $ipdup = 0;
 my %ipinuse = ();
 my %macdupl = (); # Duplicate MACs have to be on different subnets
 my %ipoutside = ();
+my %ipinrange = ();
 
-# mark duplicate ip or duplicate MAC
+# mark duplicate IP, duplicate MAC or IP in dynamic range
 foreach my $line (@current2) {
     my @temp = split(/\,/,$line);
     $macdupl{$temp[0]} += 1;
-    if ($macdupl{$temp[0]} > 1) { 
+    if ($macdupl{$temp[0]} > 1) {
 	$ipdup = 1; 	# Flag up duplicates for use later
     }
     $ipinuse{$temp[1]} += 1;
-    if ($ipinuse{$temp[1]} > 1) { 
+    if ($ipinuse{$temp[1]} > 1) {
 	$ipdup = 1; 	# Flag up duplicates for use later
     }
-    # Mark IP addresses outwith known subnets
     $ipoutside{$temp[1]} = 1;
+    $ipinrange{$temp[1]} = 0;
     foreach my $itf (@ITFs) {
-        if ( &General::IpInSubnet($temp[1],
-                $netsettings{"${itf}_NETADDRESS"}, 
-                $netsettings{"${itf}_NETMASK"})) {
-            $ipoutside{$temp[1]} = 0;
-        }
+    # Mark IP addresses outwith known subnets
+            	if ( &General::IpInSubnet($temp[1],
+                	$netsettings{"${itf}_NETADDRESS"},
+                	$netsettings{"${itf}_NETMASK"})) {
+            	   $ipoutside{$temp[1]} = 0;
+        	}
+    # Mark IP addresses that overlap with dynamic range
+	    	if (&Network::ip_address_in_range($temp[1],
+		        $dhcpsettings{"START_ADDR_${itf}"},
+		        $dhcpsettings{"END_ADDR_${itf}"})) {
+            	   $ipinrange{$temp[1]} = 1;
+        	}        
     }
 }
 
@@ -1014,7 +1065,7 @@ foreach my $line (@current2) {
 	$gdesc = $Lang::tr{'click to disable'};
     } else {
 	$gif = 'off.gif';
-	$gdesc = $Lang::tr{'click to enable'}; 
+	$gdesc = $Lang::tr{'click to enable'};
     }
 
     # Skip all entries that do not match the search query
@@ -1027,34 +1078,37 @@ foreach my $line (@current2) {
 
     if ($dhcpsettings{'KEY2'} eq $key) {
 	print "<tr>";
-	$col="bgcolor='${Header::colouryellow}'";
+	$col="class='colouryellow'";
     } elsif ($key % 2) {
 	print "<tr>";
-	$col="bgcolor='$color{'color20'}'";
+	$col="class='color20'";
     } else {
 	print "<tr>";
-	$col="bgcolor='$color{'color22'}'";
+	$col="class='color22'";
     }
     my $TAG0 = '';
     my $TAG1 = '';
     my $TAG2 = '';
     my $TAG3 = '';
     my $TAG4 = '';
-    if ($ipinuse{$temp[1]} > 1) { 
+    if ($ipinuse{$temp[1]} > 1) {
 	$TAG0 = '<b>';
 	$TAG1 = '</b>';
     }
-    if ($macdupl{$temp[0]} > 1) { 
+    if ($macdupl{$temp[0]} > 1) {
 	$TAG2 = '<b>';
 	$TAG3 = '</b>';
     }
-    if ($ipoutside{$temp[1]} > 0) { 
-	$TAG4 = "bgcolor='orange'" if ($dhcpsettings{'KEY2'} ne $key);
+    if ($ipoutside{$temp[1]} > 0) {
+	$TAG4 = "class='orange'" if ($dhcpsettings{'KEY2'} ne $key);
+    }
+    if ($ipinrange{$temp[1]} > 0) { 
+	$TAG4 = "class='red'" if ($dhcpsettings{'KEY2'} ne $key);
     }
 
     print <<END
 <td align='center' $col>$TAG2$temp[0]$TAG3</td>
-<td align='center' $col $TAG4>$TAG0$temp[1]$TAG1</td>
+<td align='center' $TAG4 $col>$TAG0$temp[1]$TAG1</td>
 <td align='center' $col>$temp[6]&nbsp;</td>
 <td align='center' $col>$temp[3]&nbsp;</td>
 <td align='center' $col>$temp[4]&nbsp;</td>
@@ -1099,7 +1153,6 @@ print <<END
 	<td class='boldbase'>&nbsp;<b>$Lang::tr{'legend'}:&nbsp;</b></td>
 	<td><img src='/images/on.gif' alt='$Lang::tr{'click to disable'}' /></td>
 	<td class='base'>$Lang::tr{'click to disable'}</td>
-	<td>&nbsp;&nbsp;</td>
 	<td><img src='/images/off.gif' alt='$Lang::tr{'click to enable'}' /></td>
 	<td class='base'>$Lang::tr{'click to enable'}</td>
 	<td>&nbsp;&nbsp;</td>
@@ -1111,8 +1164,10 @@ print <<END
 </tr>
 <tr>
 	<td>&nbsp;</td>
-	<td bgcolor='orange'>&nbsp;</td>
-	<td class='base'>$Lang::tr{'ip address outside subnets'}</td>
+	<td class='base orange'>&nbsp;</td>
+	<td class='base'>&nbsp;$Lang::tr{'ip address outside subnets'}&emsp;</td>
+       <td class='base red'>&nbsp;</td>
+       <td class='base'>&nbsp;$Lang::tr{'dhcp fixed ip address in dynamic range'}</td>
 	<td>&nbsp;</td>
 	<td>&nbsp;</td>
 	$dup
@@ -1189,7 +1244,7 @@ sub sortcurrent2
 	# use combination of ether & IP as key to allow duplicates in either but not both
 	$entries{$record->{FETHER} . $record->{FIPADDR}} = $record; # add this to a hash of hashes
     }
-    
+
     open(FILE, ">$filename2") or die 'Unable to open fixed lease file.';
     foreach my $entry ( sort fixedleasesort keys %entries) {
 	print FILE "$entries{$entry}->{FETHER},$entries{$entry}->{FIPADDR},$entries{$entry}->{DATA}\n";
@@ -1202,7 +1257,7 @@ sub sortcurrent2
     close (FILE);
     undef (%entries);  #This array is reused latter. Clear it.
 }
-						    
+
 # Build the configuration file mixing  settings, fixed leases and advanced options
 sub buildconf {
     open(FILE, ">/${General::swroot}/dhcp/dhcpd.conf") or die "Unable to write dhcpd.conf file";
@@ -1222,7 +1277,7 @@ sub buildconf {
     } else {
         print FILE "ddns-update-style none;\n";
     }
-    
+
     # Write first new option definition
     foreach my $line (@current1) {
 	chomp($line);   # remove newline
@@ -1235,7 +1290,7 @@ sub buildconf {
     foreach my $line (@current1) {
 	chomp($line);   # remove newline
 	my @temp = split(/\t/,$line);
-	
+
 	if ($temp[0] eq 'on' && !ExistNewOptionDefinition ($temp[1] . ' ' . $temp[2])){ # active & !definition
 	    my $global=1;
 	    for (my $key=0; $key<@ITFs; $key++) {
@@ -1248,7 +1303,7 @@ sub buildconf {
 	    if ($global) {
 		print FILE "option $temp[1] $temp[2];\n";
 	    }
-	}# on    
+	}# on
     }# foreach line
     print FILE "\n";
 
@@ -1258,7 +1313,12 @@ sub buildconf {
 	if ($dhcpsettings{"ENABLE_${itf}"} eq 'on' ){
 	    print FILE "subnet " . $netsettings{"${itf}_NETADDRESS"} . " netmask ". $netsettings{"${itf}_NETMASK"} . " #$itf\n";
 	    print FILE "{\n";
-	    print FILE "\trange " . $dhcpsettings{"START_ADDR_${itf}"} . ' ' . $dhcpsettings{"END_ADDR_${itf}"}.";\n" if ($dhcpsettings{"START_ADDR_${itf}"});
+	    if ($dhcpsettings{"START_ADDR_${itf}"}) {
+		print FILE "pool {\n";
+		print FILE "\trange " . $dhcpsettings{"START_ADDR_${itf}"} . ' ' . $dhcpsettings{"END_ADDR_${itf}"}.";\n";
+		print FILE "\tdeny known-clients;\n" if ($dhcpsettings{"DENY_KNOWN_CLIENTS_${itf}"} eq 'on');
+		print FILE "     }\n"; # pool
+	    }
 	    print FILE "\toption subnet-mask "   . $netsettings{"${itf}_NETMASK"} . ";\n";
 	    print FILE "\toption domain-name \"" . $dhcpsettings{"DOMAIN_NAME_${itf}"} . "\";\n";
 	    print FILE "\toption routers " . $netsettings{"${itf}_ADDRESS"} . ";\n";
@@ -1272,7 +1332,7 @@ sub buildconf {
 	    print FILE ", " . $dhcpsettings{"WINS2_${itf}"}                            if ($dhcpsettings{"WINS2_${itf}"});
 	    print FILE ";\n"                                                           if ($dhcpsettings{"WINS1_${itf}"});
 	    print FILE "\tnext-server " . $dhcpsettings{"NEXT_${itf}"} . ";\n" if ($dhcpsettings{"NEXT_${itf}"});
-	    print FILE "\tfilename \"" . $dhcpsettings{"FILE_${itf}"} . "\";\n" if ($dhcpsettings{"FILE_${itf}"});
+	    print FILE "\tfilename \"" . &EscapeFilename($dhcpsettings{"FILE_${itf}"}) . "\";\n" if ($dhcpsettings{"FILE_${itf}"});
 	    print FILE "\tdefault-lease-time " . ($dhcpsettings{"DEFAULT_LEASE_TIME_${itf}"} * 60). ";\n";
 	    print FILE "\tmax-lease-time "     . ($dhcpsettings{"MAX_LEASE_TIME_${itf}"} * 60)    . ";\n";
 	    print FILE "\tallow bootp;\n" if ($dhcpsettings{"ENABLEBOOTP_${itf}"} eq 'on');
@@ -1283,7 +1343,7 @@ sub buildconf {
 	    foreach my $line (@current1) {
 		chomp($line);   # remove newline
 		my @temp = split(/\t/,$line);		# Use TAB separator !
-	
+
 		if ($temp[0] eq 'on'){
 		    for (my $key=0; $key<@ITFs; $key++) {
 			if ($itf eq $temp[3+$key]) # Only is an interface name is read
@@ -1291,7 +1351,7 @@ sub buildconf {
 			    print FILE "\toption $temp[1] $temp[2];\n";
 			}
 		    }
-		}# on    
+		}# on
 	    }# foreach line
 	    print FILE "} #$itf\n\n";
 
@@ -1306,13 +1366,56 @@ sub buildconf {
 		print FILE "}\n\n";
 	    }
 
-	    system ('/usr/bin/touch', "${General::swroot}/dhcp/enable_${lc_itf}");
+	    &General::system('/usr/bin/touch', "${General::swroot}/dhcp/enable_${lc_itf}");
 	    &General::log("DHCP on ${itf}: " . $Lang::tr{'dhcp server enabled'})
 	} else {
 	    unlink "${General::swroot}/dhcp/enable_${lc_itf}";
 	    &General::log("DHCP on ${itf}: " . $Lang::tr{'dhcp server disabled'})
 	}
     }
+
+	# Add event handlers
+	print FILE <<EOF;
+on commit {
+	set ClientAddress = concat(
+		"ADDRESS=",
+		binary-to-ascii(10, 8, ".", leased-address)
+	);
+	set ClientName = concat(
+		"NAME=",
+		pick-first-value(option host-name, config-option-host-name, client-name, "")
+	);
+
+	if (ClientName != "") {
+		execute("/usr/sbin/unbound-dhcp-leases-client", "commit", ClientAddress, ClientName);
+	}
+}
+
+on release {
+	set ClientAddress = concat(
+		"ADDRESS=",
+		binary-to-ascii(10, 8, ".", leased-address)
+	);
+	set ClientName = concat(
+		"NAME=",
+		pick-first-value(option host-name, config-option-host-name, client-name, "")
+	);
+
+	if (ClientName != "") {
+		execute("/usr/sbin/unbound-dhcp-leases-client", "release", ClientAddress, ClientName);
+	}
+}
+
+on expiry {
+	set ClientAddress = concat(
+		"ADDRESS=",
+		binary-to-ascii(10, 8, ".", leased-address)
+	);
+
+	execute("/usr/sbin/unbound-dhcp-leases-client", "expiry", ClientAddress);
+}
+
+EOF
 
     #write fixed leases if any. Does not handle duplicates to write them elsewhere than the global scope.
     my $key = 0;
@@ -1325,7 +1428,7 @@ sub buildconf {
 	    print FILE "\thardware ethernet $temp[0];\n";
 	    print FILE "\tfixed-address $temp[1];\n";
 	    print FILE "\tnext-server $temp[3];\n"          if ($temp[3]);
-	    print FILE "\tfilename \"$temp[4]\";\n"         if ($temp[4]);
+	    print FILE "\tfilename \"" . &EscapeFilename($temp[4]) . "\";\n" if ($temp[4]);
 	    print FILE "\toption root-path \"$temp[5]\";\n" if ($temp[5]);
 	    print FILE "}\n";
 	    $key++;
@@ -1333,9 +1436,9 @@ sub buildconf {
     }
     print FILE "include \"${General::swroot}/dhcp/dhcpd.conf.local\";\n";
     close FILE;
-    if ( $dhcpsettings{"ENABLE_GREEN"} eq 'on' || $dhcpsettings{"ENABLE_BLUE"} eq 'on' ) {system '/usr/local/bin/dhcpctrl enable >/dev/null 2>&1';}
-    else {system '/usr/local/bin/dhcpctrl disable >/dev/null 2>&1';}
-    system '/usr/local/bin/dhcpctrl restart >/dev/null 2>&1';
+    if ( $dhcpsettings{"ENABLE_GREEN"} eq 'on' || $dhcpsettings{"ENABLE_BLUE"} eq 'on' ) {&General::system('/usr/local/bin/dhcpctrl', 'enable');}
+    else {&General::system('/usr/local/bin/dhcpctrl', 'disable');}
+    &General::system_background('/usr/local/bin/dhcpctrl', 'restart');
 }
 
 #
@@ -1391,4 +1494,13 @@ sub IsUsedNewOptionDefinition {
 	return 1 if ( ($opt eq $temp[1]) && ($temp[2] !~ /code \d+=/) );
     }
     return 0;
+}
+
+sub EscapeFilename($) {
+	my $filename = shift;
+
+	# Replace all single / by \/
+	$filename =~ s/\//\\\//g;
+
+	return $filename;
 }

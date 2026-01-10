@@ -1,7 +1,7 @@
 ###############################################################################
 #                                                                             #
 # IPFire.org - A linux based firewall                                         #
-# Copyright (C) 2007  Michael Tremer & Christian Schmidt                      #
+# Copyright (C) 2007-2018  IPFire Team  <info@ipfire.org>                     #
 #                                                                             #
 # This program is free software: you can redistribute it and/or modify        #
 # it under the terms of the GNU General Public License as published by        #
@@ -24,16 +24,24 @@
 
 include Config
 
+SUMMARY    = A client program for the telnet remote login protocol
+
 VER        = 0.17
+
 THISAPP    = netkit-telnet-$(VER)
 DL_FILE    = $(THISAPP).tar.gz
 DL_FROM    = $(URL_IPFIRE)
 DIR_APP    = $(DIR_SRC)/$(THISAPP)
 TARGET     = $(DIR_INFO)/$(THISAPP)
 PROG       = telnet
-PAK_VER    = 1
+PAK_VER    = 2
 
-DEPS       = ""
+DEPS       =
+
+SERVICES   =
+
+# Fixes build with GCC 14
+CFLAGS += -Wno-error=implicit-function-declaration -Wno-error=int-conversion
 
 ###############################################################################
 # Top-level Rules
@@ -45,8 +53,8 @@ objects = $(DL_FILE) \
 $(DL_FILE) = $(DL_FROM)/$(DL_FILE)
 telnet-client.tar.gz = $(DL_FROM)/telnet-client.tar.gz
 
-$(DL_FILE)_MD5 = d6beabaaf53fe6e382c42ce3faa05a36
-telnet-client.tar.gz_MD5 = d74983062470c5a3e7ae14f34c489e00
+$(DL_FILE)_BLAKE2 = 0eef225adeb0dd332ffd9cce0285213e6aa89f04263fb37e3dac35462492732265b2c29bd2a86277e39e0ad55267ff1a150f1140823c91d44c29cf6a20df8e7e
+telnet-client.tar.gz_BLAKE2 = e7337d8f4d82e8392f7924a448f41129149ee5694f8f1a8537ad6336b3485211f4546c5a8929ece207ccd3f052dade564cd6d01ffa901e2f5e06c91bc9c1706f
 
 install : $(TARGET)
 
@@ -54,13 +62,13 @@ check : $(patsubst %,$(DIR_CHK)/%,$(objects))
 
 download :$(patsubst %,$(DIR_DL)/%,$(objects))
 
-md5 : $(subst %,%_MD5,$(objects))
+b2 : $(subst %,%_BLAKE2,$(objects))
 
-dist: 
+dist:
 	@$(PAK)
 
 ###############################################################################
-# Downloading, checking, md5sum
+# Downloading, checking, b2sum
 ###############################################################################
 
 $(patsubst %,$(DIR_CHK)/%,$(objects)) :
@@ -69,8 +77,8 @@ $(patsubst %,$(DIR_CHK)/%,$(objects)) :
 $(patsubst %,$(DIR_DL)/%,$(objects)) :
 	@$(LOAD)
 
-$(subst %,%_MD5,$(objects)) :
-	@$(MD5)
+$(subst %,%_BLAKE2,$(objects)) :
+	@$(B2SUM)
 
 ###############################################################################
 # Installation Details
@@ -97,7 +105,7 @@ $(TARGET) : $(patsubst %,$(DIR_DL)/%,$(objects))
 	cd $(DIR_APP) && patch -Np1 -i $(DIR_SRC)/src/patches/telnet-0.17-errno_test_sys_bsd.patch
 	cd $(DIR_APP) && patch -Np1 -i $(DIR_SRC)/src/patches/netkit-telnet-0.17-reallynodns.patch
 	cd $(DIR_APP) && ./configure --prefix=/usr
-	cd $(DIR_APP) && make 
+	cd $(DIR_APP) && make
 	cd $(DIR_APP) && make install
 	rm -f /usr/sbin/telnetd
 	rm -f /usr/man/man8/in.telnetd.8

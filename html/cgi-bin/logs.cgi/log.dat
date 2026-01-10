@@ -22,7 +22,7 @@ require "${General::swroot}/header.pl";
 my %color = ();
 my %mainsettings = ();
 &General::readhash("${General::swroot}/main/settings", \%mainsettings);
-&General::readhash("/srv/web/ipfire/html/themes/".$mainsettings{'THEME'}."/include/colors.txt", \%color);
+&General::readhash("/srv/web/ipfire/html/themes/ipfire/include/colors.txt", \%color);
 
 use POSIX();
 
@@ -49,44 +49,72 @@ $cgiparams{'ACTION'} = '';
 $cgiparams{'SECTION'} = 'ipfire';
 
 my %sections = (
-        'ipfire' => '(ipfire: )',
-        'red' => '(red:|pppd\[.*\]: |chat\[.*\]|pppoe\[.*\]|pptp\[.*\]|pppoa\[.*\]|pppoa3\[.*\]|pppoeci\[.*\]|ipppd|ipppd\[.*\]|kernel: ippp\d|kernel: isdn.*|ibod\[.*\]|dhcpcd\[.*\]|modem_run\[.*\])',
-        'ddns' => '(ddns\[\d+\]:)',
-        'dns' => '(dnsmasq\[.*\]: )',
-        'dma' => '(dma\[.*\]: )',
-        'dhcp' => '(dhcpd: )',
+        'apcupsd' => '(apcupsd\[.*?\]: )',
+        'auth' => '(\w+\(pam_unix\)\[.*\]: )',
+        'wio' => '(wio:|wio\[.*\])',
+        'captive' => '(Captive:)',
         'clamav' => '(clamd\[.*\]: |freshclam\[.*\]: )',
         'collectd' => '(collectd\[.*\]: )',
         'cron' => '(fcron\[.*\]: )',
-        'ntp' => '(ntpd(?:ate)?\[.*\]: )',
-        'ssh' => '(sshd(?:\(.*\))?\[.*\]: )',
-        'auth' => '(\w+\(pam_unix\)\[.*\]: )',
-        'kernel' => '(kernel: (?!DROP_))',
+        'ddns' => '(ddns\[\d+\]:)',
+        'dhcp' => '(dhcpd: )',
+        'dma' => '(dma: |dma\[.*\]: |postfix/\w*\[\d*\]: )',
+        'guardian' => '(guardian\[.*\]: )',
+        'haproxy' => '(haproxy\[.*?\]: )',
+        'ipblocklist' => '(ipblocklist: )',
+        'ipfire' => '(ipfire: )',
         'ipsec' => '(ipsec_[\w_]+: |pluto\[.*\]: |charon: |vpnwatch: )',
+        'kernel' => '(kernel: (?!DROP_))',
+        'monit' => '(monit\[.*?\]: )',
+        'ntp' => '(ntpd(?:ate)?\[.*\]: )',
+        'nut' => '(upsmon\[.*?\]: )',
+        'oinkmaster' => '(oinkmaster\[.*\]: )',
         'openvpn' => '(openvpnserver\[.*\]: |.*n2n\[.*\]: )',
-        'pakfire' => '(pakfire:) ',
-        'wireless' => '(hostapd:|kernel: ath.*:|kernel: wifi[0-9]:) '
+        'pakfire' => '(pakfire:)',
+        'red' => '(red:|pppd\[.*\]: |chat\[.*\]|pppoe\[.*\]|pptp\[.*\]|pppoa\[.*\]|pppoa3\[.*\]|pppoeci\[.*\]|ipppd|ipppd\[.*\]|kernel: ippp\d|kernel: isdn.*|ibod\[.*\]|dhcpcd\[.*\]|modem_run\[.*\])',
+        'samba' => '(nmbd|smbd|winbind)\[\d+\]:',
+        'suricata' => '(suricata: )',
+        'squid' => '(squid\[.*\]: |squid: )',
+        'ssh' => '(sshd(?:\(.*\))?\[.*\]: |sshd-session(?:\(.*\))?\[.*\]:)',
+        'unbound' => '(unbound: \[.*?\])(.*:.*$)',
+        'urlfilter bl' => '(installpackage\[urlfilter\]: )',
+        'wireless' => '(hostapd:|kernel: ath.*:|kernel: wifi[0-9]:)',
+		'zabbix_agentd' => '(zabbix_agentd\[.*?\]: )'
 	 );
 
 # Translations for the %sections array.
 my %trsections = (
-        'ipfire' => 'IPFire',
-        'red' => 'RED',
-        'ddns' => $Lang::tr{'dynamic dns'},
-        'dns' => 'DNS',
-        'dma' => 'Mail',
-        'dhcp' => "$Lang::tr{'dhcp server'}",
-        'cron' => 'Cron',
-        'collectd' => 'Collectd',
-				'clamav' => 'ClamAV',
-        'ntp' => 'NTP',
-        'ssh' => 'SSH',
+        'apcupsd' => 'APCUPS',
         'auth' => "$Lang::tr{'loginlogout'}",
-        'kernel' => "$Lang::tr{'kernel'}",
+        'wio' => 'Who Is Online?',
+        'captive' => $Lang::tr{'Captive'},
+        'clamav' => 'ClamAV',
+        'collectd' => 'Collectd',
+        'cron' => 'Cron',
+        'ddns' => "$Lang::tr{'dynamic dns'}",
+        'dhcp' => "$Lang::tr{'dhcp server'}",
+        'dma' => 'Mail',
+        'guardian' => "$Lang::tr{'guardian'}",
+        'haproxy' => 'HAProxy',
+        'ipblocklist' => "$Lang::tr{'ipblocklist'}",
+        'ipfire' => 'IPFire',
         'ipsec' => 'IPSec',
+        'kernel' => "$Lang::tr{'kernel'}",
+        'monit' => 'Monit',
+        'ntp' => 'NTP',
+        'nut' => 'NUT',
+        'oinkmaster' => 'Oinkmaster',
         'openvpn' => 'OpenVPN',
         'pakfire' => 'Pakfire',
-        'wireless' => 'Wireless'
+        'red' => 'RED',
+        'samba' => $Lang::tr{'samba'},
+        'suricata' => "$Lang::tr{'intrusion detection'}",
+        'squid' => "$Lang::tr{'web proxy'}",
+        'ssh' => 'SSH',
+        'unbound' => 'DNS: Unbound',
+        'urlfilter bl' => 'URLFilter Blacklist',
+        'wireless' => 'Wireless',
+		'zabbix_agentd' => 'Zabbix Agent'
 	);
 
 
@@ -205,8 +233,8 @@ while ($gzindex >=0 && $loop) {
 	    #&General::log("reading $filestr");
 	    READ:while (<FILE>) {
 		my $line = $_;
-	 	if ($line =~ /^${monthstr} ${daystr} ..:..:.. [\w\-]+ ${section}(.*)/) {
-		    # when standart viewing, just keep in memory the correct slice
+	 	if ($line =~ /^${monthstr} ${daystr} ..:..:.. [\w\-\.]+ ${section}(.*)/) {
+		    # when standard viewing, just keep in memory the correct slice
 		    # it starts a '$start' and size is $viewport
 		    # If export, then keep all lines...
 		    if ($cgiparams{'ACTION'} eq $Lang::tr{'export'}){
@@ -217,7 +245,7 @@ while ($gzindex >=0 && $loop) {
 			    if (@log > $Header::viewsize) {
 			        shift (@log);
 			    }
-			#} else { dont do this optimisation, need to count lines !
+			#} else { don't do this optimisation, need to count lines !
 			    #    $datetime = $maxtime; # we have read viewsize lines, stop main loop
 			    #    last READ;           # exit read file
 			}
@@ -250,7 +278,7 @@ if ($cgiparams{'ACTION'} eq $Lang::tr{'export'})
 
 	foreach $_ (@log)
 	{
-		/^... (..) (..:..:..) [\w\-]+ ${section}(.*)$/;
+		/^... (..) (..:..:..) [\w\-\.]+ ${section}(.*)$/;
 		my $day =  $1;
 		$day =~ tr / /0/;
 		my $time = $cgiparams{'DAY'} ? "$2" : "$day/$2" ;
@@ -282,7 +310,7 @@ print <<END
 	<select name='SECTION'>
 END
 ;
-foreach $section (keys %sections) {
+foreach $section (sort {$trsections{$a} cmp $trsections{$b}} keys %sections) {
 	print "\t<option ";
 	if ($section eq $cgiparams{'SECTION'}) {
 		print "selected='selected' "; }
@@ -360,47 +388,40 @@ if ($logsettings{'LOGVIEW_REVERSE'} eq 'on') { @log = reverse @log; }
 if ($lines != 0) { &oldernewer(); }
 
 print <<END
-<table width='100%' class='tbl'>
-<tr>
-	<th width='10%' align='center' class='boldbase'><b>$Lang::tr{'time'}</b></th>
-	<th width='10%' align='center' class='boldbase'><b>$Lang::tr{'section'}</b></th>
-	<th width='80%'>&nbsp;</th>
-</tr>
+<table class='tbl'>
+	<tr>
+		<th width='10%' align='center'>$Lang::tr{'time'}</th>
+		<th width='15%' align='center'>$Lang::tr{'section'}</th>
+		<th width='75%'>&nbsp;</th>
+	</tr>
 END
 ;
 
-$lines = 0;
-#print '<tt>';
 foreach $_ (@log)
 {
-	/^... (..) (..:..:..) [\w\-]+ ${section}(.*)$/;
+	/^... (..) (..:..:..) [\w\-\.]+ ${section}(.*)$/;
 	my $day =  $1;
 	$day =~ tr / /0/;
 	my $time = $cgiparams{'DAY'} ? "$2" : "$day/$2" ;
 	my $sec = $3;
-	my $data = $4;
-	# correct the cut position, just when section=RED
-	if (($cgiparams{'SECTION'} eq 'red' ) && ($sec =~ /(kernel:)(.*)/)) {
-	    $sec = 'kernel';
-	    $data = $2.': '.$data;
-	}
-	my $d = substr ($data,0,80);
-	while (length($data)>80){	#very basic breaking of lines...
-	    $data = substr ($data,80);	#permit correct display in table cell
-	    $d .=  ' ' . substr ($data,0,80);
-	}
-	my $col="";
+	my $data = &Header::cleanhtml($4, 'y');
 
-	if ($lines % 2) {
-		print "<tr>";
-		$col="bgcolor='$color{'color20'}'"; }
-	else {
-		print "<tr>";
-		$col="bgcolor='$color{'color22'}'"; }
-	print "<td $col>$time<td $col>$sec<td $col>" .&Header::cleanhtml ("$d", 'y') . "</td></tr>\n";
-	$lines++;
+	print <<END;
+		<tr>
+			<td align='center'>
+				$time
+			</td>
+
+			<td>
+				$sec
+			</td>
+
+			<td>
+				$data
+			</td>
+		</tr>
+END
 }
-#print '</tt>';
 print "</table>";
 
 &oldernewer();

@@ -4,6 +4,12 @@
 			     	'title' => "$Lang::tr{'virtual private networking'}",
 			     	'enabled' => 1,
 			 	};
+    $subservices->{'15.wireguard'} = {
+				'caption' => $Lang::tr{'wireguard'},
+				'uri' => '/cgi-bin/wireguard.cgi',
+				'title' => "$Lang::tr{'wireguard'}",
+				'enabled' => 1,
+				};
     $subservices->{'20.openvpn'} = {
 				'caption' => 'OpenVPN',
 			     	'uri' => '/cgi-bin/ovpnmain.cgi',
@@ -20,18 +26,13 @@
 				'title' => "$Lang::tr{'time server'}",
 				'enabled' => 1,
 				};
-    $subservices->{'50.qos'} = {'caption' => 'Quality of Service',
+    $subservices->{'50.qos'} = {'caption' => $Lang::tr{'quality of service'},
 				'uri' => '/cgi-bin/qos.cgi',
-				'title' => "Quality of Service",
+				'title' => "$Lang::tr{'quality of service'}",
 				'enabled' => 1,
 				};
-    $subservices->{'60.ids'} = {'caption' => $Lang::tr{'intrusion detection'},
-				'enabled' => 1,
-				'uri' => '/cgi-bin/ids.cgi',
-				'title' => "$Lang::tr{'intrusion detection system'}",
-				};
-    $subservices->{'70.extrahd'} = {'caption' => "ExtraHD",
-				'enabled' => 1,
+    $subservices->{'70.extrahd'} = {'caption' => $Lang::tr{'extrahd'},
 				'uri' => '/cgi-bin/extrahd.cgi',
-				'title' => "ExtraHD",
+				'title' => "$Lang::tr{'extrahd'}",
+				'enabled' => 1,
 				};

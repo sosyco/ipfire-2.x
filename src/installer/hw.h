@@ -24,14 +24,15 @@
 #include <libudev.h>
 
 #define DESTINATION_MOUNT_PATH        "/harddisk"
-#define SOURCE_MOUNT_PATH "/cdrom"
-#define SOURCE_TEST_FILE  SOURCE_MOUNT_PATH "/" VERSION ".media"
+#define SOURCE_MOUNT_PATH             "/cdrom"
+#define SOURCE_TEST_FILE              SOURCE_MOUNT_PATH "/" DISTRO_SNAME "-" DISTRO_VERSION ".media"
 
 #define HW_MAX_DISKS                 32
 #define STRING_SIZE                1024
 #define DEV_SIZE                    128
 
 #define HW_PATH_BOOT                  "/boot"
+#define HW_PATH_BOOT_EFI              "/boot/efi"
 #define HW_PATH_DATA                  "/var"
 
 #define HW_PART_TYPE_NORMAL           0
@@ -41,10 +42,10 @@
 #define HW_PART_TABLE_GPT             1
 
 #define HW_FS_SWAP                    0
-#define HW_FS_REISERFS                1
-#define HW_FS_EXT4                    2
-#define HW_FS_EXT4_WO_JOURNAL         3
-#define HW_FS_XFS                     4
+#define HW_FS_EXT4                    1
+#define HW_FS_XFS                     2
+#define HW_FS_FAT32                   3
+#define HW_FS_BTRFS                   4
 
 #define HW_FS_DEFAULT                 HW_FS_EXT4
 
@@ -52,11 +53,17 @@
 
 #define SERIAL_BAUDRATE               115200
 
+#define BTRFS_MOUNT_OPTIONS           "compress=zstd:1"
+
 #define BYTES2MB(x) ((x) / 1024 / 1024)
 #define MB2BYTES(x) ((unsigned long long)(x) * 1024 * 1024)
 
 struct hw {
 	struct udev *udev;
+	char arch[STRING_SIZE];
+
+	// Enabled if we should install in EFI mode
+	int efi;
 };
 
 struct hw_disk {
@@ -82,37 +89,58 @@ struct hw_destination {
 	int part_table;
 	char part_bootldr[DEV_SIZE];
 	char part_boot[DEV_SIZE];
+	char part_boot_efi[DEV_SIZE];
 	char part_swap[DEV_SIZE];
 	char part_root[DEV_SIZE];
-	char part_data[DEV_SIZE];
 	int part_boot_idx;
+	int part_boot_efi_idx;
 
 	int filesystem;
 
 	unsigned long long size;
 	unsigned long long size_bootldr;
 	unsigned long long size_boot;
+	unsigned long long size_boot_efi;
 	unsigned long long size_swap;
 	unsigned long long size_root;
-	unsigned long long size_data;
+};
+
+// Struct to define the BTRFS subvolumes layout
+static const struct btrfs_subvolumes {
+	const char* name;
+	const char* mount_path;
+} btrfs_subvolumes[] = {
+	{ "@",          "/" },
+	{ "@snapshots", "/.snapshots" },
+	{ "@home",      "/home" },
+	{ "@root",      "/root" },
+	{ "@cache",     "/var/cache" },
+	{ "@backups",   "/var/ipfire/backup" },
+	{ "@lib",       "/var/lib" },
+	{ "@logs",      "/var/log" },
+	{ "@mails",     "/var/mail" },
+	{ "@tmp",       "/var/tmp" },
+
+	// Sentinel
+	{ NULL },
 };
 
 struct hw* hw_init();
 void hw_free(struct hw* hw);
 
 int hw_mount(const char* source, const char* target, const char* fs, int flags);
-int hw_umount(const char* target);
+int hw_umount(const char* source, const char* prefix);
 
 char* hw_find_source_medium(struct hw* hw);
 
 struct hw_disk** hw_find_disks(struct hw* hw, const char* sourcedrive);
 void hw_free_disks(struct hw_disk** disks);
-unsigned int hw_count_disks(const struct hw_disk** disks);
+unsigned int hw_count_disks(struct hw_disk** disks);
 struct hw_disk** hw_select_disks(struct hw_disk** disks, int* selection);
-struct hw_disk** hw_select_first_disk(const struct hw_disk** disks);
+struct hw_disk** hw_select_first_disk(struct hw_disk** disks);
 
-struct hw_destination* hw_make_destination(int part_type, struct hw_disk** disks,
-	int disable_swap);
+struct hw_destination* hw_make_destination(struct hw* hw, int part_type, struct hw_disk** disks,
+	int disable_swap, int filesystem);
 
 unsigned long long hw_memory();
 
@@ -126,7 +154,7 @@ int hw_destroy_raid_superblocks(const struct hw_destination* dest, const char* o
 int hw_setup_raid(struct hw_destination* dest, const char* output);
 int hw_stop_all_raid_arrays(const char* output);
 
-int hw_install_bootloader(struct hw_destination* dest, const char* output);
+int hw_install_bootloader(struct hw* hw, struct hw_destination* dest, const char* output);
 int hw_write_fstab(struct hw_destination* dest);
 
 char* hw_find_backup_file(const char* output, const char* search_path);

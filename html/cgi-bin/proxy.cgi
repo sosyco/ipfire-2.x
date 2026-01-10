@@ -2,7 +2,7 @@
 ###############################################################################
 #                                                                             #
 # IPFire.org - A linux based firewall                                         #
-# Copyright (C) 2007-2013  IPFire Team  <info@ipfire.org>                     #
+# Copyright (C) 2007-2025  IPFire Team  <info@ipfire.org>                     #
 #                                                                             #
 # This program is free software: you can redistribute it and/or modify        #
 # it under the terms of the GNU General Public License as published by        #
@@ -18,15 +18,9 @@
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.       #
 #                                                                             #
 ###############################################################################
-#
-# (c) 2004-2009 marco.s - http://www.advproxy.net
-#
-# This code is distributed under the terms of the GPL
-#
-# $Id: advproxy.cgi,v 3.0.2 2009/02/04 00:00:00 marco.s Exp $
-#
 
 use strict;
+use Scalar::Util qw(looks_like_number);
 
 # enable only the following on debugging purpose
 #use warnings;
@@ -36,14 +30,16 @@ require '/var/ipfire/general-functions.pl';
 require "${General::swroot}/lang.pl";
 require "${General::swroot}/header.pl";
 
-my @squidversion = `/usr/sbin/squid -v`;
+require "${General::swroot}/ids-functions.pl";
+
+my @squidversion = &General::system_output("/usr/sbin/squid", "-v");
 my $http_port='81';
 my $https_port='444';
 
 my %color = ();
 my %mainsettings = ();
 &General::readhash("${General::swroot}/main/settings", \%mainsettings);
-&General::readhash("/srv/web/ipfire/html/themes/".$mainsettings{'THEME'}."/include/colors.txt", \%color);
+&General::readhash("/srv/web/ipfire/html/themes/ipfire/include/colors.txt", \%color);
 
 my %proxysettings=();
 my %netsettings=();
@@ -55,16 +51,10 @@ my %mainsettings=();
 my %checked=();
 my %selected=();
 
-my @throttle_limits=(64,128,256,384,512,768,1024,1280,1536,1792,2048,2560,3072,3584,4096,5120,6144,7168,8192,10240,12288,16384,20480);
-my $throttle_binary="7z|arj|bin|bz2|cab|exe|gz|lzh|rar|sea|tar|tgz|xz|zip";
-my $throttle_dskimg="b5t|bin|bwt|ccd|cdi|cue|gho|img|iso|mds|nrg|pqi|vmdk";
-my $throttle_mmedia="aiff?|asf|avi|divx|mov|mp3|mpe?g|ogg|qt|ra?m|ts|vob";
+my @throttle_limits=(64,128,256,512,1024,1536,2048,3072,4096,5120,6144,7168,8192,10240,16384,20480,51200,102400);
 
 my $def_ports_safe="80 # http\n21 # ftp\n443 # https\n563 # snews\n70 # gopher\n210 # wais\n1025-65535 # unregistered ports\n280 # http-mgmt\n488 # gss-http\n591 # filemaker\n777 # multiling http\n800 # Squids port (for icons)\n";
 my $def_ports_ssl="443 # https\n563 # snews\n";
-
-my @useragent=();
-my @useragentlist=();
 
 my $hintcolour='#FFFFCC';
 my $ncsa_buttontext='';
@@ -88,7 +78,6 @@ my $errormessage='';
 
 my $acldir   = "${General::swroot}/proxy/advanced/acls";
 my $ncsadir  = "${General::swroot}/proxy/advanced/ncsa";
-my $ntlmdir  = "${General::swroot}/proxy/advanced/ntlm";
 my $raddir   = "${General::swroot}/proxy/advanced/radius";
 my $identdir = "${General::swroot}/proxy/advanced/ident";
 my $credir   = "${General::swroot}/proxy/advanced/cre";
@@ -98,7 +87,6 @@ my $stdgrp = "$ncsadir/standard.grp";
 my $extgrp = "$ncsadir/extended.grp";
 my $disgrp = "$ncsadir/disabled.grp";
 
-my $browserdb = "${General::swroot}/proxy/advanced/useragents";
 my $mimetypes = "${General::swroot}/proxy/advanced/mimetypes";
 my $throttled_urls = "${General::swroot}/proxy/advanced/throttle";
 
@@ -108,7 +96,7 @@ my $cre_svhosts = "${General::swroot}/proxy/advanced/cre/supervisors";
 
 my $identhosts = "$identdir/hosts";
 
-my $authdir  = "/usr/lib/squid/";
+my $authdir  = "/usr/lib/squid";
 my $errordir = "/usr/lib/squid/errors";
 
 my $acl_src_subnets = "$acldir/src_subnets.acl";
@@ -131,57 +119,58 @@ my $acl_ports_safe = "$acldir/ports_safe.acl";
 my $acl_ports_ssl  = "$acldir/ports_ssl.acl";
 my $acl_include = "$acldir/include.acl";
 
+my $acl_dst_noproxy_url = "$acldir/dst_noproxy_url.acl";
+my $acl_dst_noproxy_ip = "$acldir/dst_noproxy_ip.acl";
+
 my $updaccelversion  = 'n/a';
 my $urlfilterversion = 'n/a';
 
 unless (-d "$acldir")   { mkdir("$acldir"); }
 unless (-d "$ncsadir")  { mkdir("$ncsadir"); }
-unless (-d "$ntlmdir")  { mkdir("$ntlmdir"); }
 unless (-d "$raddir")   { mkdir("$raddir"); }
 unless (-d "$identdir") { mkdir("$identdir"); }
 unless (-d "$credir")   { mkdir("$credir"); }
 
-unless (-e $cre_groups)  { system("touch $cre_groups"); }
-unless (-e $cre_svhosts) { system("touch $cre_svhosts"); }
+unless (-e $cre_groups)  { &General::system("touch", "$cre_groups"); }
+unless (-e $cre_svhosts) { &General::system("touch $cre_svhosts"); }
 
-unless (-e $userdb) { system("touch $userdb"); }
-unless (-e $stdgrp) { system("touch $stdgrp"); }
-unless (-e $extgrp) { system("touch $extgrp"); }
-unless (-e $disgrp) { system("touch $disgrp"); }
+unless (-e $userdb) { &General::system("touch", "$userdb"); }
+unless (-e $stdgrp) { &General::system("touch", "$stdgrp"); }
+unless (-e $extgrp) { &General::system("touch", "$extgrp"); }
+unless (-e $disgrp) { &General::system("touch", "$disgrp"); }
 
-unless (-e $acl_src_subnets)    { system("touch $acl_src_subnets"); }
-unless (-e $acl_src_banned_ip)  { system("touch $acl_src_banned_ip"); }
-unless (-e $acl_src_banned_mac) { system("touch $acl_src_banned_mac"); }
-unless (-e $acl_src_unrestricted_ip)  { system("touch $acl_src_unrestricted_ip"); }
-unless (-e $acl_src_unrestricted_mac) { system("touch $acl_src_unrestricted_mac"); }
-unless (-e $acl_src_noaccess_ip)  { system("touch $acl_src_noaccess_ip"); }
-unless (-e $acl_src_noaccess_mac) { system("touch $acl_src_noaccess_mac"); }
-unless (-e $acl_dst_noauth)     { system("touch $acl_dst_noauth"); }
-unless (-e $acl_dst_noauth_dom) { system("touch $acl_dst_noauth_dom"); }
-unless (-e $acl_dst_noauth_net) { system("touch $acl_dst_noauth_net"); }
-unless (-e $acl_dst_noauth_url) { system("touch $acl_dst_noauth_url"); }
-unless (-e $acl_dst_nocache)     { system("touch $acl_dst_nocache"); }
-unless (-e $acl_dst_nocache_dom) { system("touch $acl_dst_nocache_dom"); }
-unless (-e $acl_dst_nocache_net) { system("touch $acl_dst_nocache_net"); }
-unless (-e $acl_dst_nocache_url) { system("touch $acl_dst_nocache_url"); }
-unless (-e $acl_dst_throttle)  { system("touch $acl_dst_throttle"); }
-unless (-e $acl_ports_safe) { system("touch $acl_ports_safe"); }
-unless (-e $acl_ports_ssl)  { system("touch $acl_ports_ssl"); }
-unless (-e $acl_include) { system("touch $acl_include"); }
+unless (-e $acl_src_subnets)    { &General::system("touch", "$acl_src_subnets"); }
+unless (-e $acl_src_banned_ip)  { &General::system("touch", "$acl_src_banned_ip"); }
+unless (-e $acl_src_banned_mac) { &General::system("touch", "$acl_src_banned_mac"); }
+unless (-e $acl_src_unrestricted_ip)  { &General::system("touch", "$acl_src_unrestricted_ip"); }
+unless (-e $acl_src_unrestricted_mac) { &General::system("touch", "$acl_src_unrestricted_mac"); }
+unless (-e $acl_src_noaccess_ip)  { &General::system("touch", "$acl_src_noaccess_ip"); }
+unless (-e $acl_src_noaccess_mac) { &General::system("touch", "$acl_src_noaccess_mac"); }
+unless (-e $acl_dst_noauth)     { &General::system("touch", "$acl_dst_noauth"); }
+unless (-e $acl_dst_noauth_dom) { &General::system("touch", "$acl_dst_noauth_dom"); }
+unless (-e $acl_dst_noauth_net) { &General::system("touch", "$acl_dst_noauth_net"); }
+unless (-e $acl_dst_noauth_url) { &General::system("touch", "$acl_dst_noauth_url"); }
+unless (-e $acl_dst_nocache)     { &General::system("touch", "$acl_dst_nocache"); }
+unless (-e $acl_dst_nocache_dom) { &General::system("touch", "$acl_dst_nocache_dom"); }
+unless (-e $acl_dst_nocache_net) { &General::system("touch", "$acl_dst_nocache_net"); }
+unless (-e $acl_dst_nocache_url) { &General::system("touch", "$acl_dst_nocache_url"); }
+unless (-e $acl_dst_throttle)  { &General::system("touch", "$acl_dst_throttle"); }
+unless (-e $acl_ports_safe) { &General::system("touch", "$acl_ports_safe"); }
+unless (-e $acl_ports_ssl)  { &General::system("touch", "$acl_ports_ssl"); }
+unless (-e $acl_include) { &General::system("touch", "$acl_include"); }
 
-unless (-e $browserdb) { system("touch $browserdb"); }
-unless (-e $mimetypes) { system("touch $mimetypes"); }
+unless (-e $mimetypes) { &General::system("touch", "$mimetypes"); }
 
 my $HAVE_NTLM_AUTH = (-e "/usr/bin/ntlm_auth");
-
-open FILE, $browserdb;
-@useragentlist = sort { reverse(substr(reverse(substr($a,index($a,',')+1)),index(reverse(substr($a,index($a,','))),',')+1)) cmp reverse(substr(reverse(substr($b,index($b,',')+1)),index(reverse(substr($b,index($b,','))),',')+1))} grep !/(^$)|(^\s*#)/,<FILE>;
-close(FILE);
 
 &General::readhash("${General::swroot}/ethernet/settings", \%netsettings);
 &General::readhash("${General::swroot}/main/settings", \%mainsettings);
 
-my $green_cidr = &General::ipcidr("$netsettings{'GREEN_NETADDRESS'}\/$netsettings{'GREEN_NETMASK'}");
+my $green_cidr = "";
+if (&Header::green_used() && $netsettings{'GREEN_DEV'}) {
+	$green_cidr = &General::ipcidr("$netsettings{'GREEN_NETADDRESS'}\/$netsettings{'GREEN_NETMASK'}");
+}
+
 my $blue_cidr = "";
 if (&Header::blue_used() && $netsettings{'BLUE_DEV'}) {
 	$blue_cidr = &General::ipcidr("$netsettings{'BLUE_NETADDRESS'}\/$netsettings{'BLUE_NETMASK'}");
@@ -201,9 +190,8 @@ $proxysettings{'TRANSPARENT_PORT'} = '3128';
 $proxysettings{'VISIBLE_HOSTNAME'} = '';
 $proxysettings{'ADMIN_MAIL_ADDRESS'} = '';
 $proxysettings{'ADMIN_PASSWORD'} = '';
-$proxysettings{'ERR_LANGUAGE'} = 'German';
+$proxysettings{'ERR_LANGUAGE'} = 'en';
 $proxysettings{'ERR_DESIGN'} = 'ipfire';
-$proxysettings{'SUPPRESS_VERSION'} = 'off';
 $proxysettings{'FORWARD_VIA'} = 'off';
 $proxysettings{'FORWARD_IPADDRESS'} = 'off';
 $proxysettings{'FORWARD_USERNAME'} = 'off';
@@ -216,8 +204,8 @@ $proxysettings{'CACHEMGR'} = 'off';
 $proxysettings{'LOGQUERY'} = 'off';
 $proxysettings{'LOGUSERAGENT'} = 'off';
 $proxysettings{'FILEDESCRIPTORS'} = '16384';
-$proxysettings{'CACHE_MEM'} = '2';
-$proxysettings{'CACHE_SIZE'} = '50';
+$proxysettings{'CACHE_MEM'} = '128';
+$proxysettings{'CACHE_SIZE'} = '0';
 $proxysettings{'MAX_SIZE'} = '4096';
 $proxysettings{'MIN_SIZE'} = '0';
 $proxysettings{'MEM_POLICY'} = 'LRU';
@@ -240,13 +228,10 @@ $proxysettings{'THROTTLING_GREEN_TOTAL'} = 'unlimited';
 $proxysettings{'THROTTLING_GREEN_HOST'} = 'unlimited';
 $proxysettings{'THROTTLING_BLUE_TOTAL'} = 'unlimited';
 $proxysettings{'THROTTLING_BLUE_HOST'} = 'unlimited';
-$proxysettings{'THROTTLE_BINARY'} = 'off';
-$proxysettings{'THROTTLE_DSKIMG'} = 'off';
-$proxysettings{'THROTTLE_MMEDIA'} = 'off';
+$proxysettings{'ASNBL_FASTFLUX_DETECTION'} = 'off';
+$proxysettings{'ASNBL_FASTFLUX_THRESHOLD'} = '5';
+$proxysettings{'ASNBL_SELECANN_DETECTION'} = 'off';
 $proxysettings{'ENABLE_MIME_FILTER'} = 'off';
-$proxysettings{'ENABLE_BROWSER_CHECK'} = 'off';
-$proxysettings{'FAKE_USERAGENT'} = '';
-$proxysettings{'FAKE_REFERER'} = '';
 $proxysettings{'AUTH_METHOD'} = 'none';
 $proxysettings{'AUTH_REALM'} = '';
 $proxysettings{'AUTH_MAX_USERIP'} = '';
@@ -285,8 +270,6 @@ $proxysettings{'IDENT_ENABLE_ACL'} = 'off';
 $proxysettings{'IDENT_USER_ACL'} = 'positive';
 $proxysettings{'ENABLE_FILTER'} = 'off';
 $proxysettings{'ENABLE_UPDXLRATOR'} = 'off';
-$proxysettings{'ENABLE_CLAMAV'} = 'off';
-$proxysettings{'CHILDREN'} = '10';
 
 $ncsa_buttontext = $Lang::tr{'advproxy NCSA create user'};
 
@@ -358,7 +341,7 @@ if (($proxysettings{'ACTION'} eq $Lang::tr{'save'}) || ($proxysettings{'ACTION'}
 		$errormessage = $Lang::tr{'advproxy errmsg cache'}." ".$proxysettings{'CACHE_MEM'}." > ".$proxysettings{'CACHE_SIZE'};
 		goto ERROR;
 	}
-	
+
 	if (!(&General::validport($proxysettings{'PROXY_PORT'})))
 	{
 		$errormessage = $Lang::tr{'advproxy errmsg invalid proxy port'};
@@ -400,13 +383,12 @@ if (($proxysettings{'ACTION'} eq $Lang::tr{'save'}) || ($proxysettings{'ACTION'}
 		$errormessage = $Lang::tr{'proxy errmsg filedescriptors'};
 		goto ERROR;
 	}
-	if (!($proxysettings{'CACHE_MEM'} =~ /^\d+/) ||
-		($proxysettings{'CACHE_MEM'} < 1))
+	if (!($proxysettings{'CACHE_MEM'} =~ /^\d+/))
 	{
 		$errormessage = $Lang::tr{'advproxy errmsg mem cache size'};
 		goto ERROR;
 	}
-	my @free = `/usr/bin/free`;
+	my @free = &General::system_output("/usr/bin/free");
 	$free[1] =~ m/(\d+)/;
 	$cachemem = int $1 / 2048;
 	if ($proxysettings{'CACHE_MEM'} > $cachemem) {
@@ -437,24 +419,18 @@ if (($proxysettings{'ACTION'} eq $Lang::tr{'save'}) || ($proxysettings{'ACTION'}
 		$errormessage = $Lang::tr{'invalid maximum incoming size'};
 		goto ERROR;
 	}
-		if (!($proxysettings{'CHILDREN'} =~ /^\d+$/) || ($proxysettings{'CHILDREN'} < 1))
+	if (($proxysettings{'ASNBL_FASTFLUX_DETECTION'} eq 'on') || ($proxysettings{'ASNBL_SELECANN_DETECTION'} eq 'on'))
 	{
-		$errormessage = $Lang::tr{'advproxy invalid num of children'};
-		goto ERROR;
-	}
-	if ($proxysettings{'ENABLE_BROWSER_CHECK'} eq 'on')
-	{
-		$browser_regexp = '';
-		foreach (@useragentlist)
-		{
-			chomp;
-			@useragent = split(/,/);
-			if ($proxysettings{'UA_'.$useragent[0]} eq 'on') { $browser_regexp .= "$useragent[2]|"; }
+		if (-z $proxysettings{'ASNBL_FASTFLUX_THRESHOLD'}) {
+			$errormessage = $Lang::tr{'advproxy fastflux no threshold given'};
+			goto ERROR;
 		}
-		chop($browser_regexp);
-		if (!$browser_regexp)
-		{
-			$errormessage = $Lang::tr{'advproxy errmsg no browser'};
+		if (! looks_like_number($proxysettings{'ASNBL_FASTFLUX_THRESHOLD'})) {
+			$errormessage = $Lang::tr{'advproxy fastflux threshold invalid'};
+			goto ERROR;
+		}
+		if (($proxysettings{'ASNBL_FASTFLUX_THRESHOLD'} < 2) || ($proxysettings{'ASNBL_FASTFLUX_THRESHOLD'} > 10)) {
+			$errormessage = $Lang::tr{'advproxy fastflux threshold out of bounds'};
 			goto ERROR;
 		}
 	}
@@ -552,33 +528,6 @@ if (($proxysettings{'ACTION'} eq $Lang::tr{'save'}) || ($proxysettings{'ACTION'}
 			}
 		}
 	}
-	if ($proxysettings{'AUTH_METHOD'} eq 'ntlm')
-	{
-		if ($proxysettings{'NTLM_DOMAIN'} eq '')
-		{
-			$errormessage = $Lang::tr{'advproxy errmsg ntlm domain'};
-			goto ERROR;
-		}
-		if ($proxysettings{'NTLM_PDC'} eq '')
-		{
-			$errormessage = $Lang::tr{'advproxy errmsg ntlm pdc'};
-			goto ERROR;
-		}
-		if (!&General::validhostname($proxysettings{'NTLM_PDC'}))
-		{
-			$errormessage = $Lang::tr{'advproxy errmsg invalid pdc'};
-			goto ERROR;
-		}
-		if ((!($proxysettings{'NTLM_BDC'} eq '')) && (!&General::validhostname($proxysettings{'NTLM_BDC'})))
-		{
-			$errormessage = $Lang::tr{'advproxy errmsg invalid bdc'};
-			goto ERROR;
-		}
-
-		$proxysettings{'NTLM_DOMAIN'} = lc($proxysettings{'NTLM_DOMAIN'});
-		$proxysettings{'NTLM_PDC'}    = lc($proxysettings{'NTLM_PDC'});
-		$proxysettings{'NTLM_BDC'}    = lc($proxysettings{'NTLM_BDC'});
-	}
 	if ($proxysettings{'AUTH_METHOD'} eq 'radius')
 	{
 		if (!&General::validip($proxysettings{'RADIUS_SERVER'}))
@@ -620,6 +569,29 @@ ERROR:
 
 	if ($proxysettings{'VALID'} eq 'yes')
 	{
+		# Determine if suricata may needs to be restarted.
+		my $suricata_proxy_ports_changed;
+
+		# Check if the IDS is running
+		if(&IDS::ids_is_running()) {
+			my %oldproxysettings;
+
+			# Read-in current proxy settings and store them as oldsettings hash.
+			&General::readhash("${General::swroot}/proxy/advanced/settings", \%oldproxysettings);
+
+			# Check if the proxy port has been changed.
+			unless ($proxysettings{'PROXY_PORT'} eq $oldproxysettings{'PROXY_PORT'}) {
+				# Port has changed, suricata needs to be adjusted.
+				$suricata_proxy_ports_changed = 1;
+			}
+
+			# Check if the transparent port has been changed.
+			unless ($proxysettings{'TRANSPARENT_PORT'} eq $oldproxysettings{'TRANSPARENT_PORT'}) {
+				# Transparent port has changed, suricata needs to be adjusted.
+				$suricata_proxy_ports_changed = 1;
+			}
+		}
+
 		&write_acls;
 
 		delete $proxysettings{'SRC_SUBNETS'};
@@ -629,6 +601,8 @@ ERROR:
 		delete $proxysettings{'SRC_UNRESTRICTED_MAC'};
 		delete $proxysettings{'DST_NOCACHE'};
 		delete $proxysettings{'DST_NOAUTH'};
+		delete $proxysettings{'DST_NOPROXY_IP'};
+		delete $proxysettings{'DST_NOPROXY_URL'};
 		delete $proxysettings{'PORTS_SAFE'};
 		delete $proxysettings{'PORTS_SSL'};
 		delete $proxysettings{'MIME_TYPES'};
@@ -668,7 +642,6 @@ ERROR:
 		$stdproxysettings{'UPSTREAM_PASSWORD'} = $proxysettings{'UPSTREAM_PASSWORD'};
 		$stdproxysettings{'ENABLE_FILTER'} = $proxysettings{'ENABLE_FILTER'};
 		$stdproxysettings{'ENABLE_UPDXLRATOR'} = $proxysettings{'ENABLE_UPDXLRATOR'};
-		$stdproxysettings{'ENABLE_CLAMAV'} = $proxysettings{'ENABLE_CLAMAV'};
 		&General::writehash("${General::swroot}/proxy/settings", \%stdproxysettings);
 
 		&writeconfig;
@@ -676,31 +649,40 @@ ERROR:
 
 		if ($proxysettings{'CACHEMGR'} eq 'on'){&writecachemgr;}
 
-		system ('/usr/local/bin/squidctrl', 'disable');
+		&General::system ('/usr/local/bin/squidctrl', 'disable');
 		unlink "${General::swroot}/proxy/enable";
 		unlink "${General::swroot}/proxy/transparent";
 		unlink "${General::swroot}/proxy/enable_blue";
 		unlink "${General::swroot}/proxy/transparent_blue";
 
 		if ($proxysettings{'ENABLE'} eq 'on') {
-			system ('/usr/bin/touch', "${General::swroot}/proxy/enable");
-			system ('/usr/local/bin/squidctrl', 'enable'); }
+			&General::system('/usr/bin/touch', "${General::swroot}/proxy/enable");
+			&General::system('/usr/local/bin/squidctrl', 'enable'); }
 		if ($proxysettings{'TRANSPARENT'} eq 'on' && $proxysettings{'ENABLE'} eq 'on') {
-			system ('/usr/bin/touch', "${General::swroot}/proxy/transparent"); }
+			&General::system('/usr/bin/touch', "${General::swroot}/proxy/transparent"); }
 		if ($proxysettings{'ENABLE_BLUE'} eq 'on') {
-			system ('/usr/bin/touch', "${General::swroot}/proxy/enable_blue");
-			system ('/usr/local/bin/squidctrl', 'enable'); }
+			&General::system('/usr/bin/touch', "${General::swroot}/proxy/enable_blue");
+			&General::system('/usr/local/bin/squidctrl', 'enable'); }
 		if ($proxysettings{'TRANSPARENT_BLUE'} eq 'on' && $proxysettings{'ENABLE_BLUE'} eq 'on') {
-			system ('/usr/bin/touch', "${General::swroot}/proxy/transparent_blue"); }
+			&General::system('/usr/bin/touch', "${General::swroot}/proxy/transparent_blue"); }
 
-		if ($proxysettings{'ACTION'} eq $Lang::tr{'advproxy save and restart'}) { system('/usr/local/bin/squidctrl restart >/dev/null 2>&1'); }
-		if ($proxysettings{'ACTION'} eq $Lang::tr{'proxy reconfigure'}) { system('/usr/local/bin/squidctrl reconfigure >/dev/null 2>&1'); }	
+		if ($proxysettings{'ACTION'} eq $Lang::tr{'advproxy save and restart'}) { &General::system('/usr/local/bin/squidctrl', 'restart'); }
+		if ($proxysettings{'ACTION'} eq $Lang::tr{'proxy reconfigure'}) { &General::system('/usr/local/bin/squidctrl', 'reconfigure'); }
+
+		# Check if the suricata_proxy_ports_changed flag has been set.
+		if ($suricata_proxy_ports_changed) {
+			# Re-generate HTTP ports file.
+			&IDS::generate_http_ports_file();
+
+			# Restart suricata.
+			&IDS::call_suricatactrl("restart");
+		}
   }
 }
 
 if ($proxysettings{'ACTION'} eq $Lang::tr{'advproxy clear cache'})
 {
-	system('/usr/local/bin/squidctrl flush >/dev/null 2>&1');
+	&General::system('/usr/local/bin/squidctrl', 'flush');
 }
 
 if (!$errormessage)
@@ -738,10 +720,6 @@ $checked{'ENABLE_BLUE'}{$proxysettings{'ENABLE_BLUE'}} = "checked='checked'";
 $checked{'TRANSPARENT_BLUE'}{'off'} = '';
 $checked{'TRANSPARENT_BLUE'}{'on'} = '';
 $checked{'TRANSPARENT_BLUE'}{$proxysettings{'TRANSPARENT_BLUE'}} = "checked='checked'";
-
-$checked{'SUPPRESS_VERSION'}{'off'} = '';
-$checked{'SUPPRESS_VERSION'}{'on'} = '';
-$checked{'SUPPRESS_VERSION'}{$proxysettings{'SUPPRESS_VERSION'}} = "checked='checked'";
 
 $checked{'FORWARD_IPADDRESS'}{'off'} = '';
 $checked{'FORWARD_IPADDRESS'}{'on'} = '';
@@ -834,36 +812,22 @@ $selected{'THROTTLING_GREEN_HOST'}{$proxysettings{'THROTTLING_GREEN_HOST'}} = "s
 $selected{'THROTTLING_BLUE_TOTAL'}{$proxysettings{'THROTTLING_BLUE_TOTAL'}} = "selected='selected'";
 $selected{'THROTTLING_BLUE_HOST'}{$proxysettings{'THROTTLING_BLUE_HOST'}} = "selected='selected'";
 
-$checked{'THROTTLE_BINARY'}{'off'} = '';
-$checked{'THROTTLE_BINARY'}{'on'} = '';
-$checked{'THROTTLE_BINARY'}{$proxysettings{'THROTTLE_BINARY'}} = "checked='checked'";
-$checked{'THROTTLE_DSKIMG'}{'off'} = '';
-$checked{'THROTTLE_DSKIMG'}{'on'} = '';
-$checked{'THROTTLE_DSKIMG'}{$proxysettings{'THROTTLE_DSKIMG'}} = "checked='checked'";
-$checked{'THROTTLE_MMEDIA'}{'off'} = '';
-$checked{'THROTTLE_MMEDIA'}{'on'} = '';
-$checked{'THROTTLE_MMEDIA'}{$proxysettings{'THROTTLE_MMEDIA'}} = "checked='checked'";
+$checked{'ASNBL_FASTFLUX_DETECTION'}{'off'} = '';
+$checked{'ASNBL_FASTFLUX_DETECTION'}{'on'} = '';
+$checked{'ASNBL_FASTFLUX_DETECTION'}{$proxysettings{'ASNBL_FASTFLUX_DETECTION'}} = "checked='checked'";
+
+$checked{'ASNBL_SELECANN_DETECTION'}{'off'} = '';
+$checked{'ASNBL_SELECANN_DETECTION'}{'on'} = '';
+$checked{'ASNBL_SELECANN_DETECTION'}{$proxysettings{'ASNBL_SELECANN_DETECTION'}} = "checked='checked'";
 
 $checked{'ENABLE_MIME_FILTER'}{'off'} = '';
 $checked{'ENABLE_MIME_FILTER'}{'on'} = '';
 $checked{'ENABLE_MIME_FILTER'}{$proxysettings{'ENABLE_MIME_FILTER'}} = "checked='checked'";
 
-$checked{'ENABLE_BROWSER_CHECK'}{'off'} = '';
-$checked{'ENABLE_BROWSER_CHECK'}{'on'} = '';
-$checked{'ENABLE_BROWSER_CHECK'}{$proxysettings{'ENABLE_BROWSER_CHECK'}} = "checked='checked'";
-
-foreach (@useragentlist) {
-	@useragent = split(/,/);
-	$checked{'UA_'.$useragent[0]}{'off'} = '';
-	$checked{'UA_'.$useragent[0]}{'on'} = '';
-	$checked{'UA_'.$useragent[0]}{$proxysettings{'UA_'.$useragent[0]}} = "checked='checked'";
-}
-
 $checked{'AUTH_METHOD'}{'none'} = '';
 $checked{'AUTH_METHOD'}{'ncsa'} = '';
 $checked{'AUTH_METHOD'}{'ident'} = '';
 $checked{'AUTH_METHOD'}{'ldap'} = '';
-$checked{'AUTH_METHOD'}{'ntlm'} = '';
 $checked{'AUTH_METHOD'}{'ntlm-auth'} = '';
 $checked{'AUTH_METHOD'}{'radius'} = '';
 $checked{'AUTH_METHOD'}{$proxysettings{'AUTH_METHOD'}} = "checked='checked'";
@@ -928,10 +892,6 @@ $checked{'ENABLE_UPDXLRATOR'}{'off'} = '';
 $checked{'ENABLE_UPDXLRATOR'}{'on'} = '';
 $checked{'ENABLE_UPDXLRATOR'}{$proxysettings{'ENABLE_UPDXLRATOR'}} = "checked='checked'";
 
-$checked{'ENABLE_CLAMAV'}{'off'} = '';
-$checked{'ENABLE_CLAMAV'}{'on'} = '';
-$checked{'ENABLE_CLAMAV'}{$proxysettings{'ENABLE_CLAMAV'}} = "checked='checked'";
-
 &Header::openpage($Lang::tr{'advproxy advanced web proxy configuration'}, 1, '');
 
 &Header::openbigbox('100%', 'left', '', $errormessage);
@@ -989,7 +949,8 @@ if ($netsettings{'BLUE_DEV'}) {
 }
 print <<END
 	<td class='base'>$Lang::tr{'advproxy visible hostname'}:</td>
-	<td><input type='text' name='VISIBLE_HOSTNAME' value='$proxysettings{'VISIBLE_HOSTNAME'}' /></td>
+	<td><input type='text' name='VISIBLE_HOSTNAME'
+		value='@{[ &Header::escape($proxysettings{'VISIBLE_HOSTNAME'}) ]}' /></td>
 </tr>
 <tr>
 END
@@ -1017,49 +978,24 @@ print <<END
 	</td>
 </tr>
 <tr>
-	<td class='base'>$Lang::tr{'advproxy suppress version'}:</td>
-	<td><input type='checkbox' name='SUPPRESS_VERSION' $checked{'SUPPRESS_VERSION'}{'on'} /></td>
+	<td>&nbsp;</td>
+	<td>&nbsp;</td>
 	<td class='base'>$Lang::tr{'advproxy error design'}:</td>
 	<td class='base'><select name='ERR_DESIGN'>
 		<option value='ipfire' $selected{'ERR_DESIGN'}{'ipfire'}>IPFire</option>
 		<option value='squid' $selected{'ERR_DESIGN'}{'squid'}>$Lang::tr{'advproxy standard'}</option>
 	</select></td>
 </tr>
-<tr>
-	<td class='base'>$Lang::tr{'advproxy squid version'}:</td>
-	<td class='base'>&nbsp;[<font color='$Header::colourred'> $squidversion[0] </font>]</td>
-	<td>&nbsp;</td>
-	<td>&nbsp;</td>
-</tr>
 </table>
 <hr size='1'>
 <table width='100%'>
-<tr><td class='base' colspan='4'><b>$Lang::tr{'advproxy redirector children'}</b></td></tr>
-<tr><td class='base' >$Lang::tr{'processes'}:&nbsp;<img src='/blob.gif' alt='*' /><input type='text' name='CHILDREN' value='$proxysettings{'CHILDREN'}' size='5' /></td>
 END
 ;
-my $count = `ip n| wc -l`;
-if ( $count < 1 ){$count = 1;}
-if ( -e "/usr/bin/squidclamav" ) {
-	print "<td class='base'><b>".$Lang::tr{'advproxy squidclamav'}."</b><br />";
-	if ( ! -e "/var/run/clamav/clamd.pid" ){
-		print "<font color='red'>clamav not running</font><br /><br />";
-		$proxysettings{'ENABLE_CLAMAV'} = 'off';
-		}
-	else {
-		print $Lang::tr{'advproxy enabled'}."<input type='checkbox' name='ENABLE_CLAMAV' ".$checked{'ENABLE_CLAMAV'}{'on'}." /><br />";
-		print "+ ".int(( $count**(1/3)) * 8);}
-	print "</td>";
-} else {
-	print "<td></td>";
-}
-print "<td class='base'><b>".$Lang::tr{'advproxy url filter'}."</b><br />";
+print "<td class='base'><a href='/cgi-bin/urlfilter.cgi'><b>".$Lang::tr{'advproxy url filter'}."</a></b><br />";
 print $Lang::tr{'advproxy enabled'}."<input type='checkbox' name='ENABLE_FILTER' ".$checked{'ENABLE_FILTER'}{'on'}." /><br />";
-print "+ ".int(($count**(1/3)) * 6);
 print "</td>";
-print "<td class='base'><b>".$Lang::tr{'advproxy update accelerator'}."</b><br />";
+print "<td class='base'><a href='/cgi-bin/updatexlrator.cgi'><b>".$Lang::tr{'advproxy update accelerator'}."</a></b><br />";
 print $Lang::tr{'advproxy enabled'}."<input type='checkbox' name='ENABLE_UPDXLRATOR' ".$checked{'ENABLE_UPDXLRATOR'}{'on'}." /><br />";
-print "+ ".int(($count**(1/3)) * 5);
 print "</td></tr>";
 print <<END
 </table>
@@ -1117,16 +1053,18 @@ print <<END
 	<td colspan='4'><b>$Lang::tr{'advproxy cache management'}</b></td>
 </tr>
 <tr>
-	<td class='base'>$Lang::tr{'proxy cachemgr'}:</td>
+	<td class='base'><a href='/cgi-bin/cachemgr.cgi' target='_blank'>$Lang::tr{'proxy cachemgr'}:</td>
 	<td><input type='checkbox' name='CACHEMGR' $checked{'CACHEMGR'}{'on'} /></td>
 	<td class='base'>$Lang::tr{'advproxy admin mail'}:</td>
-	<td><input type='text' name='ADMIN_MAIL_ADDRESS' value='$proxysettings{'ADMIN_MAIL_ADDRESS'}' /></td>
+	<td><input type='text' name='ADMIN_MAIL_ADDRESS'
+		value='@{[ &Header::escape($proxysettings{'ADMIN_MAIL_ADDRESS'}) ]}' /></td>
 </tr>
 <tr>
 	<td class='base'>$Lang::tr{'proxy filedescriptors'}:&nbsp;<img src='/blob.gif' alt='*' /></td>
 	<td><input type='text' name='FILEDESCRIPTORS' value='$proxysettings{'FILEDESCRIPTORS'}' size='5' /></td>
 	<td class='base'>$Lang::tr{'proxy admin password'}:</td>
-	<td><input type='text' name='ADMIN_PASSWORD' value='$proxysettings{'ADMIN_PASSWORD'}' /></td>
+	<td><input type='text' name='ADMIN_PASSWORD'
+		value='@{[ &Header::escape($proxysettings{'ADMIN_PASSWORD'}) ]}' /></td>
 </tr>
 <tr>
 	<td width='25%'></td> <td width='20%'> </td><td width='25%'> </td><td width='30%'></td>
@@ -1256,9 +1194,11 @@ END
 
 if (!$proxysettings{'SRC_SUBNETS'})
 {
-	print "$green_cidr\n";
-	if ($netsettings{'BLUE_DEV'})
-	{
+	if (&Header::green_used()) {
+		print "$green_cidr\n";
+	}
+
+	if (&Header::blue_used()) {
 		print "$blue_cidr\n";
 	}
 } else { print $proxysettings{'SRC_SUBNETS'}; }
@@ -1416,6 +1356,61 @@ END
 ;
 }
 
+# ===================================================================
+#  WPAD settings
+# ===================================================================
+
+print <<END
+<table width='100%'>
+<tr>
+	<td colspan='4'><b>$Lang::tr{'advproxy wpad title'}</b></td>
+</tr>
+<tr>
+	<td width='25%'></td> <td width='20%'> </td><td width='25%'> </td><td width='30%'></td>
+</tr>
+<tr>
+	<td colspan='2' class='base'>$Lang::tr{'advproxy wpad label dst_noproxy_ip'}:</td>
+	<td colspan='2' class='base'>$Lang::tr{'advproxy wpad label dst_noproxy_url'}:</td>
+</tr>
+<tr>
+	<td colspan='2'><textarea name='DST_NOPROXY_IP' cols='32' rows='3' wrap='off'>
+END
+;
+
+	print $proxysettings{'DST_NOPROXY_IP'};
+
+print <<END
+</textarea></td>
+
+	<td colspan='2'><textarea name='DST_NOPROXY_URL' cols='32' rows='3' wrap='off'>
+END
+;
+
+	print $proxysettings{'DST_NOPROXY_URL'};
+
+print <<END
+</textarea></td>
+</tr>
+<tr>
+	<td colspan='2' class='base'>$Lang::tr{'advproxy wpad example dst_noproxy_ip'}</td>
+	<td colspan='2' class='base'>$Lang::tr{'advproxy wpad example dst_noproxy_url'}</td>
+</tr>
+<tr>
+	<td colspan="4">&nbsp;</td>
+</tr>
+<tr>
+	<td colspan="4">$Lang::tr{'advproxy wpad view pac'}: <a href="http://$ENV{SERVER_ADDR}:81/wpad.dat" target="_blank">http://$ENV{SERVER_ADDR}:81/wpad.dat</a></td>
+</tr>
+<tr>
+	<td colspan="4">&nbsp;</td>
+</tr>
+</table>
+
+<hr size='1'>
+
+END
+;
+
 # -------------------------------------------------------------------
 
 print <<END
@@ -1531,7 +1526,15 @@ END
 ;
 
 foreach (@throttle_limits) {
-	print "\t<option value='$_' $selected{'THROTTLING_GREEN_TOTAL'}{$_}>$_ kBit/s</option>\n";
+	my $val = $_;
+	my $unit = "kbit/s";
+
+	if ($val >= 1024) {
+		$unit = "Mbit/s";
+		$val /= 1024;
+	}
+
+	print "\t<option value='$_' $selected{'THROTTLING_GREEN_TOTAL'}{$_}>$val $unit</option>\n";
 }
 
 print <<END
@@ -1545,7 +1548,7 @@ END
 ;
 
 foreach (@throttle_limits) {
-	print "\t<option value='$_' $selected{'THROTTLING_GREEN_HOST'}{$_}>$_ kBit/s</option>\n";
+	print "\t<option value='$_' $selected{'THROTTLING_GREEN_HOST'}{$_}>$_ kbit/s</option>\n";
 }
 
 print <<END
@@ -1566,7 +1569,7 @@ END
 ;
 
 foreach (@throttle_limits) {
-	print "\t<option value='$_' $selected{'THROTTLING_BLUE_TOTAL'}{$_}>$_ kBit/s</option>\n";
+	print "\t<option value='$_' $selected{'THROTTLING_BLUE_TOTAL'}{$_}>$_ kbit/s</option>\n";
 }
 
 print <<END
@@ -1580,7 +1583,7 @@ END
 ;
 
 foreach (@throttle_limits) {
-	print "\t<option value='$_' $selected{'THROTTLING_BLUE_HOST'}{$_}>$_ kBit/s</option>\n";
+	print "\t<option value='$_' $selected{'THROTTLING_BLUE_HOST'}{$_}>$_ kbit/s</option>\n";
 }
 
 print <<END
@@ -1593,21 +1596,6 @@ END
 }
 
 print <<END
-</table>
-<table width='100%'>
-<tr>
-	<td colspan='4'><i>$Lang::tr{'advproxy content based throttling'}:</i></td>
-</tr>
-<tr>
-	<td width='15%' class='base'>$Lang::tr{'advproxy throttle binary'}:</td>
-	<td width='10%'><input type='checkbox' name='THROTTLE_BINARY' $checked{'THROTTLE_BINARY'}{'on'} /></td>
-	<td width='15%' class='base'>$Lang::tr{'advproxy throttle dskimg'}:</td>
-	<td width='10%'><input type='checkbox' name='THROTTLE_DSKIMG' $checked{'THROTTLE_DSKIMG'}{'on'} /></td>
-	<td width='15%' class='base'>$Lang::tr{'advproxy throttle mmedia'}:</td>
-	<td width='10%'><input type='checkbox' name='THROTTLE_MMEDIA' $checked{'THROTTLE_MMEDIA'}{'on'} /></td>
-	<td width='15%'>&nbsp;</td>
-	<td width='10%'>&nbsp;</td>
-</tr>
 </table>
 <hr size='1'>
 <table width='100%'>
@@ -1642,55 +1630,23 @@ print <<END
 </table>
 
 <hr size='1'>
-<table width='100%'>
-<tr>
-	<td colspan='4'><b>$Lang::tr{'advproxy web browser'}</b> $Lang::tr{'advproxy UA enable filter'}:<input type='checkbox' name='ENABLE_BROWSER_CHECK' $checked{'ENABLE_BROWSER_CHECK'}{'on'} /></td>
-</tr>
-END
-;
-if ( $proxysettings{'ENABLE_BROWSER_CHECK'} eq 'on' ){
-print <<END
-<tr>
-	<td colspan='4'><i>
-END
-;
-if (@useragentlist) { print "$Lang::tr{'advproxy allowed web browsers'}:"; } else { print "$Lang::tr{'advproxy no clients defined'}"; }
-print <<END
-</i></td>
-</tr>
-</table>
-<table width='100%'>
-END
-;
 
-for ($n=0; $n<=@useragentlist; $n = $n + $i) {
-	for ($i=0; $i<=3; $i++) {
-		if ($i eq 0) { print "<tr>\n"; }
-		if (($n+$i) < @useragentlist) {
-			@useragent = split(/,/,@useragentlist[$n+$i]);
-			print "<td width='15%'>$useragent[1]:<\/td>\n";
-			print "<td width='10%'><input type='checkbox' name='UA_$useragent[0]' $checked{'UA_'.$useragent[0]}{'on'} /></td>\n";
-		}
-		if ($i eq 3) { print "<\/tr>\n"; }
-	}
-}
-}
-print <<END
-</table>
-<hr size='1'>
 <table width='100%'>
 <tr>
-	<td><b>$Lang::tr{'advproxy privacy'}</b></td>
+       <td><b>$Lang::tr{'advproxy asbased anomaly detection'}</b></td>
 </tr>
 <tr>
-	<td class='base'>$Lang::tr{'advproxy fake useragent'}:</td>
-	<td class='base'>$Lang::tr{'advproxy fake referer'}:</td>
+       <td class='base'>$Lang::tr{'advproxy fastflux detection'}:</td>
+       <td><input type='checkbox' name='ASNBL_FASTFLUX_DETECTION' $checked{'ASNBL_FASTFLUX_DETECTION'}{'on'} /></td>
+       <td class='base'>$Lang::tr{'advproxy fastflux detection threshold'}:</td>
+       <td><input type='text' name='ASNBL_FASTFLUX_THRESHOLD' value='$proxysettings{'ASNBL_FASTFLUX_THRESHOLD'}' size=2 /></td>
 </tr>
 <tr>
-	<td><input type='text' name='FAKE_USERAGENT' value='$proxysettings{'FAKE_USERAGENT'}' size='40%' /></td>
-	<td><input type='text' name='FAKE_REFERER' value='$proxysettings{'FAKE_REFERER'}' size='40%' /></td>
+       <td class='base'>$Lang::tr{'advproxy selectively announcements detection'}:</td>
+       <td colspan='3'><input type='checkbox' name='ASNBL_SELECANN_DETECTION' $checked{'ASNBL_SELECANN_DETECTION'}{'on'} /></td>
 </tr>
 </table>
+
 <hr size='1'>
 END
 ;
@@ -1711,7 +1667,6 @@ print <<END;
 	<td width='$auth_column_width%' class='base'><input type='radio' name='AUTH_METHOD' value='ncsa' $checked{'AUTH_METHOD'}{'ncsa'} />$Lang::tr{'advproxy AUTH method ncsa'}</td>
 	<td width='$auth_column_width%' class='base'><input type='radio' name='AUTH_METHOD' value='ident' $checked{'AUTH_METHOD'}{'ident'} />$Lang::tr{'advproxy AUTH method ident'}</td>
 	<td width='$auth_column_width%' class='base'><input type='radio' name='AUTH_METHOD' value='ldap' $checked{'AUTH_METHOD'}{'ldap'} />$Lang::tr{'advproxy AUTH method ldap'}</td>
-	<td width='$auth_column_width%' class='base'><input type='radio' name='AUTH_METHOD' value='ntlm' $checked{'AUTH_METHOD'}{'ntlm'} />$Lang::tr{'advproxy AUTH method ntlm'}</td>
 END
 
 if ($HAVE_NTLM_AUTH) {
@@ -1863,8 +1818,11 @@ print <<END
 END
 ;
 if (!$proxysettings{'IDENT_HOSTS'}) {
-	print "$green_cidr\n";
-	if ($netsettings{'BLUE_DEV'}) {
+	if (&Header::green_used()) {
+		print "$green_cidr\n";
+	}
+
+	if (&Header::blue_used()) {
 		print "$blue_cidr\n";
 	}
 } else {
@@ -1920,80 +1878,6 @@ END
 if ($proxysettings{'AUTH_METHOD'} eq 'ident') { print $proxysettings{'IDENT_DENY_USERS'}; }
 
 if ($proxysettings{'AUTH_METHOD'} eq 'ident') { print <<END
-</textarea></td>
-</tr>
-</table>
-END
-; }
-
-# ===================================================================
-#  NTLM auth settings
-# ===================================================================
-
-if ($proxysettings{'AUTH_METHOD'} eq 'ntlm') {
-print <<END
-<hr size='1'>
-<table width='100%'>
-<tr>
-	<td colspan='6'><b>$Lang::tr{'advproxy NTLM domain settings'}</b></td>
-</tr>
-<tr>
-	<td class='base'>$Lang::tr{'advproxy NTLM domain'}:</td>
-	<td><input type='text' name='NTLM_DOMAIN' value='$proxysettings{'NTLM_DOMAIN'}' size='15' /></td>
-	<td class='base'>$Lang::tr{'advproxy NTLM PDC hostname'}:</td>
-	<td><input type='text' name='NTLM_PDC' value='$proxysettings{'NTLM_PDC'}' size='14' /></td>
-	<td class='base'>$Lang::tr{'advproxy NTLM BDC hostname'}:</td>
-	<td><input type='text' name='NTLM_BDC' value='$proxysettings{'NTLM_BDC'}' size='14' /></td>
-</tr>
-</table>
-<hr size ='1'>
-<table width='100%'>
-<tr>
-	<td colspan='3'><b>$Lang::tr{'advproxy NTLM auth mode'}</b></td>
-</tr>
-<tr>
-	<td width='25%' class='base' width='25%'>$Lang::tr{'advproxy NTLM use integrated auth'}:</td>
-	<td width='20%'><input type='checkbox' name='NTLM_ENABLE_INT_AUTH' $checked{'NTLM_ENABLE_INT_AUTH'}{'on'} /></td>
-	<td>&nbsp;</td>
-</tr>
-</table>
-<hr size ='1'>
-<table width='100%'>
-<tr>
-	<td colspan='4'><b>$Lang::tr{'advproxy NTLM user based access restrictions'}</b></td>
-</tr>
-<tr>
-	<td width='25%' class='base'>$Lang::tr{'advproxy enabled'}:</td>
-	<td width='20%'><input type='checkbox' name='NTLM_ENABLE_ACL' $checked{'NTLM_ENABLE_ACL'}{'on'} /></td>
-	<td width='25%'>&nbsp;</td>
-	<td width='30%'>&nbsp;</td>
-</tr>
-<tr>
-	<td colspan='2'><input type='radio' name='NTLM_USER_ACL' value='positive' $checked{'NTLM_USER_ACL'}{'positive'} />
-	$Lang::tr{'advproxy NTLM use positive access list'}:</td>
-	<td colspan='2'><input type='radio' name='NTLM_USER_ACL' value='negative' $checked{'NTLM_USER_ACL'}{'negative'} />
-	$Lang::tr{'advproxy NTLM use negative access list'}:</td>
-</tr>
-<tr>
-	<td colspan='2'>$Lang::tr{'advproxy NTLM authorized users'}</td>
-	<td colspan='2'>$Lang::tr{'advproxy NTLM unauthorized users'}</td>
-</tr>
-<tr>
-	<td colspan='2'><textarea name='NTLM_ALLOW_USERS' cols='32' rows='6' wrap='off'>
-END
-; }
-
-if ($proxysettings{'AUTH_METHOD'} eq 'ntlm') { print $proxysettings{'NTLM_ALLOW_USERS'}; }
-
-if ($proxysettings{'AUTH_METHOD'} eq 'ntlm') { print <<END
-</textarea></td>
-	<td colspan='2'><textarea name='NTLM_DENY_USERS' cols='32' rows='6' wrap='off'>
-END
-; }
-
-if ($proxysettings{'AUTH_METHOD'} eq 'ntlm') { print $proxysettings{'NTLM_DENY_USERS'}; }
-
-if ($proxysettings{'AUTH_METHOD'} eq 'ntlm') { print <<END
 </textarea></td>
 </tr>
 </table>
@@ -2208,19 +2092,6 @@ print <<END
 <td><input type='hidden' name='LDAP_BINDDN_USER' value='$proxysettings{'LDAP_BINDDN_USER'}'></td>
 <td><input type='hidden' name='LDAP_BINDDN_PASS' value='$proxysettings{'LDAP_BINDDN_PASS'}'></td>
 <td><input type='hidden' name='LDAP_GROUP'       value='$proxysettings{'LDAP_GROUP'}'></td>
-END
-; }
-
-if (!($proxysettings{'AUTH_METHOD'} eq 'ntlm')) {
-print <<END
-<td><input type='hidden' name='NTLM_DOMAIN'          value='$proxysettings{'NTLM_DOMAIN'}'></td>
-<td><input type='hidden' name='NTLM_PDC'             value='$proxysettings{'NTLM_PDC'}'></td>
-<td><input type='hidden' name='NTLM_BDC'             value='$proxysettings{'NTLM_BDC'}'></td>
-<td><input type='hidden' name='NTLM_ENABLE_INT_AUTH' value='$proxysettings{'NTLM_ENABLE_INT_AUTH'}'></td>
-<td><input type='hidden' name='NTLM_ENABLE_ACL'      value='$proxysettings{'NTLM_ENABLE_ACL'}'></td>
-<td><input type='hidden' name='NTLM_USER_ACL'        value='$proxysettings{'NTLM_USER_ACL'}'></td>
-<td><input type='hidden' name='NTLM_ALLOW_USERS'     value='$proxysettings{'NTLM_ALLOW_USERS'}'></td>
-<td><input type='hidden' name='NTLM_DENY_USERS'      value='$proxysettings{'NTLM_DENY_USERS'}'></td>
 END
 ; }
 
@@ -2495,6 +2366,18 @@ sub read_acls
 		while (<FILE>) { $proxysettings{'DST_NOAUTH'} .= $_ };
 		close(FILE);
 	}
+	if (-e "$acl_dst_noproxy_ip") {
+		open(FILE,"$acl_dst_noproxy_ip");
+		delete $proxysettings{'DST_NOPROXY_IP'};
+		while (<FILE>) { $proxysettings{'DST_NOPROXY_IP'} .= $_ };
+		close(FILE);
+	}
+	if (-e "$acl_dst_noproxy_url") {
+		open(FILE,"$acl_dst_noproxy_url");
+		delete $proxysettings{'DST_NOPROXY_URL'};
+		while (<FILE>) { $proxysettings{'DST_NOPROXY_URL'} .= $_ };
+		close(FILE);
+	}
 	if (-e "$acl_ports_safe") {
 		open(FILE,"$acl_ports_safe");
 		delete $proxysettings{'PORTS_SAFE'};
@@ -2511,18 +2394,6 @@ sub read_acls
 		open(FILE,"$mimetypes");
 		delete $proxysettings{'MIME_TYPES'};
 		while (<FILE>) { $proxysettings{'MIME_TYPES'} .= $_ };
-		close(FILE);
-	}
-	if (-e "$ntlmdir/msntauth.allowusers") {
-		open(FILE,"$ntlmdir/msntauth.allowusers");
-		delete $proxysettings{'NTLM_ALLOW_USERS'};
-		while (<FILE>) { $proxysettings{'NTLM_ALLOW_USERS'} .= $_ };
-		close(FILE);
-	}
-	if (-e "$ntlmdir/msntauth.denyusers") {
-		open(FILE,"$ntlmdir/msntauth.denyusers");
-		delete $proxysettings{'NTLM_DENY_USERS'};
-		while (<FILE>) { $proxysettings{'NTLM_DENY_USERS'} .= $_ };
 		close(FILE);
 	}
 	if (-e "$raddir/radauth.allowusers") {
@@ -2615,6 +2486,7 @@ sub check_acls
 		if ($_)
 		{
 			if (/^\./) { $_ = '*'.$_; }
+			unless (&General::validwildcarddomainname($_)) { $errormessage = $Lang::tr{'advproxy errmsg invalid url'} . ": " . &Header::escape($_); }
 			$proxysettings{'DST_NOCACHE'} .= $_."\n";
 		}
 	}
@@ -2626,7 +2498,7 @@ sub check_acls
 		s/^\s+//g; s/\s+$//g;
 		if ($_)
 		{
-			unless (&General::validipandmask($_)) { $errormessage = $Lang::tr{'advproxy errmsg invalid ip or mask'}; }
+			unless (&Network::check_subnet($_)) { $errormessage = $Lang::tr{'advproxy errmsg invalid ip or mask'} . ": $_"; }
 			$proxysettings{'SRC_SUBNETS'} .= $_."\n";
 		}
 	}
@@ -2690,6 +2562,32 @@ sub check_acls
 			if (/^\./) { $_ = '*'.$_; }
 			$proxysettings{'DST_NOAUTH'} .= $_."\n";
 		}
+	}
+
+	@temp = split(/\n/,$proxysettings{'DST_NOPROXY_IP'});
+	undef $proxysettings{'DST_NOPROXY_IP'};
+	foreach (@temp)
+	{
+			s/^\s+//g; s/\s+$//g;
+			if ($_)
+			{
+					unless (&General::validipormask($_)) { $errormessage = $Lang::tr{'advproxy errmsg wpad invalid ip or mask'}; }
+					$proxysettings{'DST_NOPROXY_IP'} .= $_."\n";
+			}
+	}
+
+	@temp = split(/\n/,$proxysettings{'DST_NOPROXY_URL'});
+	undef $proxysettings{'DST_NOPROXY_URL'};
+	foreach (@temp)
+	{
+			s/^\s+//g;
+			unless (/^#/) { s/\s+//g; }
+			if ($_)
+			{
+					if (/^\./) { $_ = '*'.$_; }
+					unless (&General::validwildcarddomainname($_)) { $errormessage = $Lang::tr{'advproxy errmsg invalid url'} . ": " . &Header::escape($_); }
+					$proxysettings{'DST_NOPROXY_URL'} .= $_."\n";
+			}
 	}
 
 	if (($proxysettings{'NTLM_ENABLE_ACL'} eq 'on') && ($proxysettings{'NTLM_USER_ACL'} eq 'positive'))
@@ -2797,9 +2695,11 @@ sub write_acls
 	flock(FILE, 2);
 	if (!$proxysettings{'SRC_SUBNETS'})
 	{
-		print FILE "$green_cidr\n";
-		if ($netsettings{'BLUE_DEV'})
-		{
+		if (&Header::green_used()) {
+			print FILE "$green_cidr\n";
+		}
+
+		if (&Header::blue_used()) {
 			print FILE "$blue_cidr\n";
 		}
 	} else { print FILE $proxysettings{'SRC_SUBNETS'}; }
@@ -2828,6 +2728,16 @@ sub write_acls
 	open(FILE, ">$acl_dst_noauth");
 	flock(FILE, 2);
 	print FILE $proxysettings{'DST_NOAUTH'};
+	close(FILE);
+
+	open(FILE, ">$acl_dst_noproxy_ip");
+	flock(FILE, 2);
+	print FILE $proxysettings{'DST_NOPROXY_IP'};
+	close(FILE);
+
+	open(FILE, ">$acl_dst_noproxy_url");
+	flock(FILE, 2);
+	print FILE $proxysettings{'DST_NOPROXY_URL'};
 	close(FILE);
 
 	open(FILE, ">$acl_dst_noauth_net");
@@ -2933,23 +2843,6 @@ sub write_acls
 	if (!$proxysettings{'PORTS_SSL'}) { print FILE $def_ports_ssl; } else { print FILE $proxysettings{'PORTS_SSL'}; }
 	close(FILE);
 
-	open(FILE, ">$acl_dst_throttle");
-	flock(FILE, 2);
-	if ($proxysettings{'THROTTLE_BINARY'} eq 'on')
-	{
-		@temp = split(/\|/,$throttle_binary);
-		foreach (@temp) { print FILE "\\.$_\$\n"; }
-	}
-	if ($proxysettings{'THROTTLE_DSKIMG'} eq 'on')
-	{
-		@temp = split(/\|/,$throttle_dskimg);
-		foreach (@temp) { print FILE "\\.$_\$\n"; }
-	}
-	if ($proxysettings{'THROTTLE_MMEDIA'} eq 'on')
-	{
-		@temp = split(/\|/,$throttle_mmedia);
-		foreach (@temp) { print FILE "\\.$_\$\n"; }
-	}
 	if (-s $throttled_urls)
 	{
 		open(URLFILE, $throttled_urls);
@@ -2962,16 +2855,6 @@ sub write_acls
 	open(FILE, ">$mimetypes");
 	flock(FILE, 2);
 	print FILE $proxysettings{'MIME_TYPES'};
-	close(FILE);
-
-	open(FILE, ">$ntlmdir/msntauth.allowusers");
-	flock(FILE, 2);
-	print FILE $proxysettings{'NTLM_ALLOW_USERS'};
-	close(FILE);
-
-	open(FILE, ">$ntlmdir/msntauth.denyusers");
-	flock(FILE, 2);
-	print FILE $proxysettings{'NTLM_DENY_USERS'};
 	close(FILE);
 
 	open(FILE, ">$raddir/radauth.allowusers");
@@ -3014,6 +2897,10 @@ sub write_acls
 
 sub writepacfile
 {
+	my %vpnconfig=();
+	my %ovpnconfig=();
+	&General::readhasharray("${General::swroot}/vpn/config", \%vpnconfig);
+	&General::readhasharray("${General::swroot}/ovpn/ovpnconfig", \%ovpnconfig);
 	open(FILE, ">/srv/web/ipfire/html/proxy.pac");
 	flock(FILE, 2);
 	print FILE "function FindProxyForURL(url, host)\n";
@@ -3037,6 +2924,67 @@ END
 
 	if (&Header::orange_used() && $netsettings{'ORANGE_DEV'}) {
 		print FILE "     (isInNet(host, \"$netsettings{'ORANGE_NETADDRESS'}\", \"$netsettings{'ORANGE_NETMASK'}\")) ||\n";
+	}
+
+	# Additional exceptions for URLs
+	# The file has to be created by the user and should contain one entry per line
+	# Line-Format: <URL incl. wildcards>
+	# e.g. *.ipfire.org*
+	if (-s "$acl_dst_noproxy_url") {
+		undef @templist;
+
+		open(NOPROXY,"$acl_dst_noproxy_url");
+		@templist = <NOPROXY>;
+		close(NOPROXY);
+		chomp (@templist);
+
+		foreach (@templist)
+		{
+			print FILE "     (shExpMatch(url, \"$_\")) ||\n";
+		}
+	}
+
+	# Additional exceptions for Subnets
+	# The file has to be created by the user and should contain one entry per line
+	# Line-Format: <IP>/<SUBNET MASK>
+	# e.g. 192.168.0.0/255.255.255.0
+	if (-s "$acl_dst_noproxy_ip") {
+		undef @templist;
+
+		open(NOPROXY,"$acl_dst_noproxy_ip");
+		@templist = <NOPROXY>;
+		close(NOPROXY);
+		chomp (@templist);
+
+		foreach (@templist)
+		{
+			@temp = split(/\//);
+			print FILE "     (isInNet(host, \"$temp[0]\", \"$temp[1]\")) ||\n";
+		}
+	}
+
+	foreach my $key (sort { uc($vpnconfig{$a}[1]) cmp uc($vpnconfig{$b}[1]) } keys %vpnconfig) {
+		if ($vpnconfig{$key}[0] eq 'on' && $vpnconfig{$key}[3] ne 'host') {
+			my @networks = split(/\|/, $vpnconfig{$key}[11]);
+			foreach my $network (@networks) {
+				my ($vpnip, $vpnsub) = split("/", $network);
+				$vpnsub = &Network::convert_prefix2netmask($vpnsub) || $vpnsub;
+				next if ($vpnip eq "0.0.0.0" || $vpnsub eq "0.0.0.0");
+				print FILE "     (isInNet(host, \"$vpnip\", \"$vpnsub\")) ||\n";
+			}
+		}
+	}
+
+	foreach my $key (sort { uc($ovpnconfig{$a}[1]) cmp uc($ovpnconfig{$b}[1]) } keys %ovpnconfig) {
+		if ($ovpnconfig{$key}[0] eq 'on' && $ovpnconfig{$key}[3] ne 'host') {
+			my @networks = split(/\|/, $ovpnconfig{$key}[11]);
+			foreach my $network (@networks) {
+				my ($vpnip, $vpnsub) = split("/", $network);
+				$vpnsub = &Network::convert_prefix2netmask($vpnsub) || $vpnsub;
+				next if ($vpnip eq "0.0.0.0" || $vpnsub eq "0.0.0.0");
+				print FILE "     (isInNet(host, \"$vpnip\", \"$vpnsub\")) ||\n";
+			}
+		}
 	}
 
 	print FILE <<END
@@ -3069,15 +3017,14 @@ END
 					)
 				{
 					chomp $temp[1];
-					print FILE " ||\n     (isInNet(myIpAddress(), \"$temp[0]\", \"$temp[1]\"))";
+					my $tempmask = &Network::convert_prefix2netmask($temp[1]);
+					print FILE " ||\n     (isInNet(myIpAddress(), \"$temp[0]\", \"$tempmask\"))";
 				}
 			}
 
 			print FILE "\n";
 
 			print FILE <<END
-
-
    )
      return "PROXY $netsettings{'GREEN_ADDRESS'}:$proxysettings{'PROXY_PORT'}";
 END
@@ -3142,6 +3089,8 @@ sub writeconfig
 
 shutdown_lifetime 5 seconds
 icp_port 0
+httpd_suppress_version_string on
+email_err_data off
 
 END
 	;
@@ -3151,11 +3100,15 @@ END
 		print FILE "include /etc/squid/squid.conf.pre.local\n\n";
 	}
 
-	print FILE "http_port $netsettings{'GREEN_ADDRESS'}:$proxysettings{'PROXY_PORT'}";
+	if (&Header::green_used()) {
+		print FILE "http_port $netsettings{'GREEN_ADDRESS'}:$proxysettings{'PROXY_PORT'}";
+	} else {
+		print FILE "http_port 0.0.0.0:$proxysettings{'PROXY_PORT'}";
+	}
 	if ($proxysettings{'NO_CONNECTION_AUTH'} eq 'on') { print FILE " no-connection-auth" }
 	print FILE "\n";
 
-	if ($proxysettings{'TRANSPARENT'} eq 'on') {
+	if (&Header::green_used() && $proxysettings{'TRANSPARENT'} eq 'on') {
 		print FILE "http_port $netsettings{'GREEN_ADDRESS'}:$proxysettings{'TRANSPARENT_PORT'} intercept";
 		if ($proxysettings{'NO_CONNECTION_AUTH'} eq 'on') { print FILE " no-connection-auth" }
 		print FILE "\n";
@@ -3173,7 +3126,7 @@ END
 		}
 	}
 
-	if ($proxysettings{'CACHE_SIZE'} > 0)
+	if (($proxysettings{'CACHE_SIZE'} > 0) || ($proxysettings{'CACHE_MEM'} > 0))
 	{
 		print FILE "\n";
 
@@ -3205,7 +3158,7 @@ END
 
 	if ($proxysettings{'OFFLINE_MODE'} eq 'on') {  print FILE "offline_mode on\n\n"; }
 	if ($proxysettings{'CACHE_DIGESTS'} eq 'on') {  print FILE "digest_generation on\n\n"; } else {  print FILE "digest_generation off\n\n"; }
-	
+
 	if ((!($proxysettings{'MEM_POLICY'} eq 'LRU')) || (!($proxysettings{'CACHE_POLICY'} eq 'LRU')))
 	{
 		if (!($proxysettings{'MEM_POLICY'} eq 'LRU'))
@@ -3239,17 +3192,20 @@ END
 		}
 	}
 
-	print FILE <<END
-
+	print FILE <<END;
+acl IPFire_ips dst 127.0.0.1
 acl IPFire_http  port $http_port
 acl IPFire_https port $https_port
-acl IPFire_ips              dst $netsettings{'GREEN_ADDRESS'}
 acl IPFire_networks         src "$acl_src_subnets"
 acl IPFire_servers          dst "$acl_src_subnets"
+END
+	if (&Header::green_used()) {
+		print FILE <<END;
+acl IPFire_ips              dst $netsettings{'GREEN_ADDRESS'}
 acl IPFire_green_network    src $green_cidr
 acl IPFire_green_servers    dst $green_cidr
 END
-	;
+	}
 	if ($netsettings{'BLUE_DEV'}) { print FILE "acl IPFire_blue_network     src $blue_cidr\n"; }
 	if ($netsettings{'BLUE_DEV'}) { print FILE "acl IPFire_blue_servers     dst $blue_cidr\n"; }
 	if (!-z $acl_src_banned_ip) { print FILE "acl IPFire_banned_ips       src \"$acl_src_banned_ip\"\n"; }
@@ -3270,7 +3226,12 @@ cache_dir aufs /var/log/cache $proxysettings{'CACHE_SIZE'} $proxysettings{'L1_DI
 END
 		;
 	} else {
-		print FILE "cache deny all\n\n";
+		if ($proxysettings{'CACHE_MEM'} > 0) {
+			# always 2% of CACHE_MEM defined as max object size
+			print FILE "maximum_object_size_in_memory " . int($proxysettings{'CACHE_MEM'} * 1024 * 0.02) . " KB\n\n";
+		} else {
+			print FILE "cache deny all\n\n";
+	    }
 	}
 
 	print FILE <<END
@@ -3385,39 +3346,6 @@ END
 			if (!($proxysettings{'AUTH_IPCACHE_TTL'} eq '0')) { print FILE "\nauthenticate_ip_ttl $proxysettings{'AUTH_IPCACHE_TTL'} minutes\n"; }
 		}
 
-		if ($proxysettings{'AUTH_METHOD'} eq 'ntlm')
-		{
-			if ($proxysettings{'NTLM_ENABLE_INT_AUTH'} eq 'on')
-			{
-				print FILE "auth_param ntlm program $authdir/ntlm_smb_lm_auth $proxysettings{'NTLM_DOMAIN'}/$proxysettings{'NTLM_PDC'}";
-				if ($proxysettings{'NTLM_BDC'} eq '') { print FILE "\n"; } else { print FILE " $proxysettings{'NTLM_DOMAIN'}/$proxysettings{'NTLM_BDC'}\n"; }
-				print FILE "auth_param ntlm children $proxysettings{'AUTH_CHILDREN'}\n";
-				if (!($proxysettings{'AUTH_IPCACHE_TTL'} eq '0')) { print FILE "\nauthenticate_ip_ttl $proxysettings{'AUTH_IPCACHE_TTL'} minutes\n"; }
-			} else {
-				print FILE "auth_param basic program $authdir/basic_msnt_auth\n";
-				print FILE "auth_param basic children $proxysettings{'AUTH_CHILDREN'}\n";
-				print FILE "auth_param basic realm $authrealm\n";
-				print FILE "auth_param basic credentialsttl $proxysettings{'AUTH_CACHE_TTL'} minutes\n";
-				if (!($proxysettings{'AUTH_IPCACHE_TTL'} eq '0')) { print FILE "\nauthenticate_ip_ttl $proxysettings{'AUTH_IPCACHE_TTL'} minutes\n"; }
-
-				open(MSNTCONF, ">$ntlmdir/msntauth.conf");
-				flock(MSNTCONF,2);
-				print MSNTCONF "server $proxysettings{'NTLM_PDC'}";
-				if ($proxysettings{'NTLM_BDC'} eq '') { print MSNTCONF " $proxysettings{'NTLM_PDC'}"; } else { print MSNTCONF " $proxysettings{'NTLM_BDC'}"; }
-				print MSNTCONF " $proxysettings{'NTLM_DOMAIN'}\n";
-				if ($proxysettings{'NTLM_ENABLE_ACL'} eq 'on')
-				{
-					if ($proxysettings{'NTLM_USER_ACL'} eq 'positive')
-					{
-						print MSNTCONF "allowusers $ntlmdir/msntauth.allowusers\n";
-					} else {
-						print MSNTCONF "denyusers $ntlmdir/msntauth.denyusers\n";
-					}
-				}
-				close(MSNTCONF);
-			}
-		}
-
 		if ($proxysettings{'AUTH_METHOD'} eq 'ntlm-auth')
 		{
 			print FILE "auth_param ntlm program /usr/bin/ntlm_auth --helper-protocol=squid-2.5-ntlmssp";
@@ -3425,11 +3353,12 @@ END
 				my $ntlm_auth_group = $proxysettings{'NTLM_AUTH_GROUP'};
 				$ntlm_auth_group =~ s/\\/\+/;
 
-				print FILE " --require-membership-of=\"$ntlm_auth_group\"";
+				print FILE " --require-membership-of=$ntlm_auth_group";
 			}
 			print FILE "\n";
 
 			print FILE "auth_param ntlm children $proxysettings{'AUTH_CHILDREN'}\n\n";
+			print FILE "auth_param ntlm credentialsttl $proxysettings{'AUTH_CACHE_TTL'} minutes\n\n";
 
 			# BASIC authentication
 			if ($proxysettings{'NTLM_AUTH_BASIC'} eq "on") {
@@ -3438,12 +3367,12 @@ END
 					my $ntlm_auth_group = $proxysettings{'NTLM_AUTH_GROUP'};
 					$ntlm_auth_group =~ s/\\/\+/;
 
-					print FILE " --require-membership-of=\"$ntlm_auth_group\"";
+					print FILE " --require-membership-of=$ntlm_auth_group";
 				}
 				print FILE "\n";
-				print FILE "auth_param basic children 10\n";
-				print FILE "auth_param basic realm IPFire Web Proxy Server\n";
-				print FILE "auth_param basic credentialsttl 2 hours\n\n";
+				print FILE "auth_param basic children $proxysettings{'AUTH_CHILDREN'}\n";
+				print FILE "auth_param basic realm $authrealm\n";
+				print FILE "auth_param basic credentialsttl $proxysettings{'AUTH_CACHE_TTL'} minutes\n\n";
 			}
 		}
 
@@ -3460,17 +3389,6 @@ END
 
 		print FILE "\n";
 		print FILE "acl for_inetusers proxy_auth REQUIRED\n";
-		if (($proxysettings{'AUTH_METHOD'} eq 'ntlm') && ($proxysettings{'NTLM_ENABLE_INT_AUTH'} eq 'on') && ($proxysettings{'NTLM_ENABLE_ACL'} eq 'on'))
-		{
-			if ((!-z "$ntlmdir/msntauth.allowusers") && ($proxysettings{'NTLM_USER_ACL'} eq 'positive'))
-			{
-				print FILE "acl for_acl_users proxy_auth \"$ntlmdir/msntauth.allowusers\"\n";
-			}
-			if ((!-z "$ntlmdir/msntauth.denyusers") && ($proxysettings{'NTLM_USER_ACL'} eq 'negative'))
-			{
-				print FILE "acl for_acl_users proxy_auth \"$ntlmdir/msntauth.denyusers\"\n";
-			}
-		}
 		if (($proxysettings{'AUTH_METHOD'} eq 'radius') && ($proxysettings{'RADIUS_ENABLE_ACL'} eq 'on'))
 		{
 			if ((!-z "$raddir/radauth.allowusers") && ($proxysettings{'RADIUS_USER_ACL'} eq 'positive'))
@@ -3522,8 +3440,6 @@ END
 	}
 
 	if (($delaypools) && (!-z $acl_dst_throttle)) { print FILE "acl for_throttled_urls url_regex -i \"$acl_dst_throttle\"\n\n"; }
-
-	if ($proxysettings{'ENABLE_BROWSER_CHECK'} eq 'on') { print FILE "acl with_allowed_useragents browser $browser_regexp\n\n"; }
 
 	print FILE "acl within_timeframe time ";
 	if ($proxysettings{'TIME_MON'} eq 'on') { print FILE "M"; }
@@ -3598,17 +3514,6 @@ END
 	}
 	if ((!-z $extgrp) && ($proxysettings{'AUTH_METHOD'} eq 'ncsa') && ($proxysettings{'NCSA_BYPASS_REDIR'} eq 'on')) { print FILE "\nredirector_access deny for_extended_users\n"; }
 
-	# Check if squidclamav is enabled.
-	if ($proxysettings{'ENABLE_CLAMAV'} eq 'on') {
-		print FILE "\n#Settings for squidclamav:\n";
-		print FILE "http_port 127.0.0.1:$proxysettings{'PROXY_PORT'}\n";
-		print FILE "acl purge method PURGE\n";
-		print FILE "http_access deny to_localhost\n";
-		print FILE "http_access allow localhost\n";
-		print FILE "http_access allow purge localhost\n";
-		print FILE "http_access deny purge\n";
-		print FILE "url_rewrite_access deny localhost\n";
-	}
 	print FILE <<END;
 
 #Access to squid:
@@ -3629,6 +3534,59 @@ if (@safe_ports) {
 if (@ssl_ports) {
 	print FILE "http_access deny  CONNECT !SSL_ports\n";
 }
+
+	if ((($proxysettings{'ASNBL_FASTFLUX_DETECTION'} eq 'on') && (!-z $proxysettings{'ASNBL_FASTFLUX_THRESHOLD'})) || ($proxysettings{'ASNBL_SELECANN_DETECTION'} eq 'on')) {
+		print FILE "external_acl_type asnblhelper children-max=10 children-startup=2 ttl=86400 %DST /usr/bin/asnbl-helper.py ${General::swroot}/proxy/asnbl-helper.conf\n";
+		print FILE "acl asnbl external asnblhelper\n";
+
+		# Use the user-defined URL filter whitelist (if present and populated) for the ASNBL helper as well
+		# Necessary for destinations such as fedoraproject.org, but we do not want to maintain a dedicated
+		# or hardcoded list for such FQDNs.
+		if ((-e "${General::swroot}/urlfilter/blacklists/custom/allowed/domains") && (!-z "${General::swroot}/urlfilter/blacklists/custom/allowed/domains")) {
+			print FILE "acl asnbl_whitelisted_destinations dstdomain \"${General::swroot}/urlfilter/blacklists/custom/allowed/domains\"\n";
+			print FILE "http_access deny asnbl !asnbl_whitelisted_destinations\n\n";
+		} else {
+			print FILE "http_access deny asnbl\n\n";
+		}
+
+		# Write ASNBL helper configuration file...
+		open(ASNBLFILE, ">${General::swroot}/proxy/asnbl-helper.conf");
+		flock(ASNBLFILE, 2);
+
+		print ASNBLFILE<<END
+#
+# This file has been automatically generated. Manual changes will be overwritten.
+#
+
+[GENERAL]
+LOGLEVEL = INFO
+ASNDB_PATH = /var/lib/location/database.db
+USE_REPLYMAP = no
+END
+;
+
+		print ASNBLFILE "AS_DIVERSITY_THRESHOLD = $proxysettings{'ASNBL_FASTFLUX_THRESHOLD'}\n";
+
+		if ($proxysettings{'ASNBL_SELECANN_DETECTION'} eq 'on') {
+			print ASNBLFILE "BLOCK_SUSPECTED_SELECTIVE_ANNOUNCEMENTS = yes\n";
+		} else {
+			print ASNBLFILE "BLOCK_SUSPECTED_SELECTIVE_ANNOUNCEMENTS = no\n";
+		}
+
+		if ($proxysettings{'ASNBL_FASTFLUX_DETECTION'} eq 'on') {
+			print ASNBLFILE "BLOCK_DIVERSITY_EXCEEDING_DESTINATIONS = yes\n";
+		} else {
+			print ASNBLFILE "BLOCK_DIVERSITY_EXCEEDING_DESTINATIONS = no\n";
+		}
+
+		print ASNBLFILE<<END
+TESTDATA = (10.0.0.1, 0) (127.0.0.1, 0) (fe80::1, 0)
+ACTIVE_ASNBLS =
+END
+;
+
+		close ASNBLFILE;
+    }
 
 if ($proxysettings{'AUTH_METHOD'} eq 'ident')
 {
@@ -3708,9 +3666,11 @@ if ($delaypools) {
 
 	if ($netsettings{'BLUE_DEV'})
 	{
-		print FILE "delay_access 1 allow IPFire_green_network";
-		if (!-z $acl_dst_throttle) { print FILE " for_throttled_urls"; }
-		print FILE "\n";
+		if (&Header::green_used()) {
+			print FILE "delay_access 1 allow IPFire_green_network";
+			if (!-z $acl_dst_throttle) { print FILE " for_throttled_urls"; }
+			print FILE "\n";
+		}
 		print FILE "delay_access 1 deny  all\n";
 	} else {
 		print FILE "delay_access 1 allow all";
@@ -3734,7 +3694,7 @@ if ($delaypools) {
 	print FILE "\n";
 }
 
-if ($proxysettings{'NO_PROXY_LOCAL'} eq 'on')
+if (&Header::green_used() && $proxysettings{'NO_PROXY_LOCAL'} eq 'on')
 {
 	print FILE "#Prevent internal proxy access to Green except IPFire itself\n";
 	print FILE "http_access deny IPFire_green_servers !IPFire_ips !IPFire_green_network\n\n";
@@ -3775,7 +3735,6 @@ END
 				print FILE " !within_timeframe";
 			} else {
 				print FILE " within_timeframe"; }
-			if ($proxysettings{'ENABLE_BROWSER_CHECK'} eq 'on') { print FILE " with_allowed_useragents"; }
 			print FILE " to_ipaddr_without_auth\n";
 		}
 		if (!-z $acl_dst_noauth_dom)
@@ -3785,7 +3744,6 @@ END
 				print FILE " !within_timeframe";
 			} else {
 				print FILE " within_timeframe"; }
-			if ($proxysettings{'ENABLE_BROWSER_CHECK'} eq 'on') { print FILE " with_allowed_useragents"; }
 			print FILE " to_domains_without_auth\n";
 		}
 		if (!-z $acl_dst_noauth_url)
@@ -3795,7 +3753,6 @@ END
 				print FILE " !within_timeframe";
 			} else {
 				print FILE " within_timeframe"; }
-			if ($proxysettings{'ENABLE_BROWSER_CHECK'} eq 'on') { print FILE " with_allowed_useragents"; }
 			print FILE " to_hosts_without_auth\n";
 		}
 	}
@@ -3829,23 +3786,9 @@ END
 			{
 				if (!-z $disgrp) { print FILE " !for_disabled_users"; } else { print FILE " for_inetusers"; }
 			}
-			if (($proxysettings{'AUTH_METHOD'} eq 'ldap') || (($proxysettings{'AUTH_METHOD'} eq 'ntlm') && ($proxysettings{'NTLM_ENABLE_INT_AUTH'} eq 'off')) || ($proxysettings{'AUTH_METHOD'} eq 'radius'))
+			if (($proxysettings{'AUTH_METHOD'} eq 'ldap') || ($proxysettings{'AUTH_METHOD'} eq 'radius'))
 			{
 				print FILE " for_inetusers";
-			}
-			if (($proxysettings{'AUTH_METHOD'} eq 'ntlm') && ($proxysettings{'NTLM_ENABLE_INT_AUTH'} eq 'on'))
-			{
-				if ($proxysettings{'NTLM_ENABLE_ACL'} eq 'on')
-				{
-					if (($proxysettings{'NTLM_USER_ACL'} eq 'positive') && (!-z "$ntlmdir/msntauth.allowusers"))
-					{
-						print FILE " for_acl_users";
-					}
-					if (($proxysettings{'NTLM_USER_ACL'} eq 'negative') && (!-z "$ntlmdir/msntauth.denyusers"))
-					{
-						print FILE " !for_acl_users";
-					}
-				} else { print FILE " for_inetusers"; }
 			}
 			if (($proxysettings{'AUTH_METHOD'} eq 'radius') && ($proxysettings{'RADIUS_ENABLE_ACL'} eq 'on'))
 			{
@@ -3874,23 +3817,9 @@ END
 			{
 				if (!-z $disgrp) { print FILE " !for_disabled_users"; } else { print FILE " for_inetusers"; }
 			}
-			if (($proxysettings{'AUTH_METHOD'} eq 'ldap') || (($proxysettings{'AUTH_METHOD'} eq 'ntlm') && ($proxysettings{'NTLM_ENABLE_INT_AUTH'} eq 'off')) || ($proxysettings{'AUTH_METHOD'} eq 'radius'))
+			if (($proxysettings{'AUTH_METHOD'} eq 'ldap') || ($proxysettings{'AUTH_METHOD'} eq 'radius'))
 			{
 				print FILE " for_inetusers";
-			}
-			if (($proxysettings{'AUTH_METHOD'} eq 'ntlm') && ($proxysettings{'NTLM_ENABLE_INT_AUTH'} eq 'on'))
-			{
-				if ($proxysettings{'NTLM_ENABLE_ACL'} eq 'on')
-				{
-					if (($proxysettings{'NTLM_USER_ACL'} eq 'positive') && (!-z "$ntlmdir/msntauth.allowusers"))
-					{
-						print FILE " for_acl_users";
-					}
-					if (($proxysettings{'NTLM_USER_ACL'} eq 'negative') && (!-z "$ntlmdir/msntauth.denyusers"))
-					{
-						print FILE " !for_acl_users";
-					}
-				} else { print FILE " for_inetusers"; }
 			}
 			if (($proxysettings{'AUTH_METHOD'} eq 'radius') && ($proxysettings{'RADIUS_ENABLE_ACL'} eq 'on'))
 			{
@@ -3917,14 +3846,6 @@ END
 	}
 
 	if (
-	    (
-	     ($proxysettings{'AUTH_METHOD'} eq 'ntlm') &&
-	     ($proxysettings{'NTLM_ENABLE_INT_AUTH'} eq 'on') &&
-	     ($proxysettings{'NTLM_ENABLE_ACL'} eq 'on') &&
-	     ($proxysettings{'NTLM_USER_ACL'} eq 'negative') &&
-	     (!-z "$ntlmdir/msntauth.denyusers")
-	    )
-		||
 	    (
 	     ($proxysettings{'AUTH_METHOD'} eq 'radius') &&
 	     ($proxysettings{'RADIUS_ENABLE_ACL'} eq 'on') &&
@@ -3953,20 +3874,11 @@ END
 			print FILE " !within_timeframe";
 		} else {
 			print FILE " within_timeframe"; }
-		if ($proxysettings{'ENABLE_BROWSER_CHECK'} eq 'on') { print FILE " with_allowed_useragents"; }
 		print FILE " !on_ident_aware_hosts\n";
 	}
 
 	print FILE "http_access allow IPFire_networks";
 	if (
-	    (
-	     ($proxysettings{'AUTH_METHOD'} eq 'ntlm') &&
-	     ($proxysettings{'NTLM_ENABLE_INT_AUTH'} eq 'on') &&
-	     ($proxysettings{'NTLM_ENABLE_ACL'} eq 'on') &&
-	     ($proxysettings{'NTLM_USER_ACL'} eq 'positive') &&
-	     (!-z "$ntlmdir/msntauth.allowusers")
-	    )
-		||
 	    (
 	     ($proxysettings{'AUTH_METHOD'} eq 'radius') &&
 	     ($proxysettings{'RADIUS_ENABLE_ACL'} eq 'on') &&
@@ -3996,13 +3908,11 @@ END
 		print FILE " !within_timeframe";
 	} else {
 		print FILE " within_timeframe"; }
-	if ($proxysettings{'ENABLE_BROWSER_CHECK'} eq 'on') { print FILE " with_allowed_useragents"; }
 	print FILE "\n";
 
 	print FILE "http_access deny  all\n\n";
 
-	if (($proxysettings{'FORWARD_IPADDRESS'} eq 'off') || ($proxysettings{'FORWARD_VIA'} eq 'off') ||
-		(!($proxysettings{'FAKE_USERAGENT'} eq '')) || (!($proxysettings{'FAKE_REFERER'} eq '')))
+	if (($proxysettings{'FORWARD_IPADDRESS'} eq 'off') || ($proxysettings{'FORWARD_VIA'} eq 'off'))
 	{
 		print FILE "#Strip HTTP Header\n";
 
@@ -4016,34 +3926,10 @@ END
 			print FILE "request_header_access Via deny all\n";
 			print FILE "reply_header_access Via deny all\n";
 		}
-		if (!($proxysettings{'FAKE_USERAGENT'} eq ''))
-		{
-			print FILE "request_header_access User-Agent deny all\n";
-			print FILE "reply_header_access User-Agent deny all\n";
-		}
-		if (!($proxysettings{'FAKE_REFERER'} eq ''))
-		{
-			print FILE "request_header_access Referer deny all\n";
-			print FILE "reply_header_access Referer deny all\n";
-		}
 
 		print FILE "\n";
 
-		if ((!($proxysettings{'FAKE_USERAGENT'} eq '')) || (!($proxysettings{'FAKE_REFERER'} eq '')))
-		{
-			if (!($proxysettings{'FAKE_USERAGENT'} eq ''))
-			{
-				print FILE "header_replace User-Agent $proxysettings{'FAKE_USERAGENT'}\n";
-			}
-			if (!($proxysettings{'FAKE_REFERER'} eq ''))
-			{
-				print FILE "header_replace Referer $proxysettings{'FAKE_REFERER'}\n";
-			}
-			print FILE "\n";
-		}
 	}
-
-	if ($proxysettings{'SUPPRESS_VERSION'} eq 'on') { print FILE "httpd_suppress_version_string on\n\n" }
 
 	if ((!-z $mimetypes) && ($proxysettings{'ENABLE_MIME_FILTER'} eq 'on')) {
 		if (!-z $acl_src_unrestricted_ip)  { print FILE "http_reply_access allow IPFire_unrestricted_ips\n"; }
@@ -4064,8 +3950,14 @@ END
 		print FILE " $proxysettings{'VISIBLE_HOSTNAME'}\n\n";
 	}
 
-	if (!($proxysettings{'ADMIN_MAIL_ADDRESS'} eq '')) { print FILE "cache_mgr $proxysettings{'ADMIN_MAIL_ADDRESS'}\n"; }
-	if (!($proxysettings{'ADMIN_PASSWORD'} eq '')) { print FILE "cachemgr_passwd $proxysettings{'ADMIN_PASSWORD'} all\n"; }
+	if (!($proxysettings{'ADMIN_MAIL_ADDRESS'} eq ''))
+		{
+			print FILE "cache_mgr $proxysettings{'ADMIN_MAIL_ADDRESS'}\n";
+		}
+	if (!($proxysettings{'ADMIN_PASSWORD'} eq ''))
+		{
+			print FILE "cachemgr_passwd $proxysettings{'ADMIN_PASSWORD'} all\n";
+		}
 	print FILE "\n";
 
 	print FILE "max_filedescriptors $proxysettings{'FILEDESCRIPTORS'}\n\n";
@@ -4081,18 +3973,26 @@ END
 		# login=*:password      ($proxysettings{'FORWARD_USERNAME'} eq 'on')
 		if (($proxy1 eq 'YES') || ($proxy1 eq 'PASS'))
 		{
+			$proxysettings{'UPSTREAM_USER'} = &Header::escape($proxysettings{'UPSTREAM_USER'});
 			print FILE " login=$proxysettings{'UPSTREAM_USER'}";
-			if ($proxy1 eq 'YES') { print FILE ":$proxysettings{'UPSTREAM_PASSWORD'}"; }
+			if ($proxy1 eq 'YES')
+			{
+				$proxysettings{'UPSTREAM_PASSWORD'} = &Header::escape($proxysettings{'UPSTREAM_PASSWORD'});
+				print FILE ":$proxysettings{'UPSTREAM_PASSWORD'}";
+			}
 		}
 		elsif ($proxysettings{'FORWARD_USERNAME'} eq 'on') { print FILE " login=*:password"; }
 
 		print FILE "\nalways_direct allow IPFire_ips\n";
 		print FILE "never_direct  allow all\n\n";
 	}
-	if (($proxysettings{'ENABLE_FILTER'} eq 'on') || ($proxysettings{'ENABLE_UPDXLRATOR'} eq 'on') || ($proxysettings{'ENABLE_CLAMAV'} eq 'on'))
+	if (($proxysettings{'ENABLE_FILTER'} eq 'on') || ($proxysettings{'ENABLE_UPDXLRATOR'} eq 'on'))
 	{
 		print FILE "url_rewrite_program /usr/sbin/redirect_wrapper\n";
-		print FILE "url_rewrite_children $proxysettings{'CHILDREN'}\n\n";
+		print FILE "url_rewrite_children ", &General::number_cpu_cores();
+		print FILE " startup=", &General::number_cpu_cores();
+		print FILE " idle=", &General::number_cpu_cores();
+		print FILE " queue-size=", &General::number_cpu_cores() * 32, "\n\n";
 	}
 
 	# Include file with user defined settings.
@@ -4100,18 +4000,6 @@ END
 		print FILE "include /etc/squid/squid.conf.local\n";
 	}
 	close FILE;
-
-	# Proxy settings for squidclamav - if installed.
-	#
-	# Check if squidclamav is enabled.
-	if ($proxysettings{'ENABLE_CLAMAV'} eq 'on') {
-
-		my $configfile='/etc/squidclamav.conf';
-
-		my $data = &General::read_file_utf8($configfile);
-		$data =~ s/squid_port [0-9]+/squid_port $proxysettings{'PROXY_PORT'}/g;
-		&General::write_file_utf8($configfile, $data);
-	}
 }
 
 # -------------------------------------------------------------------
@@ -4134,7 +4022,7 @@ sub adduser
 		close(FILE);
 	} else {
 		&deluser($str_user);
-		system("/usr/sbin/htpasswd -b $userdb $str_user $str_pass");
+		&General::system("/usr/bin/htpasswd", "-bB", "-C 10", "$userdb", "$str_user", "$str_pass");
 	}
 
 	if ($str_group eq 'standard') { open(FILE, ">>$stdgrp");
@@ -4188,7 +4076,9 @@ sub writecachemgr
 {
 	open(FILE, ">${General::swroot}/proxy/cachemgr.conf");
 	flock(FILE, 2);
-	print FILE "$netsettings{'GREEN_ADDRESS'}:$proxysettings{'PROXY_PORT'}\n";
+	if (&Header::green_used()) {
+		print FILE "$netsettings{'GREEN_ADDRESS'}:$proxysettings{'PROXY_PORT'}\n";
+	}
 	print FILE "localhost";
 	close(FILE);
   return;

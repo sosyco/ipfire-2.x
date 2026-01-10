@@ -1,7 +1,7 @@
 /*#############################################################################
 #                                                                             #
 # IPFire - An Open Source Firewall Distribution                               #
-# Copyright (C) 2014 IPFire development team                                  #
+# Copyright (C) 2007-2022  IPFire Team  <info@ipfire.org>                     #
 #                                                                             #
 # This program is free software: you can redistribute it and/or modify        #
 # it under the terms of the GNU General Public License as published by        #
@@ -37,20 +37,14 @@
 #include <sys/stat.h>
 #include <sys/swap.h>
 #include <sys/sysinfo.h>
+#include <sys/utsname.h>
 #include <unistd.h>
-
-#include <linux/fs.h>
 
 #include <libsmooth.h>
 
 #include "hw.h"
 
-const char* other_filesystems[] = {
-	"/dev",
-	"/proc",
-	"/sys",
-	NULL
-};
+extern FILE* flog;
 
 static int system_chroot(const char* output, const char* path, const char* cmd) {
 	char chroot_cmd[STRING_SIZE];
@@ -60,8 +54,50 @@ static int system_chroot(const char* output, const char* path, const char* cmd) 
 	return mysystem(output, chroot_cmd);
 }
 
+static int hw_mkdir(const char *dir) {
+	char tmp[STRING_SIZE];
+	char *p = NULL;
+	size_t len;
+	int r;
+
+	snprintf(tmp, sizeof(tmp),"%s",dir);
+	len = strlen(tmp);
+
+	if (tmp[len - 1] == '/') {
+		tmp[len - 1] = 0;
+	}
+
+	for (p = tmp + 1; *p; p++) {
+		if (*p == '/') {
+			*p = 0;
+
+			// Create target if it does not exist
+			if (access(tmp, X_OK) != 0) {
+				r = mkdir(tmp, S_IRWXU|S_IRWXG|S_IRWXO);
+
+				if (r) {
+					return r;
+				}
+			}
+
+			*p = '/';
+		}
+	}
+
+	// Create target if it does not exist
+	if (access(tmp, X_OK) != 0) {
+		r = mkdir(tmp, S_IRWXU|S_IRWXG|S_IRWXO);
+
+		if (r) {
+			return r;
+		}
+	}
+
+	return 0;
+}
+
 struct hw* hw_init() {
-	struct hw* hw = malloc(sizeof(*hw));
+	struct hw* hw = calloc(1, sizeof(*hw));
 	assert(hw);
 
 	// Initialize libudev
@@ -70,6 +106,16 @@ struct hw* hw_init() {
 		fprintf(stderr, "Could not create udev instance\n");
 		exit(1);
 	}
+
+	// What architecture are we running on?
+	struct utsname uname_data;
+	int ret = uname(&uname_data);
+	if (ret == 0)
+		snprintf(hw->arch, sizeof(hw->arch), "%s", uname_data.machine);
+
+	// Should we install in EFI mode?
+	if ((strcmp(hw->arch, "x86_64") == 0) || (strcmp(hw->arch, "aarch64") == 0))
+		hw->efi = 1;
 
 	return hw;
 }
@@ -85,14 +131,13 @@ static int strstartswith(const char* a, const char* b) {
 	return (strncmp(a, b, strlen(b)) == 0);
 }
 
-static char loop_device[STRING_SIZE];
-
 static int setup_loop_device(const char* source, const char* device) {
+	int device_fd = -1;
+
 	int file_fd = open(source, O_RDWR);
 	if (file_fd < 0)
 		goto ERROR;
 
-	int device_fd = -1;
 	if ((device_fd = open(device, O_RDWR)) < 0)
 		goto ERROR;
 
@@ -138,14 +183,58 @@ int hw_mount(const char* source, const char* target, const char* fs, int flags) 
 	return mount(source, target, fs, flags, NULL);
 }
 
-int hw_umount(const char* target) {
-	int r = umount2(target, 0);
+static int hw_bind_mount(const char* source, const char* prefix) {
+	if (!source || !prefix) {
+		errno = EINVAL;
+		return 1;
+	}
 
-	if (r && errno == EBUSY) {
-		// Give it a moment to settle
-		sleep(1);
+	char target[PATH_MAX];
+	int r;
 
-		r = umount2(target, MNT_FORCE);
+	// Format target
+	r = snprintf(target, sizeof(target) - 1, "%s/%s", prefix, source);
+	if (r < 0)
+		return 1;
+
+	// Ensure target exists
+	mkdir(target, S_IRWXU|S_IRWXG|S_IRWXO);
+
+	return hw_mount(source, target, NULL, MS_BIND);
+}
+
+int hw_umount(const char* source, const char* prefix) {
+	char target[PATH_MAX];
+	int r;
+
+	if (prefix)
+		r = snprintf(target, sizeof(target) - 1, "%s/%s", prefix, source);
+	else
+		r = snprintf(target, sizeof(target) - 1, "%s", source);
+	if (r < 0)
+		return r;
+
+	// Perform umount
+	r = umount2(target, 0);
+	if (r) {
+		switch (errno) {
+			// Try again with force if umount wasn't successful
+			case EBUSY:
+				sleep(1);
+
+				r = umount2(target, MNT_FORCE);
+				break;
+
+			// target wasn't a mountpoint. Ignore.
+			case EINVAL:
+				r = 0;
+				break;
+
+			// target doesn't exist
+			case ENOENT:
+				r = 0;
+				break;
+		}
 	}
 
 	return r;
@@ -153,6 +242,15 @@ int hw_umount(const char* target) {
 
 static int hw_test_source_medium(const char* path) {
 	int ret = hw_mount(path, SOURCE_MOUNT_PATH, "iso9660", MS_RDONLY);
+
+	if (ret != 0) {
+		// 2nd try, ntfs for a rufus converted usb key
+		ret = hw_mount(path, SOURCE_MOUNT_PATH, "ntfs3", MS_RDONLY);
+	}
+	if (ret != 0) {
+		// 3rd try, vfat for a rufus converted usb key
+		ret = hw_mount(path, SOURCE_MOUNT_PATH, "vfat", MS_RDONLY);
+	}
 
 	// If the source could not be mounted we
 	// cannot proceed.
@@ -163,9 +261,9 @@ static int hw_test_source_medium(const char* path) {
 	ret = access(SOURCE_TEST_FILE, R_OK);
 
 	// Umount the test device.
-	hw_umount(SOURCE_MOUNT_PATH);
+	hw_umount(SOURCE_MOUNT_PATH, NULL);
 
-	return (ret == 0);
+	return ret;
 }
 
 char* hw_find_source_medium(struct hw* hw) {
@@ -226,6 +324,21 @@ static unsigned long long hw_block_device_get_size(const char* dev) {
 struct hw_disk** hw_find_disks(struct hw* hw, const char* sourcedrive) {
 	struct hw_disk** ret = hw_create_disks();
 	struct hw_disk** disks = ret;
+	char size_str[32];
+
+	// Determine the disk device of source if it is a partition
+	const char* sourcedisk = NULL;
+	char syssource[PATH_MAX];
+	(void)snprintf(syssource, sizeof(syssource) - 1, "/sys/class/block/%s", sourcedrive + 5);
+	struct udev_device* s_dev = udev_device_new_from_syspath(hw->udev, syssource);
+	const char* s_devtype = udev_device_get_property_value(s_dev, "DEVTYPE");
+	if (s_devtype && (strcmp(s_devtype, "partition") == 0)) {
+		struct udev_device* p_dev = udev_device_get_parent_with_subsystem_devtype(s_dev,"block","disk");
+		if (p_dev) {
+			sourcedisk = udev_device_get_devnode(p_dev);
+		}
+	}
+	if (!sourcedisk) sourcedisk = sourcedrive;
 
 	struct udev_enumerate* enumerate = udev_enumerate_new(hw->udev);
 
@@ -250,8 +363,8 @@ struct hw_disk** hw_find_disks(struct hw* hw, const char* sourcedrive) {
 			continue;
 		}
 
-		// Skip sourcedrive if we need to
-		if (sourcedrive && (strcmp(dev_path, sourcedrive) == 0)) {
+		// Skip sourcedisk if we need to
+		if (sourcedisk && (strcmp(dev_path, sourcedisk) == 0)) {
 			udev_device_unref(dev);
 			continue;
 		}
@@ -276,7 +389,7 @@ struct hw_disk** hw_find_disks(struct hw* hw, const char* sourcedrive) {
 
 		disk->ref = 1;
 
-		strncpy(disk->path, dev_path, sizeof(disk->path));
+		snprintf(disk->path, sizeof(disk->path), "%s", dev_path);
 		const char* p = disk->path + 5;
 
 		disk->size = size;
@@ -289,7 +402,7 @@ struct hw_disk** hw_find_disks(struct hw* hw, const char* sourcedrive) {
 			vendor = udev_device_get_sysattr_value(dev, "manufacturer");
 
 		if (vendor)
-			strncpy(disk->vendor, vendor, sizeof(disk->vendor));
+			snprintf(disk->vendor, sizeof(disk->vendor), "%s", vendor);
 		else
 			*disk->vendor = '\0';
 
@@ -301,12 +414,11 @@ struct hw_disk** hw_find_disks(struct hw* hw, const char* sourcedrive) {
 			model = udev_device_get_sysattr_value(dev, "product");
 
 		if (model)
-			strncpy(disk->model, model, sizeof(disk->model));
+			snprintf(disk->model, sizeof(disk->model), "%s", model);
 		else
 			*disk->model = '\0';
 
 		// Format description
-		char size_str[STRING_SIZE];
 		snprintf(size_str, sizeof(size_str), "%4.1fGB", (double)disk->size / pow(1024, 3));
 
 		if (*disk->vendor && *disk->model) {
@@ -353,7 +465,7 @@ void hw_free_disks(struct hw_disk** disks) {
 	free(disks);
 }
 
-unsigned int hw_count_disks(const struct hw_disk** disks) {
+unsigned int hw_count_disks(struct hw_disk** disks) {
 	unsigned int ret = 0;
 
 	while (*disks++)
@@ -366,7 +478,7 @@ struct hw_disk** hw_select_disks(struct hw_disk** disks, int* selection) {
 	struct hw_disk** ret = hw_create_disks();
 	struct hw_disk** selected_disks = ret;
 
-	unsigned int num_disks = hw_count_disks((const struct hw_disk**)disks);
+	unsigned int num_disks = hw_count_disks(disks);
 
 	for (unsigned int i = 0; i < num_disks; i++) {
 		if (!selection || selection[i]) {
@@ -383,7 +495,7 @@ struct hw_disk** hw_select_disks(struct hw_disk** disks, int* selection) {
 	return ret;
 }
 
-struct hw_disk** hw_select_first_disk(const struct hw_disk** disks) {
+struct hw_disk** hw_select_first_disk(struct hw_disk** disks) {
 	struct hw_disk** ret = hw_create_disks();
 	struct hw_disk** selected_disks = ret;
 
@@ -420,23 +532,8 @@ static unsigned long long hw_swap_size(struct hw_destination* dest) {
 	return swap_size;
 }
 
-static unsigned long long hw_root_size(struct hw_destination* dest) {
-	unsigned long long root_size;
-
-	if (dest->size < MB2BYTES(2048))
-		root_size = MB2BYTES(1024);
-
-	else if (dest->size >= MB2BYTES(2048) && dest->size <= MB2BYTES(3072))
-		root_size = MB2BYTES(1536);
-
-	else
-		root_size = MB2BYTES(2048);
-
-	return root_size;
-}
-
 static unsigned long long hw_boot_size(struct hw_destination* dest) {
-	return MB2BYTES(64);
+	return MB2BYTES(512);
 }
 
 static int hw_device_has_p_suffix(const struct hw_destination* dest) {
@@ -453,7 +550,7 @@ static int hw_device_has_p_suffix(const struct hw_destination* dest) {
 	return 0;
 }
 
-static int hw_calculate_partition_table(struct hw_destination* dest, int disable_swap) {
+static int hw_calculate_partition_table(struct hw* hw, struct hw_destination* dest, int disable_swap) {
 	char path[DEV_SIZE];
 	int part_idx = 1;
 
@@ -480,6 +577,10 @@ static int hw_calculate_partition_table(struct hw_destination* dest, int disable
 	// Add some more space for partition tables, etc.
 	dest->size -= MB2BYTES(1);
 
+	// The disk has to have at least 2GB
+	if (dest->size <= MB2BYTES(2048))
+		return -1;
+
 	// Determine partition table
 	dest->part_table = HW_PART_TABLE_MSDOS;
 
@@ -505,8 +606,26 @@ static int hw_calculate_partition_table(struct hw_destination* dest, int disable
 		dest->size_bootldr = 0;
 	}
 
-	dest->size_boot = hw_boot_size(dest);
-	dest->size_root = hw_root_size(dest);
+	// Disable seperate boot partition for BTRFS installations.
+	if(dest->filesystem == HW_FS_BTRFS) {
+		dest->size_boot = 0;
+	} else {
+		dest->size_boot = hw_boot_size(dest);
+	}
+
+	// Create an EFI partition when running in EFI mode
+	if (hw->efi)
+		dest->size_boot_efi = MB2BYTES(32);
+	else
+		dest->size_boot_efi = 0;
+
+	// Determine the size of the data partition.
+	unsigned long long space_left = dest->size - \
+		(dest->size_bootldr + dest->size_boot + dest->size_boot_efi);
+
+	// If we have less than 2GB left, we disable swap
+	if (space_left <= MB2BYTES(2048))
+		disable_swap = 1;
 
 	// Should we use swap?
 	if (disable_swap)
@@ -514,21 +633,11 @@ static int hw_calculate_partition_table(struct hw_destination* dest, int disable
 	else
 		dest->size_swap = hw_swap_size(dest);
 
-	// Determine the size of the data partition.
-	unsigned long long used_space = dest->size_bootldr + dest->size_boot
-		+ dest->size_swap + dest->size_root;
+	// Subtract swap
+	space_left -= dest->size_swap;
 
-	// Disk is way too small
-	if (used_space >= dest->size)
-		return -1;
-
-	dest->size_data = dest->size - used_space;
-
-	// If it gets too small, we remove the swap space.
-	if (dest->size_data <= MB2BYTES(256)) {
-		dest->size_data += dest->size_swap;
-		dest->size_swap = 0;
-	}
+	// Root is getting what ever is left
+	dest->size_root = space_left;
 
 	// Set partition names
 	if (dest->size_boot > 0) {
@@ -538,6 +647,16 @@ static int hw_calculate_partition_table(struct hw_destination* dest, int disable
 		snprintf(dest->part_boot, sizeof(dest->part_boot), "%s%d", path, part_idx++);
 	} else
 		*dest->part_boot = '\0';
+
+	if (dest->size_boot_efi > 0) {
+		dest->part_boot_efi_idx = part_idx;
+
+		snprintf(dest->part_boot_efi, sizeof(dest->part_boot_efi),
+			"%s%d", path, part_idx++);
+	} else {
+		*dest->part_boot_efi = '\0';
+		dest->part_boot_efi_idx = 0;
+	}
 
 	if (dest->size_swap > 0)
 		snprintf(dest->part_swap, sizeof(dest->part_swap), "%s%d", path, part_idx++);
@@ -550,16 +669,15 @@ static int hw_calculate_partition_table(struct hw_destination* dest, int disable
 
 	snprintf(dest->part_root, sizeof(dest->part_root), "%s%d", path, part_idx++);
 
-	if (dest->size_data > 0)
-		snprintf(dest->part_data, sizeof(dest->part_data), "%s%d", path, part_idx++);
-	else
-		*dest->part_data = '\0';
-
 	return 0;
 }
 
-struct hw_destination* hw_make_destination(int part_type, struct hw_disk** disks, int disable_swap) {
+struct hw_destination* hw_make_destination(struct hw* hw, int part_type, struct hw_disk** disks,
+		int disable_swap, int filesystem) {
 	struct hw_destination* dest = malloc(sizeof(*dest));
+
+	// Assign filesystem
+	dest->filesystem = filesystem;
 
 	if (part_type == HW_PART_TYPE_NORMAL) {
 		dest->disk1 = *disks;
@@ -578,12 +696,9 @@ struct hw_destination* hw_make_destination(int part_type, struct hw_disk** disks
 	// Is this a RAID device?
 	dest->is_raid = (part_type > HW_PART_TYPE_NORMAL);
 
-	int r = hw_calculate_partition_table(dest, disable_swap);
+	int r = hw_calculate_partition_table(hw, dest, disable_swap);
 	if (r)
 		return NULL;
-
-	// Set default filesystem
-	dest->filesystem = HW_FS_DEFAULT;
 
 	return dest;
 }
@@ -666,6 +781,14 @@ int hw_create_partitions(struct hw_destination* dest, const char* output) {
 		part_start += dest->size_boot;
 	}
 
+	if (*dest->part_boot_efi) {
+		asprintf(&cmd, "%s mkpart %s fat32 %lluB %lluB", cmd,
+			(dest->part_table == HW_PART_TABLE_GPT) ? "ESP" : "primary",
+			part_start, part_start + dest->size_boot_efi - 1);
+
+		part_start += dest->size_boot_efi;
+	}
+
 	if (*dest->part_swap) {
 		asprintf(&cmd, "%s mkpart %s linux-swap %lluB %lluB", cmd,
 			(dest->part_table == HW_PART_TABLE_GPT) ? "SWAP" : "primary",
@@ -682,22 +805,16 @@ int hw_create_partitions(struct hw_destination* dest, const char* output) {
 		part_start += dest->size_root;
 	}
 
-	if (*dest->part_data) {
-		asprintf(&cmd, "%s mkpart %s ext2 %lluB %lluB", cmd,
-			(dest->part_table == HW_PART_TABLE_GPT) ? "DATA" : "primary",
-			part_start, part_start + dest->size_data - 1);
-
-		part_start += dest->size_data;
-	}
-
 	if (dest->part_boot_idx > 0)
 		asprintf(&cmd, "%s set %d boot on", cmd, dest->part_boot_idx);
+
+	if (dest->part_boot_efi_idx > 0)
+		asprintf(&cmd, "%s set %d esp on", cmd, dest->part_boot_efi_idx);
 
 	if (dest->part_table == HW_PART_TABLE_GPT) {
 		if (*dest->part_bootldr) {
 			asprintf(&cmd, "%s set %d bios_grub on", cmd, dest->part_boot_idx);
 		}
-		asprintf(&cmd, "%s disk_set pmbr_boot on", cmd);
 	}
 
 	r = mysystem(output, cmd);
@@ -715,13 +832,13 @@ int hw_create_partitions(struct hw_destination* dest, const char* output) {
 			if (*dest->part_boot && (try_open(dest->part_boot) != 0))
 				continue;
 
+			if (*dest->part_boot_efi && (try_open(dest->part_boot_efi) != 0))
+				continue;
+
 			if (*dest->part_swap && (try_open(dest->part_swap) != 0))
 				continue;
 
 			if (*dest->part_root && (try_open(dest->part_root) != 0))
-				continue;
-
-			if (*dest->part_data && (try_open(dest->part_data) != 0))
 				continue;
 
 			// All partitions do exist, exiting the loop.
@@ -735,32 +852,95 @@ int hw_create_partitions(struct hw_destination* dest, const char* output) {
 	return r;
 }
 
+static int hw_create_btrfs_subvolume(const char* output, const char* subvolume) {
+	char command [STRING_SIZE];
+	int r;
+
+	// Abort if the command could not be assigned.
+	r = snprintf(command, sizeof(command), "/usr/bin/btrfs subvolume create  %s/%s", DESTINATION_MOUNT_PATH, subvolume);
+	if (r < 0)
+		return r;
+
+	// Create the subvolume
+	r = mysystem(output, command);
+	if (r)
+		return r;
+
+	return 0;
+}
+
+static int hw_create_btrfs_layout(const char* path, const char* output) {
+	const struct btrfs_subvolumes* subvolume = NULL;
+	char cmd[STRING_SIZE];
+	char volume[STRING_SIZE];
+	int r;
+
+	r = snprintf(cmd, sizeof(cmd), "/usr/bin/mkfs.btrfs -f %s", path);
+	if (r < 0)
+		return r;
+
+	// Create the main BTRFS file system.
+	r = mysystem(output, cmd);
+	if (r)
+		return r;
+
+	// We need to mount the FS in order to create any subvolumes.
+	r = hw_mount(path, DESTINATION_MOUNT_PATH, "btrfs", 0);
+	if (r)
+		return r;
+
+	// Loop through the list of subvolumes to create.
+	for ( subvolume = btrfs_subvolumes; subvolume->name; subvolume++ ) {
+		r = snprintf(volume, sizeof(volume), "%s", subvolume->name);
+
+		// Abort if snprintf fails.
+		if (r < 0)
+			return r;
+
+		// Call function to create the subvolume
+		r = hw_create_btrfs_subvolume(output, volume);
+		if (r)
+			return r;
+	}
+
+	// Umount the main BTRFS after subvolume creation.
+	r = hw_umount(DESTINATION_MOUNT_PATH, 0);
+	if (r)
+		return r;
+
+	return 0;
+}
+
 static int hw_format_filesystem(const char* path, int fs, const char* output) {
 	char cmd[STRING_SIZE] = "\0";
+	int r;
 
 	// Swap
 	if (fs == HW_FS_SWAP) {
 		snprintf(cmd, sizeof(cmd), "/sbin/mkswap -v1 %s &>/dev/null", path);
-	// ReiserFS
-	} else if (fs == HW_FS_REISERFS) {
-		snprintf(cmd, sizeof(cmd), "/sbin/mkreiserfs -f %s ", path);
 
 	// EXT4
 	} else if (fs == HW_FS_EXT4) {
-		snprintf(cmd, sizeof(cmd), "/sbin/mke2fs -T ext4 %s", path);
-
-	// EXT4 w/o journal
-	} else if (fs == HW_FS_EXT4_WO_JOURNAL) {
-		snprintf(cmd, sizeof(cmd), "/sbin/mke2fs -T ext4 -O ^has_journal %s", path);
+		snprintf(cmd, sizeof(cmd), "/sbin/mke2fs -FF -T ext4 %s", path);
 
 	// XFS
 	} else if (fs == HW_FS_XFS) {
 		snprintf(cmd, sizeof(cmd), "/sbin/mkfs.xfs -f %s", path);
+
+	// BTRFS
+	} else if (fs == HW_FS_BTRFS) {
+		r = hw_create_btrfs_layout(path, output);
+
+		return r;
+
+	// FAT32
+	} else if (fs == HW_FS_FAT32) {
+		snprintf(cmd, sizeof(cmd), "/sbin/mkfs.vfat %s", path);
 	}
 
 	assert(*cmd);
 
-	int r = mysystem(output, cmd);
+	r = mysystem(output, cmd);
 
 	return r;
 }
@@ -771,6 +951,13 @@ int hw_create_filesystems(struct hw_destination* dest, const char* output) {
 	// boot
 	if (*dest->part_boot) {
 		r = hw_format_filesystem(dest->part_boot, dest->filesystem, output);
+		if (r)
+			return r;
+	}
+
+	// ESP
+	if (*dest->part_boot_efi) {
+		r = hw_format_filesystem(dest->part_boot_efi, HW_FS_FAT32, output);
 		if (r)
 			return r;
 	}
@@ -787,9 +974,39 @@ int hw_create_filesystems(struct hw_destination* dest, const char* output) {
 	if (r)
 		return r;
 
-	// data
-	if (*dest->part_data) {
-		r = hw_format_filesystem(dest->part_data, dest->filesystem, output);
+	return 0;
+}
+
+static int hw_mount_btrfs_subvolumes(const char* source) {
+	const struct btrfs_subvolumes* subvolume = NULL;
+	char path[STRING_SIZE];
+	char options[STRING_SIZE];
+	int r;
+
+	// Loop through the list of known subvolumes.
+	for (subvolume = btrfs_subvolumes; subvolume->name; subvolume++) {
+		// Assign subvolume path.
+		r = snprintf(path, sizeof(path), "%s%s", DESTINATION_MOUNT_PATH, subvolume->mount_path);
+		if (r < 0)
+			return r;
+
+		// Assign subvolume name.
+		r = snprintf(options, sizeof(options), "subvol=%s,%s", subvolume->name, BTRFS_MOUNT_OPTIONS);
+		if (r < 0)
+			return r;
+
+		// Create the directory.
+		r = hw_mkdir(path);
+
+		// Abort if the directory could not be created.
+		if(r != 0 && errno != EEXIST)
+			return r;
+
+		// Print log message
+		fprintf(flog, "Mounting subvolume %s to %s\n", subvolume->name, subvolume->mount_path);
+
+		// Try to mount the subvolume.
+		r = mount(source, path, "btrfs", 0, options);
 		if (r)
 			return r;
 	}
@@ -799,17 +1016,13 @@ int hw_create_filesystems(struct hw_destination* dest, const char* output) {
 
 int hw_mount_filesystems(struct hw_destination* dest, const char* prefix) {
 	char target[STRING_SIZE];
+	int r;
 
 	assert(*prefix == '/');
 
 	const char* filesystem;
 	switch (dest->filesystem) {
-		case HW_FS_REISERFS:
-			filesystem = "reiserfs";
-			break;
-
 		case HW_FS_EXT4:
-		case HW_FS_EXT4_WO_JOURNAL:
 			filesystem = "ext4";
 			break;
 
@@ -817,20 +1030,40 @@ int hw_mount_filesystems(struct hw_destination* dest, const char* prefix) {
 			filesystem = "xfs";
 			break;
 
+		case HW_FS_BTRFS:
+			filesystem = "btrfs";
+			break;
+
+		case HW_FS_FAT32:
+			filesystem = "vfat";
+			break;
+
 		default:
 			assert(0);
 	}
 
 	// root
-	int r = hw_mount(dest->part_root, prefix, filesystem, 0);
-	if (r)
-		return r;
+	if (dest->filesystem == HW_FS_BTRFS) {
+		r = hw_mount_btrfs_subvolumes(dest->part_root);
+		if (r)
+			return r;
+	} else {
+		r = hw_mount(dest->part_root, prefix, filesystem, 0);
+		if (r)
+			return r;
+	}
 
 	// boot
-	if (*dest->part_boot) {
-		snprintf(target, sizeof(target), "%s%s", prefix, HW_PATH_BOOT);
-		mkdir(target, S_IRWXU|S_IRWXG|S_IRWXO);
+	snprintf(target, sizeof(target), "%s%s", prefix, HW_PATH_BOOT);
+	r = mkdir(target, S_IRWXU|S_IRWXG|S_IRWXO);
 
+	if (r) {
+		hw_umount_filesystems(dest, prefix);
+
+		return r;
+	}
+
+	if (*dest->part_boot) {
 		r = hw_mount(dest->part_boot, target, filesystem, 0);
 		if (r) {
 			hw_umount_filesystems(dest, prefix);
@@ -839,12 +1072,12 @@ int hw_mount_filesystems(struct hw_destination* dest, const char* prefix) {
 		}
 	}
 
-	// data
-	if (*dest->part_data) {
-		snprintf(target, sizeof(target), "%s%s", prefix, HW_PATH_DATA);
+	// ESP
+	if (*dest->part_boot_efi) {
+		snprintf(target, sizeof(target), "%s%s", prefix, HW_PATH_BOOT_EFI);
 		mkdir(target, S_IRWXU|S_IRWXG|S_IRWXO);
 
-		r = hw_mount(dest->part_data, target, filesystem, 0);
+		r = hw_mount(dest->part_boot_efi, target, "vfat", 0);
 		if (r) {
 			hw_umount_filesystems(dest, prefix);
 
@@ -863,43 +1096,102 @@ int hw_mount_filesystems(struct hw_destination* dest, const char* prefix) {
 	}
 
 	// bind-mount misc filesystems
-	char** otherfs = other_filesystems;
-	while (*otherfs) {
-		snprintf(target, sizeof(target), "%s%s", prefix, *otherfs);
+	r = hw_bind_mount("/dev", prefix);
+	if (r)
+		return r;
 
-		mkdir(target, S_IRWXU|S_IRWXG|S_IRWXO);
-		r = hw_mount(*otherfs, target, NULL, MS_BIND);
-		if (r) {
-			hw_umount_filesystems(dest, prefix);
+	r = hw_bind_mount("/proc", prefix);
+	if (r)
+		return r;
 
-			return r;
-		}
+	r = hw_bind_mount("/sys", prefix);
+	if (r)
+		return r;
 
-		otherfs++;
-	}
+	r = hw_bind_mount("/sys/firmware/efi/efivars", prefix);
+	if (r && errno != ENOENT)
+		return r;
 
 	return 0;
 }
 
+static int hw_umount_btrfs_layout() {
+	const struct btrfs_subvolumes* subvolume = NULL;
+	char path[STRING_SIZE];
+	int counter = 0;
+	int retry = 1;
+	int r;
+
+	do {
+		// Reset the retry marker
+		retry = 0;
+
+		// Loop through the list of subvolumes
+		for (subvolume = btrfs_subvolumes; subvolume->name; subvolume++) {
+			// Abort if the subvolume path could not be assigned.
+			r = snprintf(path, sizeof(path), "%s%s", DESTINATION_MOUNT_PATH, subvolume->mount_path);
+			if (r < 0)
+				return r;
+
+			// Try to umount the subvolume.
+			r = umount2(path, 0);
+
+			// Handle return codes.
+			if (r) {
+				switch(errno) {
+					case EBUSY:
+						// Set marker to retry the umount.
+						retry = 1;
+
+						// Ignore if the subvolume could not be unmounted yet,
+						// because it is still used.
+						continue;
+
+					case EINVAL:
+						// Ignore if the subvolume already has been unmounted
+						continue;
+					case ENOENT:
+						// Ignore if the directory does not longer exist.
+						continue;
+					default:
+						fprintf(flog, "Could not umount %s from %s - Error: %d\n", subvolume->name, path, r);
+						return r;
+				}
+			}
+
+			// Print log message
+			fprintf(flog, "Umounted %s from %s\n", subvolume->name, path);
+		}
+
+		// Abort loop if all mountpoins got umounted
+		if (retry == 0)
+			return 0;
+
+		// Abort after five failed umount attempts
+		if (counter == 5)
+			return -1;
+
+		// Increment counter.
+		counter++;
+	} while (1);
+}
+
 int hw_umount_filesystems(struct hw_destination* dest, const char* prefix) {
 	int r;
-	char target[STRING_SIZE];
 
 	// Write all buffers to disk before umounting
 	hw_sync();
 
-	// boot
-	if (*dest->part_boot) {
-		snprintf(target, sizeof(target), "%s%s", prefix, HW_PATH_BOOT);
-		r = hw_umount(target);
+	// ESP
+	if (*dest->part_boot_efi) {
+		r = hw_umount(HW_PATH_BOOT_EFI, prefix);
 		if (r)
 			return -1;
 	}
 
-	// data
-	if (*dest->part_data) {
-		snprintf(target, sizeof(target), "%s%s", prefix, HW_PATH_DATA);
-		r = hw_umount(target);
+	// boot
+	if (*dest->part_boot) {
+		r = hw_umount(HW_PATH_BOOT, prefix);
 		if (r)
 			return -1;
 	}
@@ -910,16 +1202,29 @@ int hw_umount_filesystems(struct hw_destination* dest, const char* prefix) {
 	}
 
 	// misc filesystems
-	char** otherfs = other_filesystems;
-	while (*otherfs) {
-		snprintf(target, sizeof(target), "%s%s", prefix, *otherfs++);
-		r = hw_umount(target);
-		if (r)
-			return -1;
-	}
+	r = hw_umount("/sys/firmware/efi/efivars", prefix);
+	if (r)
+		return -1;
+
+	r = hw_umount("/sys", prefix);
+	if (r)
+		return -1;
+
+	r = hw_umount("/proc", prefix);
+	if (r)
+		return -1;
+
+	r = hw_umount("/dev", prefix);
+	if (r)
+		return -1;
 
 	// root
-	r = hw_umount(prefix);
+	if(dest->filesystem == HW_FS_BTRFS) {
+		r = hw_umount_btrfs_layout();
+	} else {
+		r = hw_umount(prefix, NULL);
+	}
+
 	if (r)
 		return -1;
 
@@ -1010,35 +1315,17 @@ int hw_stop_all_raid_arrays(const char* output) {
 	return mysystem(output, "/sbin/mdadm --stop --scan --verbose");
 }
 
-int hw_install_bootloader(struct hw_destination* dest, const char* output) {
+int hw_install_bootloader(struct hw* hw, struct hw_destination* dest, const char* output) {
 	char cmd[STRING_SIZE];
-	int r;
 
-	// Generate configuration file
-	snprintf(cmd, sizeof(cmd), "/usr/sbin/grub-mkconfig -o /boot/grub/grub.cfg");
-	r = system_chroot(output, DESTINATION_MOUNT_PATH, cmd);
+	snprintf(cmd, sizeof(cmd), "/usr/bin/install-bootloader %s", dest->path);
+	int r = system_chroot(output, DESTINATION_MOUNT_PATH, cmd);
 	if (r)
 		return r;
 
-	char cmd_grub[STRING_SIZE];
-	snprintf(cmd_grub, sizeof(cmd_grub), "/usr/sbin/grub-install --no-floppy --recheck");
-
-	if (dest->is_raid) {
-		snprintf(cmd, sizeof(cmd), "%s %s", cmd_grub, dest->disk1->path);
-		r = system_chroot(output, DESTINATION_MOUNT_PATH, cmd);
-		if (r)
-			return r;
-
-		snprintf(cmd, sizeof(cmd), "%s %s", cmd_grub, dest->disk2->path);
-		r = system_chroot(output, DESTINATION_MOUNT_PATH, cmd);
-	} else {
-		snprintf(cmd, sizeof(cmd), "%s %s", cmd_grub, dest->path);
-		r = system_chroot(output, DESTINATION_MOUNT_PATH, cmd);
-	}
-
 	hw_sync();
 
-	return r;
+	return 0;
 }
 
 static char* hw_get_uuid(const char* dev) {
@@ -1063,21 +1350,34 @@ static char* hw_get_uuid(const char* dev) {
 #define FSTAB_FMT "UUID=%s %-8s %-4s %-10s %d %d\n"
 
 int hw_write_fstab(struct hw_destination* dest) {
+	const struct btrfs_subvolumes* subvolume = NULL;
 	FILE* f = fopen(DESTINATION_MOUNT_PATH "/etc/fstab", "w");
 	if (!f)
 		return -1;
 
 	char* uuid = NULL;
+	char mount_options[STRING_SIZE];
 
 	// boot
 	if (*dest->part_boot) {
 		uuid = hw_get_uuid(dest->part_boot);
 
 		if (uuid) {
-			fprintf(f, FSTAB_FMT, uuid, "/boot", "auto", "defaults", 1, 2);
+			fprintf(f, FSTAB_FMT, uuid, "/boot", "auto", "defaults,nodev,noexec,nosuid", 1, 2);
 			free(uuid);
 		}
 	}
+
+	// ESP
+	if (*dest->part_boot_efi) {
+		uuid = hw_get_uuid(dest->part_boot_efi);
+
+		if (uuid) {
+			fprintf(f, FSTAB_FMT, uuid, "/boot/efi", "auto", "defaults", 1, 2);
+			free(uuid);
+		}
+	}
+
 
 	// swap
 	if (*dest->part_swap) {
@@ -1092,18 +1392,23 @@ int hw_write_fstab(struct hw_destination* dest) {
 	// root
 	uuid = hw_get_uuid(dest->part_root);
 	if (uuid) {
-		fprintf(f, FSTAB_FMT, uuid, "/", "auto", "defaults", 1, 1);
-		free(uuid);
-	}
+		if(dest->filesystem == HW_FS_BTRFS) {
+			// Loop through the list of subvolumes
+			for (subvolume = btrfs_subvolumes; subvolume->name; subvolume++) {
+				// Abort if the mount options could not be assigned
+				int r = snprintf(mount_options, sizeof(mount_options), "defaults,%s,subvol=%s", BTRFS_MOUNT_OPTIONS, subvolume->name);
+				if (r < 0) {
+					return r;
+				}
 
-	// data
-	if (*dest->part_data) {
-		uuid = hw_get_uuid(dest->part_data);
-
-		if (uuid) {
-			fprintf(f, FSTAB_FMT, uuid, "/var", "auto", "defaults", 1, 1);
-			free(uuid);
+				// Write the entry to the file
+				fprintf(f, FSTAB_FMT, uuid, subvolume->mount_path, "btrfs", mount_options, 1, 1);
+			}
+		} else {
+			fprintf(f, FSTAB_FMT, uuid, "/", "auto", "defaults", 1, 1);
 		}
+
+		free(uuid);
 	}
 
 	fclose(f);
@@ -1136,7 +1441,9 @@ char* hw_find_backup_file(const char* output, const char* search_path) {
 int hw_restore_backup(const char* output, const char* backup_path, const char* destination) {
 	char command[STRING_SIZE];
 
-	snprintf(command, sizeof(command), "/bin/tar xzpf %s -C %s", backup_path, destination);
+	snprintf(command, sizeof(command), "/bin/tar xzpf %s -C %s "
+		"--exclude-from=%s/var/ipfire/backup/exclude --exclude-from=%s/var/ipfire/backup/exclude.user",
+		backup_path, destination, destination, destination);
 	int rc = mysystem(output, command);
 
 	if (rc)

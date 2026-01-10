@@ -3,13 +3,21 @@
 # IPFire Installer RC
 #
 
+# Enable UTF-8 mode for the console before the installer starts
+export LC_ALL="en_US.utf-8"
+
+# wait for udev settle
+/bin/udevadm settle
+
 unattended=0
 if grep -q "installer.unattended" /proc/cmdline; then
 	unattended=1
 fi
 
-# Enable Unicode
-echo -en '\033%G' && kbd_mode -u
+# Mount efivarfs on EFI systems
+if [ -d "/sys/firmware/efi" ]; then
+	mount -t efivarfs efivarfs /sys/firmware/efi/efivars
+fi
 
 # Load default console font
 setfont latarcyrheb-sun16

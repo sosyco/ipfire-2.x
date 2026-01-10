@@ -33,7 +33,7 @@ my %color = ();
 my %mainsettings = ();
 
 &General::readhash("${General::swroot}/main/settings", \%mainsettings);
-&General::readhash("/srv/web/ipfire/html/themes/".$mainsettings{'THEME'}."/include/colors.txt", \%color);
+&General::readhash("/srv/web/ipfire/html/themes/ipfire/include/colors.txt", \%color);
 
 &Header::showhttpheaders();
 &Header::openpage($Lang::tr{'status information'}, 1, '');
@@ -42,7 +42,13 @@ my %mainsettings = ();
 &Header::openbox('100%', 'left',"MD Raid State");
 
 print '<textarea rows="25" cols="80" readonly="readonly">';
-print `cat "/proc/mdstat"`;
+
+# Grab mdstat status.
+open(MDSTAT, "/proc/mdstat");
+my @mdstat = <MDSTAT>;
+close(MDSTAT);
+print "@mdstat";
+
 print '</textarea>';
 
 &Header::closebox();

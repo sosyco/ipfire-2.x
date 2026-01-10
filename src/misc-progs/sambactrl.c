@@ -8,7 +8,7 @@
 
 #define BUFFER_SIZE 1024
 
-char command[BUFFER_SIZE]; 
+char command[BUFFER_SIZE];
 
 int main(int argc, char *argv[]) {
 	if (!(initsetuid()))
@@ -20,14 +20,29 @@ int main(int argc, char *argv[]) {
 		return 1;
 
 	} else if (strcmp(argv[1], "smbuserdisable") == 0) {
+		if (!is_valid_argument_alnum(argv[2])) {
+			fprintf(stderr, "Invalid username '%s'\n", argv[2]);
+			exit(2);
+		}
+
 		snprintf(command, BUFFER_SIZE-1, "/usr/bin/smbpasswd -d %s >/dev/null", argv[2]);
 		safe_system(command);
 
 	} else if (strcmp(argv[1], "smbuserenable") == 0) {
+		if (!is_valid_argument_alnum(argv[2])) {
+			fprintf(stderr, "Invalid username '%s'\n", argv[2]);
+			exit(2);
+		}
+
 		snprintf(command, BUFFER_SIZE-1, "/usr/bin/smbpasswd -e %s >/dev/null", argv[2]);
 		safe_system(command);
 
 	} else if (strcmp(argv[1], "smbuserdelete") == 0) {
+		if (!is_valid_argument_alnum(argv[2])) {
+			fprintf(stderr, "Invalid username '%s'\n", argv[2]);
+			exit(2);
+		}
+
 		snprintf(command, BUFFER_SIZE-1, "/usr/bin/smbpasswd -x %s >/dev/null", argv[2]);
 		safe_system(command);
 
@@ -36,29 +51,6 @@ int main(int argc, char *argv[]) {
 
 	} else if (strcmp(argv[1], "smbsafeconf") == 0) {
 		safe_system("/bin/cat /var/ipfire/samba/global /var/ipfire/samba/shares > /var/ipfire/samba/smb.conf");
-
-	} else if (strcmp(argv[1], "smbsafeconfcups") == 0) {
-		safe_system("/bin/cat /var/ipfire/samba/global /var/ipfire/samba/shares /var/ipfire/samba/printer > /var/ipfire/samba/smb.conf");
-
-	} else if (strcmp(argv[1], "smbsafeconfpdc") == 0) {
-		safe_system("/bin/cat /var/ipfire/samba/global /var/ipfire/samba/pdc /var/ipfire/samba/shares > /var/ipfire/samba/smb.conf");
-
-	} else if (strcmp(argv[1], "smbsafeconfpdccups") == 0) {
-		safe_system("/bin/cat /var/ipfire/samba/global /var/ipfire/samba/pdc /var/ipfire/samba/shares /var/ipfire/samba/printer > /var/ipfire/samba/smb.conf");
-
-	} else if (strcmp(argv[1], "smbglobalreset") == 0) {
-		safe_system("/bin/cat /var/ipfire/samba/default.global /var/ipfire/samba/shares > /var/ipfire/samba/smb.conf");
-		safe_system("/bin/cat /var/ipfire/samba/default.settings > /var/ipfire/samba/settings");
-		safe_system("/bin/cat /var/ipfire/samba/default.global > /var/ipfire/samba/global");
-		safe_system("/bin/cat /var/ipfire/samba/default.pdc > /var/ipfire/samba/pdc");
-
-	} else if (strcmp(argv[1], "smbsharesreset") == 0) {
-		safe_system("/bin/cat /var/ipfire/samba/global /var/ipfire/samba/default.shares > /var/ipfire/samba/smb.conf");
-		safe_system("/bin/cat /var/ipfire/samba/default.shares > /var/ipfire/samba/shares");
-
-	} else if (strcmp(argv[1], "smbprinterreset") == 0) {
-		safe_system("/bin/cat /var/ipfire/samba/global /var/ipfire/samba/shares /var/default.printer > /var/ipfire/samba/smb.conf");
-		safe_system("/bin/cat /var/ipfire/samba/default.printer > /var/ipfire/samba/printer");
 
 	} else if (strcmp(argv[1], "smbstop") == 0) {
 		safe_system("/etc/rc.d/init.d/samba stop >/dev/null");
@@ -79,34 +71,26 @@ int main(int argc, char *argv[]) {
 		safe_system(command);
 
 	} else if (strcmp(argv[1], "smbuseradd") == 0) {
+		if (!is_valid_argument_alnum(argv[2])) {
+			fprintf(stderr, "Invalid username '%s'\n", argv[2]);
+			exit(2);
+		}
+
 		snprintf(command, BUFFER_SIZE-1, "/usr/sbin/groupadd sambauser >/dev/null");
 		safe_system(command);
 
-		snprintf(command, BUFFER_SIZE-1, "/usr/sbin/useradd -c 'Samba User' -m -g %s -s %s %s >/dev/null", argv[4], argv[5], argv[2]);
+		snprintf(command, BUFFER_SIZE-1, "/usr/sbin/useradd -c 'Samba User' -m -g sambauser -s /bin/false %s >/dev/null", argv[2]);
 		safe_system(command);
 
-		snprintf(command, BUFFER_SIZE-1, "echo %s:%s | chpasswd", argv[2], argv[3]);
-		safe_system(command);
-
-		snprintf(command, BUFFER_SIZE-1, "/usr/bin/printf '%s\n%s\n' | /usr/bin/smbpasswd -as %s >/dev/null", argv[3], argv[3], argv[2]);
-		safe_system(command);
-
-	} else if (strcmp(argv[1], "smbpcadd") == 0) {
-		snprintf(command, BUFFER_SIZE-1, "/usr/sbin/groupadd sambawks >/dev/null");
-		safe_system(command);
-
-		snprintf(command, BUFFER_SIZE-1, "/usr/sbin/useradd -c 'Samba Workstation' -g %s -s %s %s >/dev/null", argv[3], argv[4], argv[2]);
-		safe_system(command);
-
-		snprintf(command, BUFFER_SIZE-1, "/usr/bin/smbpasswd -a -m %s >/dev/null", argv[2]);
-		safe_system(command);
+		run("/usr/sbin/samba-change-password", argv + 2);
 
 	} else if (strcmp(argv[1], "smbchangepw") == 0) {
-		snprintf(command, BUFFER_SIZE-1, "echo %s:%s | chpasswd", argv[2], argv[3]);
-		safe_system(command);
+		if (!is_valid_argument_alnum(argv[2])) {
+			fprintf(stderr, "Invalid username '%s'\n", argv[2]);
+			exit(2);
+		}
 
-		snprintf(command, BUFFER_SIZE-1, "/usr/bin/printf '%s\n%s\n' | /usr/bin/smbpasswd -as %s >/dev/null", argv[3], argv[3], argv[2]);
-		safe_system(command);
+		run("/usr/sbin/samba-change-password", argv + 2);
 
 	} else if (strcmp(argv[1], "readsmbpasswd") == 0) {
 		safe_system("/bin/chown root:nobody /var/ipfire/samba/private >/dev/null");

@@ -1,7 +1,7 @@
 ###############################################################################
 #                                                                             #
 # IPFire.org - A linux based firewall                                         #
-# Copyright (C) 2007-2015  IPFire Team  <info@ipfire.org>                     #
+# Copyright (C) 2007-2025  IPFire Team  <info@ipfire.org>                     #
 #                                                                             #
 # This program is free software: you can redistribute it and/or modify        #
 # it under the terms of the GNU General Public License as published by        #
@@ -24,25 +24,23 @@
 
 include Config
 
-VER        = 8.24
+VER        = 9.8
 
 THISAPP    = coreutils-$(VER)
 DL_FILE    = $(THISAPP).tar.xz
 DL_FROM    = $(URL_IPFIRE)
 DIR_APP    = $(DIR_SRC)/$(THISAPP)
 
-# Normal build or /tools build.
+# Normal build or $(TOOLS_DIR) build.
 #
 ifeq "$(ROOT)" ""
   TARGET = $(DIR_INFO)/$(THISAPP)
-  CONFIGURE_OPTIONS = --prefix=/usr
 else
   TARGET = $(DIR_INFO)/$(THISAPP)-tools
-  CONFIGURE_OPTIONS = --prefix=/tools
 endif
 
 CONFIGURE_OPTIONS += \
-	--disable-selinux \
+	--prefix=$(PREFIX) \
 	--enable-largefile \
 	--disable-rpath \
 	--enable-install-program=arch \
@@ -58,9 +56,9 @@ CFLAGS += -fno-strict-aliasing
 
 objects =$(DL_FILE)
 
-$(DL_FILE)                      = $(DL_FROM)/$(DL_FILE)
+$(DL_FILE)= $(DL_FROM)/$(DL_FILE)
 
-$(DL_FILE)_MD5                  = 40efdbce865d2458d8da0a9dcee7c16c
+$(DL_FILE)_BLAKE2 = a93e26c8dda875b11541808d82ff8d6537f521b9c44e2a9959ee8f452823a4df5aed2793ac32766e2d3f832606d7190f7f53ea5870419f585aa66429a9626d98
 
 install : $(TARGET)
 
@@ -68,10 +66,10 @@ check : $(patsubst %,$(DIR_CHK)/%,$(objects))
 
 download :$(patsubst %,$(DIR_DL)/%,$(objects))
 
-md5 : $(subst %,%_MD5,$(objects))
+b2 : $(subst %,%_BLAKE2,$(objects))
 
 ###############################################################################
-# Downloading, checking, md5sum
+# Downloading, checking, b2sum
 ###############################################################################
 
 $(patsubst %,$(DIR_CHK)/%,$(objects)) :
@@ -80,8 +78,8 @@ $(patsubst %,$(DIR_CHK)/%,$(objects)) :
 $(patsubst %,$(DIR_DL)/%,$(objects)) :
 	@$(LOAD)
 
-$(subst %,%_MD5,$(objects)) :
-	@$(MD5)
+$(subst %,%_BLAKE2,$(objects)) :
+	@$(B2SUM)
 
 ###############################################################################
 # Installation Details

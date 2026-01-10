@@ -1,7 +1,7 @@
 ###############################################################################
 #                                                                             #
 # IPFire.org - A linux based firewall                                         #
-# Copyright (C) 2007-2014  IPFire Team <info@ipfire.org>                      #
+# Copyright (C) 2007-2021  IPFire Team  <info@ipfire.org>                     #
 #                                                                             #
 # This program is free software: you can redistribute it and/or modify        #
 # it under the terms of the GNU General Public License as published by        #
@@ -42,7 +42,7 @@ check : $(patsubst %,$(DIR_CHK)/%,$(objects))
 
 download :$(patsubst %,$(DIR_DL)/%,$(objects))
 
-md5 : $(subst %,%_MD5,$(objects))
+b2 : $(subst %,%_BLAKE2,$(objects))
 
 dist:
 	@$(PAK)
@@ -55,23 +55,14 @@ $(TARGET) : $(patsubst %,$(DIR_DL)/%,$(objects))
 	@$(PREBUILD)
 
 	# rebuild module deps
-	depmod -a $(KVER)-$(VERSUFIX)
-
-	#skip initrd build on pae and rpi kernel.
-ifneq "$(KCFG)" "-rpi"
-ifneq "$(KCFG)" "-pae"
+	depmod -a $(KVER)
 
 	# Create initramfs images
-	dracut --force --verbose --strip --xz /boot/initramfs-$(KVER)-$(VERSUFIX).img $(KVER)-$(VERSUFIX)
+	dracut --force --verbose --strip /boot/initramfs-$(KVER).img $(KVER)
 
-ifeq "$(KCFG)" "-kirkwood"
-	cd /boot && mkimage -A arm -T ramdisk -C lzma -d initramfs-$(KVER)-$(VERSUFIX).img uInit-$(VERSUFIX)
-endif
-
-ifeq "$(KCFG)" "-multi"
-	cd /boot && mkimage -A arm -T ramdisk -C lzma -d initramfs-$(KVER)-$(VERSUFIX).img uInit-$(VERSUFIX)
+ifeq "$(BUILD_ARCH)" "aarch64"
+	cd /boot && mkimage -A arm64 -T ramdisk -C lzma -d initramfs-$(KVER).img uInit-$(KVER)
+	# dont remove initramfs because grub need this to boot.
 endif
 
-endif
-endif
 	@$(POSTBUILD)

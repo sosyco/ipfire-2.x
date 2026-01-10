@@ -1,0 +1,62 @@
+#!/bin/sh
+###############################################################################
+#                                                                             #
+# IPFire.org - A linux based firewall                                         #
+# Copyright (C) 2007-2022  IPFire Team  <info@ipfire.org>                     #
+#                                                                             #
+# This program is free software: you can redistribute it and/or modify        #
+# it under the terms of the GNU General Public License as published by        #
+# the Free Software Foundation, either version 3 of the License, or           #
+# (at your option) any later version.                                         #
+#                                                                             #
+# This program is distributed in the hope that it will be useful,             #
+# but WITHOUT ANY WARRANTY; without even the implied warranty of              #
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the               #
+# GNU General Public License for more details.                                #
+#                                                                             #
+# You should have received a copy of the GNU General Public License           #
+# along with this program.  If not, see <http://www.gnu.org/licenses/>.       #
+#                                                                             #
+###############################################################################
+
+. /etc/sysconfig/rc
+. ${rc_functions}
+
+eval $(/usr/local/bin/readhash /var/ipfire/ethernet/settings)
+
+INTERFACES=
+
+if [ -n "${GREEN_DEV}" ]; then
+	INTERFACES="${INTERFACES} ${GREEN_DEV}"
+fi
+
+if [ -n "${BLUE_DEV}" ]; then
+	INTERFACES="${INTERFACES} ${BLUE_DEV}"
+fi
+
+case "${1}" in
+	start)
+		boot_mesg "Starting Multicast DNS Repeater..."
+		loadproc /usr/bin/mdns-repeater ${INTERFACES}
+		;;
+
+	stop)
+		boot_mesg "Stopping Multicast DNS Repeater..."
+		killproc /usr/bin/mdns-repeater
+		;;
+
+	restart)
+		${0} stop
+		sleep 1
+		${0} start
+		;;
+
+	status)
+		statusproc /usr/bin/mdns-repeater
+		;;
+
+	*)
+		echo "Usage: ${0} {start|stop|restart|status}"
+		exit 1
+		;;
+esac

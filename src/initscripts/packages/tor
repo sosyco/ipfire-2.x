@@ -1,0 +1,114 @@
+#!/bin/sh
+###############################################################################
+#                                                                             #
+# IPFire.org - A linux based firewall                                         #
+# Copyright (C) 2007-2022  IPFire Team  <info@ipfire.org>                     #
+#                                                                             #
+# This program is free software: you can redistribute it and/or modify        #
+# it under the terms of the GNU General Public License as published by        #
+# the Free Software Foundation, either version 3 of the License, or           #
+# (at your option) any later version.                                         #
+#                                                                             #
+# This program is distributed in the hope that it will be useful,             #
+# but WITHOUT ANY WARRANTY; without even the implied warranty of              #
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the               #
+# GNU General Public License for more details.                                #
+#                                                                             #
+# You should have received a copy of the GNU General Public License           #
+# along with this program.  If not, see <http://www.gnu.org/licenses/>.       #
+#                                                                             #
+###############################################################################
+
+. /etc/sysconfig/rc
+. ${rc_functions}
+
+FILEDESCRIPTORS="65535"
+
+eval $(/usr/local/bin/readhash /var/ipfire/tor/settings)
+
+function tor_is_enabled() {
+	[ "${TOR_ENABLED}" = "on" ] || [ "${TOR_RELAY_ENABLED}" = "on" ]
+}
+
+function setup_firewall() {
+	# Flush all rules.
+	flush_firewall
+
+	# Allow incoming traffic to Tor relay (and directory) port and
+	# all outgoing TCP connections from Tor user.
+	if [ "${TOR_RELAY_ENABLED}" = "on" -a -n "${TOR_RELAY_PORT}" ]; then
+		iptables --wait -A TOR_INPUT -p tcp --dport "${TOR_RELAY_PORT}" -j ACCEPT
+		iptables --wait -A TOR_OUTPUT -p tcp -m owner --uid-owner tor -j ACCEPT
+	fi
+
+	if [ "${TOR_RELAY_ENABLED}" = "on" -a -n "${TOR_RELAY_DIRPORT}" ] && [ "${TOR_RELAY_DIRPORT}" -ne 0 ]; then
+		iptables --wait -A TOR_INPUT -p tcp --dport "${TOR_RELAY_DIRPORT}" -j ACCEPT
+	fi
+}
+
+function flush_firewall() {
+	# Flush all rules.
+	iptables --wait -F TOR_INPUT
+	iptables --wait -F TOR_OUTPUT
+}
+
+case "${1}" in
+	start)
+		tor_is_enabled || exit 0
+
+		# Setup firewall.
+		setup_firewall
+
+		# Increasing open file descriptors.
+		if [ -n "${FILEDESCRIPTORS}" ]; then
+			ulimit -n "${FILEDESCRIPTORS}"
+		fi
+
+		boot_mesg "Starting tor..."
+		loadproc /usr/bin/tor \
+			--runasdaemon 1 \
+			--defaults-torrc /usr/share/tor/defaults-torrc \
+			-f /etc/tor/torrc \
+			--quiet
+		;;
+
+	stop)
+		# Flush firewall.
+		flush_firewall
+
+		boot_mesg "Stopping tor..."
+		killproc /usr/bin/tor
+		;;
+
+	reload)
+		# Setup firewall.
+		setup_firewall
+
+		boot_mesg "Reloading tor..."
+		reloadproc /usr/bin/tor
+		;;
+
+	restart)
+		${0} stop
+		sleep 1
+		${0} start
+		;;
+
+	reload-or-restart)
+		# Reload the process if it is already running. Otherwise, restart.
+		if pidofproc -s /usr/bin/tor; then
+			$0 reload
+		else
+			$0 restart
+		fi
+		;;
+
+	status)
+		statusproc /usr/bin/tor
+		;;
+
+	*)
+		echo "Usage: ${0} {start|stop|reload|restart|reload-or-restart|status}"
+		exit 1
+		;;
+esac

@@ -1,0 +1,91 @@
+###############################################################################
+#                                                                             #
+# IPFire.org - A linux based firewall                                         #
+# Copyright (C) 2007-2023  IPFire Team  <info@ipfire.org>                     #
+#                                                                             #
+# This program is free software: you can redistribute it and/or modify        #
+# it under the terms of the GNU General Public License as published by        #
+# the Free Software Foundation, either version 3 of the License, or           #
+# (at your option) any later version.                                         #
+#                                                                             #
+# This program is distributed in the hope that it will be useful,             #
+# but WITHOUT ANY WARRANTY; without even the implied warranty of              #
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the               #
+# GNU General Public License for more details.                                #
+#                                                                             #
+# You should have received a copy of the GNU General Public License           #
+# along with this program.  If not, see <http://www.gnu.org/licenses/>.       #
+#                                                                             #
+###############################################################################
+
+###############################################################################
+# Definitions
+###############################################################################
+
+include Config
+
+VER        = 1.20.4
+
+THISAPP    = go-$(VER)
+DL_FILE    = go$(VER).$(GOOS)-$(GOARCH).tar.gz
+DL_FROM    = $(URL_IPFIRE)
+DIR_APP    = $(DIR_SRC)/go
+TARGET     = $(DIR_INFO)/$(THISAPP)
+SUP_ARCH   = aarch64 x86_64
+
+###############################################################################
+# Top-level Rules
+###############################################################################
+
+objects = $(DL_FILE)
+
+$(DL_FILE) = $(DL_FROM)/$(DL_FILE)
+
+go$(VER).$(GOOS)-arm64.tar.gz_BLAKE2 = 330336e36ebc7cb8666159256ff6dce965465195db84e29467fe0ffa79b1fa1b698d8751df73bec1cd7d04b528d9d6a9cad259f6ad5036eb89212ebc3e91b686
+go$(VER).$(GOOS)-amd64.tar.gz_BLAKE2 = 38cca2ef6d5b9f2ef8c3cef6726930be790bde5ee8693a22f15cad2d96212967c52de9361c996f0a7a91f3b28de83e40a9eca3618167bb1340978daf5e104cdf
+
+install : $(TARGET)
+
+check : $(patsubst %,$(DIR_CHK)/%,$(objects))
+
+download :$(patsubst %,$(DIR_DL)/%,$(objects))
+
+b2 : $(subst %,%_BLAKE2,$(objects))
+
+###############################################################################
+# Downloading, checking, b2sum
+###############################################################################
+
+$(patsubst %,$(DIR_CHK)/%,$(objects)) :
+	@$(CHECK)
+
+$(patsubst %,$(DIR_DL)/%,$(objects)) :
+	@$(LOAD)
+
+$(subst %,%_BLAKE2,$(objects)) :
+	@$(B2SUM)
+
+###############################################################################
+# Installation Details
+###############################################################################
+
+$(TARGET) : $(patsubst %,$(DIR_DL)/%,$(objects))
+	@$(PREBUILD)
+	@rm -rf $(DIR_APP) && cd $(DIR_SRC) && tar axf $(DIR_DL)/$(DL_FILE)
+
+	-mkdir -pv /usr/lib/go
+	cd $(DIR_APP) && cp -av bin pkg src lib misc api test /usr/lib/go
+
+	ln -svf /usr/lib/go/bin/go /usr/bin/go
+	ln -svf /usr/lib/go/bin/gofmt /usr/bin/gofmt
+
+	cd $(DIR_APP) && install -v -m 644 VERSION /usr/lib/go/VERSION
+
+	# Remove some stuff not needed for production
+	rm -rvf \
+		/usr/lib/go/pkg/bootstrap \
+		/usr/lib/go/pkg/tool/*/api \
+		/usr/lib/go/pkg/obj/go-build/*
+
+	@rm -rf $(DIR_APP)
+	@$(POSTBUILD)

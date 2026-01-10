@@ -2,7 +2,7 @@
 ###############################################################################
 #                                                                             #
 # IPFire.org - A linux based firewall                                         #
-# Copyright (C) 2007  Michael Tremer & Christian Schmidt                      #
+# Copyright (C) 2007-2025  IPFire Team  <info@ipfire.org>                     #
 #                                                                             #
 # This program is free software: you can redistribute it and/or modify        #
 # it under the terms of the GNU General Public License as published by        #
@@ -20,9 +20,8 @@
 ###############################################################################
 
 use CGI qw(param);
-use Crypt::PasswdMD5;
 
-$swroot = "/var/ipfire";
+require '/var/ipfire/general-functions.pl';
 
 my %cgiparams;
 my %mainsettings;
@@ -31,8 +30,8 @@ my %proxysettings;
 $proxysettings{'NCSA_MIN_PASS_LEN'} = 6;
 
 ### Initialize environment
-&readhash("${swroot}/main/settings", \%mainsettings);
-&readhash("${swroot}/proxy/advanced/settings", \%proxysettings);
+&readhash("${General::swroot}/main/settings", \%mainsettings);
+&readhash("${General::swroot}/proxy/advanced/settings", \%proxysettings);
 $language = $mainsettings{'LANGUAGE'};
 
 ### Initialize language
@@ -41,12 +40,12 @@ if ($language =~ /^(\w+)$/) {$language = $1;}
  # Uncomment this to force a certain language:
  # $language='en';
  #
-require "${swroot}/langs/en.pl";
-require "${swroot}/langs/${language}.pl";
+require "${General::swroot}/langs/en.pl";
+require "${General::swroot}/langs/${language}.pl";
 
-my $userdb = "$swroot/proxy/advanced/ncsa/passwd";
+my $userdb = "$General::swroot/proxy/advanced/ncsa/passwd";
 
-&readhash("$swroot/ethernet/settings", \%netsettings);
+&readhash("$General::swroot/ethernet/settings", \%netsettings);
 
 my $success = 0;
 
@@ -74,48 +73,18 @@ if ($cgiparams{'SUBMIT'} eq $tr{'advproxy chgwebpwd change password'})
 		$errormessage = $tr{'advproxy errmsg password length 1'}.$proxysettings{'NCSA_MIN_PASS_LEN'}.$tr{'advproxy errmsg password length 2'};
 		goto ERROR;
 	}
-	if (! -z $userdb)
-	{
-		open FILE, $userdb;
-		@users = <FILE>;
-		close FILE;
 
-		$username = '';
-		$cryptpwd = '';
-
-		foreach (@users)
-		{
- 			chomp;
-			@temp = split(/:/,$_);
-			if ($temp[0] =~ /^$cgiparams{'USERNAME'}$/i)
-			{
-				$username = $temp[0];
-				$cryptpwd = $temp[1];
-			}
-		}
-	}
-	if ($username eq '')
-	{
-		$errormessage = $tr{'advproxy errmsg invalid user'};
+	# If the htpasswd verification status is 0 then update the database
+	# otherwise respond with an error message.
+	if (&General::system("/usr/bin/htpasswd", "-bv", "$userdb", "$cgiparams{'USERNAME'}", "$cgiparams{'OLD_PASSWORD'}") != 0) {
+		$errormessage = $tr{'advproxy errmsg invalid user/password'};
 		goto ERROR;
-	}
-	if (
-	    !(crypt($cgiparams{'OLD_PASSWORD'}, $cryptpwd) eq $cryptpwd) &&
-	    !(apache_md5_crypt($cgiparams{'OLD_PASSWORD'}, $cryptpwd) eq $cryptpwd)
-	   )
-	{
-		$errormessage = $tr{'advproxy errmsg password incorrect'};
-		goto ERROR;
-	}
-	$returncode = system("/usr/sbin/htpasswd -b $userdb $username $cgiparams{'NEW_PASSWORD_1'}");
-	if ($returncode == 0)
-	{
-		$success = 1;
-		undef %cgiparams;
 	} else {
-		$errormessage = $tr{'advproxy errmsg change fail'};
-		goto ERROR;
+		&General::system("/usr/bin/htpasswd", "-bB", "-C 10", "$userdb", "$cgiparams{'USERNAME'}", "$cgiparams{'NEW_PASSWORD_1'}");
 	}
+
+	$success = 1;
+	undef %cgiparams;
 }
 
 ERROR:
@@ -262,7 +231,7 @@ sub readhash
 			{
 				$val =~ s/^\'//g;
 				$val =~ s/\'$//g;
-	
+
 				# Untaint variables read from hash
 				$var =~ /([A-Za-z0-9_-]*)/;        $var = $1;
 				$val =~ /([\w\W]*)/; $val = $1;

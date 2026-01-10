@@ -1,7 +1,7 @@
 ###############################################################################
 #                                                                             #
 # IPFire.org - A linux based firewall                                         #
-# Copyright (C) 2007  Michael Tremer & Christian Schmidt                      #
+# Copyright (C) 2007-2024  IPFire Team  <info@ipfire.org>                     #
 #                                                                             #
 # This program is free software: you can redistribute it and/or modify        #
 # it under the terms of the GNU General Public License as published by        #
@@ -24,17 +24,18 @@
 
 include Config
 
-VER        = 1.12.1
+SUMMARY    = Kerberos
+
+VER        = 1.21.3
 
 THISAPP    = krb5-$(VER)
 DL_FILE    = $(THISAPP).tar.gz
 DL_FROM    = $(URL_IPFIRE)
 DIR_APP    = $(DIR_SRC)/$(THISAPP)/src
 TARGET     = $(DIR_INFO)/$(THISAPP)
-PROG       = krb5
-PAK_VER    = 1
 
-DEPS       = ""
+# Fix build with GCC 15
+CFLAGS += -std=gnu17
 
 ###############################################################################
 # Top-level Rules
@@ -44,7 +45,7 @@ objects = $(DL_FILE)
 
 $(DL_FILE) = $(DL_FROM)/$(DL_FILE)
 
-$(DL_FILE)_MD5 = 4a631b3474d3e44773f1ecda96f04400
+$(DL_FILE)_BLAKE2 = e909a55eaedab68e5c829bb7bbd26cec5db2d7b8d97f3b034de94d8f957003f16977ac619afee3b862f288e59f05c5e44f41e65b8883961c8b22a26e2f4733bc
 
 install : $(TARGET)
 
@@ -52,13 +53,13 @@ check : $(patsubst %,$(DIR_CHK)/%,$(objects))
 
 download :$(patsubst %,$(DIR_DL)/%,$(objects))
 
-md5 : $(subst %,%_MD5,$(objects))
+b2 : $(subst %,%_BLAKE2,$(objects))
 
-dist: 
+dist:
 	@$(PAK)
 
 ###############################################################################
-# Downloading, checking, md5sum
+# Downloading, checking, b2sum
 ###############################################################################
 
 $(patsubst %,$(DIR_CHK)/%,$(objects)) :
@@ -67,8 +68,8 @@ $(patsubst %,$(DIR_CHK)/%,$(objects)) :
 $(patsubst %,$(DIR_DL)/%,$(objects)) :
 	@$(LOAD)
 
-$(subst %,%_MD5,$(objects)) :
-	@$(MD5)
+$(subst %,%_BLAKE2,$(objects)) :
+	@$(B2SUM)
 
 ###############################################################################
 # Installation Details
@@ -77,13 +78,7 @@ $(subst %,%_MD5,$(objects)) :
 $(TARGET) : $(patsubst %,$(DIR_DL)/%,$(objects))
 	@$(PREBUILD)
 	@rm -rf $(DIR_SRC)/$(THISAPP) && cd $(DIR_SRC) && tar axf $(DIR_DL)/$(DL_FILE)
-	cd $(DIR_APP) && patch -Np2 < $(DIR_SRC)/src/patches/mitkrb-1.12.1-db2_fix-1.patch
-
-	cd $(DIR_APP) && sed -e "s@python2.5/Python.h@& python2.7/Python.h@g" \
-		-e "s@-lpython2.5]@&,\n  AC_CHECK_LIB(python2.7,main,[PYTHON_LIB=-lpython2.7])@g" \
-		-i configure.in
-	cd $(DIR_APP) && autoconf
-
+	cd $(DIR_APP) && patch -Np2 -i $(DIR_SRC)/src/patches/krb5-1.18.3_remove_known_failed_test.patch
 	cd $(DIR_APP) && ./configure \
 		--prefix=/usr \
 		--sysconfdir=/etc \
@@ -93,7 +88,7 @@ $(TARGET) : $(patsubst %,$(DIR_DL)/%,$(objects))
 		--enable-dns-for-realm \
 		CPPFLAGS="-I/usr/include/et"
 
-	cd $(DIR_APP) && make #$(MAKETUNING)
+	cd $(DIR_APP) && make $(MAKETUNING)
 	cd $(DIR_APP) && make install
 
 	for LIB in gssapi_krb5 gssrpc k5crypto kadm5clnt kadm5srv \

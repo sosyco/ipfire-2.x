@@ -1,0 +1,61 @@
+#!/bin/sh
+###############################################################################
+#                                                                             #
+# IPFire.org - A linux based firewall                                         #
+# Copyright (C) 2007-2022  IPFire Team  <info@ipfire.org>                     #
+#                                                                             #
+# This program is free software: you can redistribute it and/or modify        #
+# it under the terms of the GNU General Public License as published by        #
+# the Free Software Foundation, either version 3 of the License, or           #
+# (at your option) any later version.                                         #
+#                                                                             #
+# This program is distributed in the hope that it will be useful,             #
+# but WITHOUT ANY WARRANTY; without even the implied warranty of              #
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the               #
+# GNU General Public License for more details.                                #
+#                                                                             #
+# You should have received a copy of the GNU General Public License           #
+# along with this program.  If not, see <http://www.gnu.org/licenses/>.       #
+#                                                                             #
+###############################################################################
+
+. /etc/sysconfig/rc
+. ${rc_functions}
+
+eval $(/usr/local/bin/readhash /var/ipfire/guardian/settings)
+
+function guardian_is_enabled() {
+	[ "${GUARDIAN_ENABLED}" = "on" ]
+}
+
+case "$1" in
+        start)
+			guardian_is_enabled || exit 0
+
+			boot_mesg "Starting Guardian..."
+			loadproc /usr/sbin/guardian -c /var/ipfire/guardian/guardian.conf
+	;;
+
+	stop)
+		if ([ -f /run/guardian/guardian.pid ]); then
+			boot_mesg "Stopping Guardian..."
+			kill $(cat /run/guardian/guardian.pid)
+			sleep 1;
+		fi
+	;;
+
+        status)
+		statusproc /usr/sbin/guardian
+	;;
+
+	restart)
+		$0 stop
+		sleep 2
+		$0 start
+	;;
+
+	*)
+		echo "Usage: $0 {start|stop|restart|status}"
+		exit 1
+	;;
+esac

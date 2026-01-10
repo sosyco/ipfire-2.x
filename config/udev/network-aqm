@@ -1,0 +1,110 @@
+#!/bin/bash
+############################################################################
+#                                                                          #
+# This file is part of the IPFire Firewall.                                #
+#                                                                          #
+# IPFire is free software; you can redistribute it and/or modify           #
+# it under the terms of the GNU General Public License as published by     #
+# the Free Software Foundation; either version 2 of the License, or        #
+# (at your option) any later version.                                      #
+#                                                                          #
+# IPFire is distributed in the hope that it will be useful,                #
+# but WITHOUT ANY WARRANTY; without even the implied warranty of           #
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the            #
+# GNU General Public License for more details.                             #
+#                                                                          #
+# You should have received a copy of the GNU General Public License        #
+# along with IPFire; if not, write to the Free Software                    #
+# Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307 USA #
+#                                                                          #
+# Copyright (C) 2007-2012 IPFire Team <info@ipfire.org>.                   #
+#                                                                          #
+############################################################################
+
+LOG_FACILITY="aqm"
+
+log() {
+	logger -t "${LOG_FACILITY}" $@
+}
+
+if [ -z "${INTERFACE}" ]; then
+	echo "INTERFACE variable was not set." >&2
+	exit 1
+fi
+
+case "${ACTION}" in
+	add|register)
+		TYPE="$(</sys/class/net/${INTERFACE}/type)"
+
+		# Detect bridges
+		if [ -d "/sys/class/net/${INTERFACE}/bridge" ]; then
+			TYPE="bridge"
+
+		# Detect wireless interfaces
+		elif [ -d "/sys/class/net/${INTERFACE}/phy80211" ]; then
+			TYPE="wireless"
+		fi
+
+		args=()
+
+		# Configure some useful defaults depending on the interface
+		case "${INTERFACE},${TYPE}" in
+			# Ignore loopback
+			lo,*)
+				exit 0
+				;;
+
+			# Ignore tun
+			tun*)
+				exit 0
+				;;
+
+			# Ignore GRE/VTI
+			*,778|*,768)
+				exit 0
+				;;
+
+			# Ignore bridges
+			*,bridge)
+				exit 0
+				;;
+
+			# Ignore wireless interfaces
+			*,wireless)
+				exit 0
+				;;
+
+			# Ignore IMQ/IFB
+			imq*,*|ifb*,*)
+				exit 0
+				;;
+
+			# Ignore WireGuard
+			wg[0-9]*,*)
+				exit 0
+				;;
+
+			# Handle dial-up connections on RED
+			ppp*,512)
+				args+=( "cake" "internet" "conservative" "ack-filter" )
+				;;
+
+			# All other interfaces are locally connected
+			*)
+				args+=( "fq_codel" )
+				;;
+		esac
+
+		# Change root qdisc to use cake
+		if ! tc qdisc replace root dev "${INTERFACE}" "${args[@]}"; then
+			log "Could not configure qdisc on ${INTERFACE} with parameters ${args[@]}"
+			exit ${ret}
+		fi
+		;;
+
+	remove|unregister)
+		# Nothing to do here.
+		;;
+esac
+
+exit 0

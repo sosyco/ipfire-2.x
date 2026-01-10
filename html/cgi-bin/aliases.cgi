@@ -33,6 +33,8 @@ use strict;
 require '/var/ipfire/general-functions.pl';	# replace /var/ipcop with /var/ipcop in case of manual install
 require "${General::swroot}/lang.pl";
 require "${General::swroot}/header.pl";
+require "${General::swroot}/ids-functions.pl";
+require "${General::swroot}/network-functions.pl";
 
 my $configfwdfw		= "${General::swroot}/firewall/config";
 my $configinput		= "${General::swroot}/firewall/input";
@@ -51,6 +53,11 @@ undef (@dummy);
 my $setting = "${General::swroot}/ethernet/settings";
 our $datafile = "${General::swroot}/ethernet/aliases";
 
+# Fetch the name of the main RED interface
+my $RED_INTERFACE = &General::get_red_interface();
+
+# Fetch all RED interfaces
+my @RED_INTERFACES = &Network::get_red_interfaces();
 
 our %settings=();
 #Settings1
@@ -60,8 +67,9 @@ our %settings=();
 $settings{'IP'} = '';
 $settings{'ENABLED'} = 'off';		# Every check box must be set to off
 $settings{'NAME'} = '';
-my @nosaved=('IP','ENABLED','NAME');	# List here ALL setting2 fields. Mandatory
-    
+$settings{'INTERFACE'} = '';
+my @nosaved=('IP','ENABLED','NAME','INTERFACE');	# List here ALL setting2 fields. Mandatory
+
 $settings{'ACTION'} = '';		# add/edit/remove
 $settings{'KEY1'} = '';			# point record for ACTION
 
@@ -93,18 +101,21 @@ if (open(FILE, "$datafile")) {
 # Remove if no Setting1 needed
 #
 if ($settings{'ACTION'} eq $Lang::tr{'save'}) {
-    
+
     #
     #Validate static Settings1 here
     #
     unless ($errormessage) {					# Everything is ok, save settings
-	#map (delete ($settings{$_}) ,(@nosaved,'ACTION','KEY1'));# Must never be saved 
+	#map (delete ($settings{$_}) ,(@nosaved,'ACTION','KEY1'));# Must never be saved
 	#&General::writehash($setting, \%settings);		# Save good settings
 	#$settings{'ACTION'} = $Lang::tr{'save'};		# Recreate  'ACTION'
 	#map ($settings{$_}= '',(@nosaved,'KEY1'));		# and reinit var to empty
-	
+
 	# Rebuild configuration file if needed
 	&BuildConfiguration;
+
+	# Handle suricata related actions.
+	&HandleSuricata();
     }
 
     ERROR:						# Leave the faulty field untouched
@@ -129,16 +140,19 @@ if ($settings{'ACTION'} eq $Lang::tr{'toggle enable disable'}) {
     $temp[2] = '' if ( $temp[2] eq '' );
     @current[$settings{'KEY1'}] = join (',',@temp)."\n";
     $settings{'KEY1'} = ''; 				# End edit mode
-    
+
     &General::log($Lang::tr{'ip alias changed'});
-    
+
     #Save current
     open(FILE, ">$datafile") or die 'Unable to open aliases file.';
     print FILE @current;
     close(FILE);
-	
+
     # Rebuild configuration file
     &BuildConfiguration;
+
+    # Handle Suricata related actions.
+    &HandleSuricata();
 }
 
 if ($settings{'ACTION'} eq $Lang::tr{'add'}) {
@@ -208,10 +222,10 @@ if ($settings{'ACTION'} eq $Lang::tr{'add'}) {
 	}
     unless ($errormessage) {
 	if ($settings{'KEY1'} eq '') { #add or edit ?
-	    unshift (@current, "$settings{'IP'},$settings{'ENABLED'},$settings{'NAME'}\n");
+	    unshift (@current, "$settings{'IP'},$settings{'ENABLED'},$settings{'NAME'},$settings{'INTERFACE'}\n");
 	    &General::log($Lang::tr{'ip alias added'});
 	} else {
-	    @current[$settings{'KEY1'}] = "$settings{'IP'},$settings{'ENABLED'},$settings{'NAME'}\n";
+	    @current[$settings{'KEY1'}] = "$settings{'IP'},$settings{'ENABLED'},$settings{'NAME'},$settings{'INTERFACE'}\n";
 	    $settings{'KEY1'} = '';       # End edit mode
 	    &General::log($Lang::tr{'ip alias changed'});
 	}
@@ -220,7 +234,10 @@ if ($settings{'ACTION'} eq $Lang::tr{'add'}) {
 	&SortDataFile;				# sort newly added/modified entry
 
 	&BuildConfiguration;			# then re-build conf which use new data
-	
+
+	# Handle Suricata related actions.
+	&HandleSuricata();
+
 ##
 ## if entering data line is repetitive, choose here to not erase fields between each addition
 ##
@@ -240,10 +257,11 @@ if ($settings{'ACTION'} eq $Lang::tr{'edit'}) {
     $settings{'IP'}=$temp[0];			# Prepare the screen for editing
     $settings{'ENABLED'}=$temp[1];
     $settings{'NAME'}=$temp[2];
+    $settings{'INTERFACE'}=$temp[3];
 }
 
 if ($settings{'ACTION'} eq $Lang::tr{'remove'}) {
-    splice (@current,$settings{'KEY1'},1);		# Delete line 
+    splice (@current,$settings{'KEY1'},1);		# Delete line
     open(FILE, ">$datafile") or die 'Unable to open aliases file.';
     print FILE @current;
     close(FILE);
@@ -251,6 +269,9 @@ if ($settings{'ACTION'} eq $Lang::tr{'remove'}) {
     &General::log($Lang::tr{'ip alias removed'});
 
     &BuildConfiguration;				# then re-build conf which use new data
+
+    # Handle Suricata related actions.
+    &HandleSuricata();
 }
 
 
@@ -278,10 +299,11 @@ if ($ENV{'QUERY_STRING'} =~ /$sortstring/ ) {
 if ($settings{'ACTION'} eq '' ) { # First launch from GUI
     $settings{'ENABLED'} ='on';
 }
-    
+
 &Header::openpage($Lang::tr{'external aliases configuration'}, 1, '');
 &Header::openbigbox('100%', 'left', '', $errormessage);
 my %checked =();     # Checkbox manipulations
+my %selected = ();
 
 if ($errormessage) {
     &Header::openbox('100%', 'left', $Lang::tr{'error messages'});
@@ -301,11 +323,16 @@ END
 ;
     &Header::closebox();
 }
-									
+
 #
 # Second check box is for editing the list
 #
 $checked{'ENABLED'}{'on'} = ($settings{'ENABLED'} eq 'on') ? "checked='checked'" : '' ;
+
+$selected{'INTERFACE'} = ();
+foreach my $intf (@RED_INTERFACES) {
+	$selected{'INTERFACE'}{$intf} = ($settings{'INTERFACE'} eq $intf) ? "selected" : "";
+}
 
 my $buttontext = $Lang::tr{'add'};
 if ($settings{'KEY1'} ne '') {
@@ -316,7 +343,7 @@ if ($settings{'KEY1'} ne '') {
 }
 
 #Edited line number (KEY1) passed until cleared by 'save' or 'remove' or 'new sort order'
-print <<END
+print <<END;
 <form method='post' action='$ENV{'SCRIPT_NAME'}'>
 <input type='hidden' name='KEY1' value='$settings{'KEY1'}' />
 <input type='hidden' name='OLDNAME' value='$settings{'NAME'}' />
@@ -327,6 +354,33 @@ print <<END
 <td><input type='text' name='NAME' value='$settings{'NAME'}' size='32' /></td>
 <td class='base' style='text-align:right; color:${Header::colourred};'>$Lang::tr{'alias ip'}:&nbsp;</td>
 <td><input type='text' name='IP' value='$settings{'IP'}' size='16' /></td>
+END
+
+if (scalar @RED_INTERFACES >= 2) {
+	print <<END;
+		<td class='base' style='color:${Header::colourred};'>$Lang::tr{'interface'}:</td>
+		<td>
+			<select name="INTERFACE">
+				<option value="">$Lang::tr{'aliases default interface'}</option>
+END
+
+	# Print an option for each RED interface
+	foreach my $intf (@RED_INTERFACES) {
+		# Skip the default one
+		next if ($RED_INTERFACE eq $intf);
+
+		print <<END;
+				<option value="$intf" $selected{'INTERFACE'}{$intf}>$intf</option>
+END
+	}
+
+	print <<END;
+			</select>
+		</td>
+END
+}
+
+print <<END;
 <td class='base' style='text-align:right;'>$Lang::tr{'enabled'}&nbsp;</td>
 <td><input type='checkbox' name='ENABLED' $checked{'ENABLED'}{'on'} /></td>
 </tr>
@@ -340,7 +394,7 @@ print <<END
 </table>
 </form>
 END
-;
+
 &Header::closebox();
 
 # Add visual indicators to column headings to show sort order - EO
@@ -393,7 +447,7 @@ foreach my $line (@current) {
 	$gdesc = $Lang::tr{'click to disable'};
     } else {
 	$gif = 'off.gif';
-	$gdesc = $Lang::tr{'click to enable'}; 
+	$gdesc = $Lang::tr{'click to enable'};
     }
 
     #Colorize each line
@@ -406,9 +460,15 @@ foreach my $line (@current) {
     }
     print "<tr style='$col'>";
 
+	my $address = $temp[0];
+
+	if ($temp[3] ne "") {
+		$address .= " @ $temp[3]";
+	}
+
     print <<END
 <td style='text-align:center; $col'>$temp[2]</td>
-<td style='text-align:center; $col'>$temp[0]</td>
+<td style='text-align:center; $col'>$address</td>
 
 <td style='text-align:center; $col'>
 <form method='post' action='$ENV{'SCRIPT_NAME'}'>
@@ -475,7 +535,7 @@ END
 sub SortDataFile
 {
     our %entries = ();
-    
+
     # Sort pair of record received in $a $b special vars.
     # When IP is specified use numeric sort else alpha.
     # If sortname ends with 'Rev', do reverse sort.
@@ -514,32 +574,32 @@ sub SortDataFile
     foreach my $line (@current) {
 	chomp( $line); #remove newline because can be on field 5 or 6 (addition of REMARK)
 	my @temp = split (',',$line);
-	
+
 	# Build a pair 'Field Name',value for each of the data dataline.
 	# Each SORTABLE field must have is pair.
 	# Other data fields (non sortable) can be grouped in one
-	
+
 	# Exemple
 	# F1,F2,F3,F4,F5       only F1 F2 for sorting
 	# my @record = ('KEY',$key++,
 	#		'F1',$temp[0],
 	#		'F2',$temp[1],
 	#		'DATA',join(',',@temp[2..4])	);  #group remainning values, with separator (,)
-	
+
 	# The KEY,key record permits doublons. If removed, then F1 becomes the key without doublon permitted.
-	
-	
-	my @record = ('KEY',$key++,'IP',$temp[0],'ENABLED',$temp[1],'NAME',$temp[2]);
+
+
+	my @record = ('KEY',$key++,'IP',$temp[0],'ENABLED',$temp[1],'NAME',$temp[2],'INTERFACE',$temp[3]);
 	my $record = {};                        	# create a reference to empty hash
 	%{$record} = @record;                		# populate that hash with @record
 	$entries{$record->{KEY}} = $record; 		# add this to a hash of hashes
     }
-    
+
     open(FILE, ">$datafile") or die 'Unable to open aliases file.';
 
     # Each field value is printed , with the newline ! Don't forget separator and order of them.
     foreach my $entry (sort fixedleasesort keys %entries) {
-	print FILE "$entries{$entry}->{IP},$entries{$entry}->{ENABLED},$entries{$entry}->{NAME}\n";
+	print FILE "$entries{$entry}->{IP},$entries{$entry}->{ENABLED},$entries{$entry}->{NAME},$entries{$entry}->{INTERFACE}\n";
     }
 
     close(FILE);
@@ -549,11 +609,27 @@ sub SortDataFile
     close (FILE);
 }
 
-#						    
+#
 # Build the configuration file for application aliases
 #
 sub BuildConfiguration {
     # Restart service associated with this
-    system '/usr/local/bin/setaliases';
+    &General::system('/usr/local/bin/setaliases');
+
+    # Reload the firewall for REDNAT rules
+    &General::firewall_reload();
 }
 
+#
+## Handle Suricata related actions.
+#
+sub HandleSuricata() {
+	# Check if suricata is running.
+	if(&IDS::ids_is_running()) {
+		# Re-generate file which contains the HOME_NET declaration.
+		&IDS::generate_home_net_file();
+
+		# Call suricatactrl to perform a restart of suricata.
+		&IDS::call_suricatactrl("restart");
+	}
+}

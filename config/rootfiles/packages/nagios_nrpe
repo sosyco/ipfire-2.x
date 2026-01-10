@@ -1,3 +1,9 @@
+etc/nagios
+etc/nagios/nrpe.cfg
+etc/rc.d/init.d/nrpe
 #root/.rnd
+#usr/bin/nrpe-uninstall
 usr/bin/nrpe
+#usr/lib/nagios
 usr/lib/nagios/check_nrpe
+var/ipfire/backup/addons/includes/nagios_nrpe

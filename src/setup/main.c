@@ -25,12 +25,11 @@ struct knic knics[20] = { { "" , "" , "" , "" } };
 int main(int argc, char *argv[])
 {
 	int choice;
-	char *sections[11]; /* need to fill this out AFTER knowning lang */
+	char *sections[8]; /* need to fill this out AFTER knowning lang */
 	int rc;
 	struct keyvalue *kv;
 	char lang[STRING_SIZE] = "en_US.utf8";
 	char title[STRING_SIZE];
-	int langcounter;
 	int autook = 0;
 
 	/* Log file/terminal stuff. */
@@ -69,10 +68,9 @@ int main(int argc, char *argv[])
 	sections[2] = _("Hostname");
 	sections[3] = _("Domain name");
 	sections[4] = _("Networking");
-	sections[5] = _("ISDN");
-	sections[6] = _("'root' password");
-	sections[7] = _("'admin' password");
-	sections[8] = NULL;
+	sections[5] = _("'root' password");
+	sections[6] = _("'admin' password");
+	sections[7] = NULL;
 
 	newtInit();
 	newtCls();
@@ -124,14 +122,10 @@ int main(int argc, char *argv[])
 					break;
 				
 				case 5:
-					handleisdn();
-					break;
-
-				case 6:
 					handlerootpassword();
 					break;
 					
-				case 7:
+				case 6:
 					handleadminpassword();
 					break;
 		
@@ -153,8 +147,6 @@ int main(int argc, char *argv[])
 		if (!(handlerootpassword()))
 			goto EXIT;
 		if (!(handleadminpassword()))
-			goto EXIT;
-		if (!(handleisdn()))
 			goto EXIT;
 		if (!(handlenetworking()))
 			goto EXIT;

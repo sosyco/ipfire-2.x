@@ -33,116 +33,99 @@ require "${General::swroot}/graphs.pl";
 my %color = ();
 my %mainsettings = ();
 &General::readhash("${General::swroot}/main/settings", \%mainsettings);
-&General::readhash("/srv/web/ipfire/html/themes/".$mainsettings{'THEME'}."/include/colors.txt", \%color);
+&General::readhash("/srv/web/ipfire/html/themes/ipfire/include/colors.txt", \%color);
 
-my @querry = split(/\?/,$ENV{'QUERY_STRING'});
-$querry[0] = '' unless defined $querry[0];
-$querry[1] = 'hour' unless defined $querry[1];
+&Header::showhttpheaders();
+&Header::openpage($Lang::tr{'memory information'}, 1, '');
+&Header::openbigbox('100%', 'left');
 
-if ( $querry[0] =~ "memory"){
-	print "Content-type: image/png\n\n";
-	binmode(STDOUT);
-	&Graphs::updatememorygraph($querry[1]);
-}elsif ( $querry[0] =~ "swap"){
-	print "Content-type: image/png\n\n";
-	binmode(STDOUT);
-	&Graphs::updateswapgraph($querry[1]);
-}else{
-	&Header::showhttpheaders();
-	&Header::openpage($Lang::tr{'memory information'}, 1, '');
-	&Header::openbigbox('100%', 'left');
+&Header::openbox('100%', 'center', "Memory $Lang::tr{'graph'}");
+&Graphs::makegraphbox("memory.cgi","memory","day");
+&Header::closebox();
 
-	&Header::openbox('100%', 'center', "Memory $Lang::tr{'graph'}");
-	&Graphs::makegraphbox("memory.cgi","memory","day");
+if (-f "$mainsettings{'RRDLOG'}/collectd/localhost/swap") {
+	&Header::openbox('100%', 'center', "Swap $Lang::tr{'graph'}");
+	&Graphs::makegraphbox("memory.cgi","swap","day");
 	&Header::closebox();
+}
 
-	if ( `ls $mainsettings{'RRDLOG'}/collectd/localhost/swap 2>/dev/null` ) {
-	    &Header::openbox('100%', 'center', "Swap $Lang::tr{'graph'}");
-	    &Graphs::makegraphbox("memory.cgi","swap","day");
-	    &Header::closebox();
-	}
-	
-	&Header::openbox('100%', 'center', $Lang::tr{'memory'});
-	print "<table width='95%' cellspacing='5'>";
-	my $ram=0;
-	my $size=0;
-	my $used=0;
-	my $free=0;
-	my $percent=0;
-	my $shared=0;
-	my $buffers=0;
-	my $cached=0;
+&Header::openbox('100%', 'center', $Lang::tr{'memory'});
+print "<table width='95%' cellspacing='5'>";
+my $size=0;
+my $used=0;
+my $free=0;
+my $percent=0;
+my $shared=0;
+my $buffers=0;
+my $cached=0;
+my $available=0;
 
-	open(FREE,'/usr/bin/free |');
-	while(<FREE>){
-		if ($_ =~ m/^\s+total\s+used\s+free\s+shared\s+buffers\s+cached$/ ){
-			print <<END
+# output format: kibibytes, wide mode (buffers and cache in two columns)
+open(my $cmd_fh, "-|", '/usr/bin/free -k -w') or die $!;
+while(<$cmd_fh>){
+	if ($_ =~ m/^\s+total\s+used\s+free\s+shared\s+buffers\s+cache\s+available$/ ){
+		print <<END
 <tr>
-<td align='center'>&nbsp;</td>
-<td align='center' class='boldbase'><b>$Lang::tr{'size'}</b></td>
-<td align='center' class='boldbase'><b>$Lang::tr{'used'}</b></td>
-<td align='center' class='boldbase'><b>$Lang::tr{'free'}</b></td>
-<td align='left' class='boldbase' colspan='2'><b>$Lang::tr{'percentage'}</b></td>
+	<td align='center'>&nbsp;</td>
+	<td align='center' class='boldbase'><b>$Lang::tr{'size'}</b></td>
+	<td align='center' class='boldbase'><b>$Lang::tr{'used'}</b></td>
+	<td align='center' class='boldbase'><b>$Lang::tr{'free'}</b></td>
+	<td align='left' class='boldbase' colspan='2'><b>$Lang::tr{'percentage'}</b></td>
 </tr>
 END
 ;
-		}else{
-			if ($_ =~ m/^Mem:\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)$/){
-				($ram,$size,$used,$free,$shared,$buffers,$cached) = ($1,$1,$2,$3,$4,$5,$6);
+	}else{
+		if ($_ =~ m/^Mem:\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)$/){
+			($size,$used,$free,$shared,$buffers,$cached,$available) = ($1,$2,$3,$4,$5,$6,$7);
+			($percent = ($used/$size)*100) =~ s/^(\d+)(\.\d+)?$/$1%/;
+			print <<END
+<tr>
+	<td class='boldbase'><b>$Lang::tr{'ram'}</b></td>
+END
+;
+		}elsif($_ =~ m/^Swap:\s+(\d+)\s+(\d+)\s+(\d+)$/){
+			($size,$used,$free) = ($1,$2,$3);
+			if ($size != 0){
 				($percent = ($used/$size)*100) =~ s/^(\d+)(\.\d+)?$/$1%/;
-				print <<END
-<tr>
-<td class='boldbase'><b>$Lang::tr{'ram'}</b></td>
-<td align='center'>$size  KB</td>
-END
-;
-			}elsif($_ =~ m/^Swap:\s+(\d+)\s+(\d+)\s+(\d+)$/){
-				($size,$used,$free) = ($1,$2,$3);
-				if ($size != 0){
-					($percent = ($used/$size)*100) =~ s/^(\d+)(\.\d+)?$/$1%/;
-				}else{
-					($percent = '');
-				}
-				print <<END
-<tr>
-<td class='boldbase'><b>$Lang::tr{'swap'}</b></td>
-<td align='center'>$size  KB</td>
-END
-;
-			}elsif($ram and $_ =~ m/^-\/\+ buffers\/cache:\s+(\d+)\s+(\d+)$/ ){
-				($used,$free) = ($1,$2);
-				($percent = ($used/$ram)*100) =~ s/^(\d+)(\.\d+)?$/$1%/;
-				print "<tr><td colspan='2' class='boldbase'><b>$Lang::tr{'excluding buffers and cache'}</b></td>";
+			}else{
+				($percent = '');
 			}
 			print <<END
-<td align='center'>$used KB</td>
-<td align='center'>$free KB</td>
-<td>
-END
-;
-			&percentbar($percent);
-			print <<END
-</td>
-<td align='left'>$percent</td>
-</tr>
+<tr>
+	<td class='boldbase'><b>$Lang::tr{'swap'}</b></td>
 END
 ;
 		}
+		print <<END
+	<td align='center'>$size KiB</td>
+	<td align='center'>$used KiB</td>
+	<td align='center'>$free KiB</td>
+	<td>
+END
+;
+		&percentbar($percent);
+		print <<END
+</td>
+	<td align='left'>$percent</td>
+</tr>
+END
+;
 	}
-	close FREE;
-	print <<END
-<tr><td class='boldbase' colspan='2'><br /></td></tr>
-<tr><td class='boldbase'><b>$Lang::tr{'shared'}</b></td><td align='center'>$shared KB</td></tr>
-<tr><td class='boldbase'><b>$Lang::tr{'buffers'}</b></td><td align='center'>$buffers KB</td></tr>
-<tr><td class='boldbase'><b>$Lang::tr{'cached'}</b></td><td align='center'>$cached KB</td></tr>
+}
+close($cmd_fh);
+print <<END
+<tr><td colspan='6'><br /></td></tr>
+<tr><td class='boldbase'><b>$Lang::tr{'shared'}</b></td><td align='center'>$shared KiB</td></tr>
+<tr><td class='boldbase'><b>$Lang::tr{'buffers'}</b></td><td align='center'>$buffers KiB</td></tr>
+<tr><td class='boldbase'><b>$Lang::tr{'cached'}</b></td><td align='center'>$cached KiB</td></tr>
+<tr><td class='boldbase'><b>$Lang::tr{'available'}</b></td><td align='center'>$available KiB</td></tr>
 </table>
 END
 ;
-	&Header::closebox();
+&Header::closebox();
 
-	&Header::closebigbox();
-	&Header::closepage();
-}
+&Header::closebigbox();
+&Header::closepage();
 
 sub percentbar{
 	my $percent = $_[0];

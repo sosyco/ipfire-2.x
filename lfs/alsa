@@ -1,7 +1,7 @@
 ###############################################################################
 #                                                                             #
 # IPFire.org - A linux based firewall                                         #
-# Copyright (C) 2007-2013  IPFire Team <info@ipfire.org>                      #
+# Copyright (C) 2007-2025  IPFire Team  <info@ipfire.org>                     #
 #                                                                             #
 # This program is free software: you can redistribute it and/or modify        #
 # it under the terms of the GNU General Public License as published by        #
@@ -24,21 +24,22 @@
 
 include Config
 
+SUMMARY    = Advanced Linux Sound Architecture
 
-VER        = 1.0.27.1
-UVER       = 1.0.27.1
-FVER       = 1.0.27
-
-VERSUFIX   = ipfire$(KCFG)
+VER        = 1.2.14
+UVER       = 1.2.14
+CVER       = 1.2.14
 
 THISAPP    = alsa-lib-$(VER)
 DL_FILE    = $(THISAPP).tar.bz2
 DL_FROM    = $(URL_IPFIRE)
 DIR_APP    = $(DIR_SRC)/$(THISAPP)
 PROG       = alsa
-PAK_VER    = 12
+PAK_VER    = 24
 
-DEPS       = ""
+DEPS       =
+
+SERVICES   =
 
 TARGET     = $(DIR_INFO)/$(THISAPP)
 
@@ -46,15 +47,16 @@ TARGET     = $(DIR_INFO)/$(THISAPP)
 # Top-level Rules
 ###############################################################################
 
-objects = $(DL_FILE) alsa-utils-$(UVER).tar.bz2 alsa-firmware-$(FVER).tar.bz2
+objects = $(DL_FILE) alsa-utils-$(UVER).tar.bz2 alsa-ucm-conf-$(CVER).tar.bz2
+
 
 $(DL_FILE) = $(DL_FROM)/$(DL_FILE)
 alsa-utils-$(UVER).tar.bz2 = $(DL_FROM)/alsa-utils-$(UVER).tar.bz2
-alsa-firmware-$(FVER).tar.bz2 = $(DL_FROM)/alsa-firmware-$(FVER).tar.bz2
+alsa-ucm-conf-$(CVER).tar.bz2 = $(DL_FROM)/alsa-ucm-conf-$(CVER).tar.bz2
 
-$(DL_FILE)_MD5 = 17102aaab10e9d4b19f6b02937bab015
-alsa-utils-$(UVER).tar.bz2_MD5 = 3d81357b997744a139881ef72bc6921a
-alsa-firmware-$(FVER).tar.bz2_MD5 = b373b350d5151dd7d64db2fc12936b04
+$(DL_FILE)_BLAKE2 = 6fee05f859a19b8ef0d9896d37442c55f602e8b4aaa7698f30c01e03a339d7a74b3214493b095a64b59ee581fb7756d903d4965e080db552e062e2001e0662ff
+alsa-utils-$(UVER).tar.bz2_BLAKE2 = 0f15f6f684bf17c0508b01eabd21917d8501b965074d3b42f6915e9bbafeafad894dcbd1a219008db0064fb98d6fb2be311e98c0b8bc7e91d1a0b8146dd02dfe
+alsa-ucm-conf-$(CVER).tar.bz2_BLAKE2 = cbb4b81db7670207cac5b85ba9cd4d9df93e4aca573da4caffe0f1e0386a9685b837e58b7ed85ddcfecf3c0f2469e706833dad6f0ef020440c943aa41520f8f0
 
 install : $(TARGET)
 
@@ -62,13 +64,13 @@ check : $(patsubst %,$(DIR_CHK)/%,$(objects))
 
 download :$(patsubst %,$(DIR_DL)/%,$(objects))
 
-md5 : $(subst %,%_MD5,$(objects))
+b2 : $(subst %,%_BLAKE2,$(objects))
 
-dist: 
+dist:
 	@$(PAK)
 
 ###############################################################################
-# Downloading, checking, md5sum
+# Downloading, checking, b2sum
 ###############################################################################
 
 $(patsubst %,$(DIR_CHK)/%,$(objects)) :
@@ -77,8 +79,8 @@ $(patsubst %,$(DIR_CHK)/%,$(objects)) :
 $(patsubst %,$(DIR_DL)/%,$(objects)) :
 	@$(LOAD)
 
-$(subst %,%_MD5,$(objects)) :
-	@$(MD5)
+$(subst %,%_BLAKE2,$(objects)) :
+	@$(B2SUM)
 
 ###############################################################################
 # Installation Details
@@ -88,16 +90,20 @@ $(TARGET) : $(patsubst %,$(DIR_DL)/%,$(objects))
 	@$(PREBUILD)
 	@rm -rf $(DIR_SRC)/alsa*
 	cd $(DIR_SRC) && tar jxf $(DIR_DL)/$(DL_FILE)
+	cd $(DIR_APP) && tar xfj $(DIR_DL)/alsa-utils-$(UVER).tar.bz2
+	$(UPDATE_AUTOMAKE)
 	cd $(DIR_APP) && ./configure
 	cd $(DIR_APP) && make $(MAKETUNING) $(EXTRA_MAKE)
 	cd $(DIR_APP) && make install
-	cd $(DIR_SRC) && tar xfj $(DIR_DL)/alsa-utils-$(UVER).tar.bz2
-	cd $(DIR_SRC)/alsa-utils-$(UVER) && ./configure --disable-xmlto
-	cd $(DIR_SRC)/alsa-utils-$(UVER) && make $(MAKETUNING) $(EXTRA_MAKE)
-	cd $(DIR_SRC)/alsa-utils-$(UVER) && make install
-	cd $(DIR_SRC) && tar xfj $(DIR_DL)/alsa-firmware-$(FVER).tar.bz2
-	cd $(DIR_SRC)/alsa-firmware-$(FVER) && ./configure
-	cd $(DIR_SRC)/alsa-firmware-$(FVER) && make $(MAKETUNING) $(EXTRA_MAKE)
-	cd $(DIR_SRC)/alsa-firmware-$(FVER) && make install
+	cd $(DIR_APP)/alsa-utils-$(UVER) && ./configure --disable-xmlto
+	cd $(DIR_APP)/alsa-utils-$(UVER) && make $(MAKETUNING) $(EXTRA_MAKE)
+	cd $(DIR_APP)/alsa-utils-$(UVER) && make install
+	cd $(DIR_APP) && tar xfj $(DIR_DL)/alsa-ucm-conf-$(CVER).tar.bz2 \
+		-C /usr/share/alsa --strip-components=1 --wildcards "*/ucm2"
+	# install initscript
+	$(call INSTALL_INITSCRIPTS,alsa)
+	# install backup include file
+	install -v -m 644 ${DIR_SRC}/config/backup/includes/alsa \
+			/var/ipfire/backup/addons/includes/alsa
 	@rm -rf $(DIR_SRC)/alsa*
 	@$(POSTBUILD)

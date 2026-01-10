@@ -2,7 +2,7 @@
 ###############################################################################
 #                                                                             #
 # IPFire.org - A linux based firewall                                         #
-# Copyright (C) 2007-2012  IPFire Team  <info@ipfire.org>                     #
+# Copyright (C) 2007-2021  IPFire Team  <info@ipfire.org>                     #
 #                                                                             #
 # This program is free software: you can redistribute it and/or modify        #
 # it under the terms of the GNU General Public License as published by        #
@@ -22,16 +22,28 @@
 . /etc/sysconfig/rc
 . $rc_functions
 
+TAR_OPTIONS=(
+	--acls
+	--xattrs
+	--xattrs-include='*'
+	--no-overwrite-dir
+	--no-delay-directory-restore
+	--preserve-permissions
+	--numeric-owner
+)
+
 extract_files() {
 	echo "Extracting files..."
-	tar xavf /opt/pakfire/tmp/files* --no-overwrite-dir -p --numeric-owner -C /
+	tar -xavf /opt/pakfire/tmp/files* "${TAR_OPTIONS[@]}" -C /
+	sync
 	echo "...Finished."
 }
 
 extract_backup_includes() {
 	echo "Extracting backup includes..."
-	tar xavf /opt/pakfire/tmp/files* --no-overwrite-dir -p --numeric-owner -C / \
+	tar xavf /opt/pakfire/tmp/files* "${TAR_OPTIONS[@]}" -C / \
 		var/ipfire/backup/addons/includes
+	sync
 	echo "...Finished."
 }
 
@@ -86,7 +98,7 @@ start_service() {
 		esac
 	done
 
-	if [ -e "/etc/init.d/${1}" ]; then
+	if [ -f "/etc/init.d/${1}" ]; then
 	    if [ -n "${BACKGROUND}" ]; then
 				(sleep ${DELAY} && /etc/init.d/${1} start) &
 			else
@@ -96,7 +108,7 @@ start_service() {
 }
 
 stop_service() {
-	if [ -e "/etc/init.d/${1}" ]; then
+	if [ -f "/etc/init.d/${1}" ]; then
 		/etc/init.d/${1} stop
 	fi
 }

@@ -2,7 +2,7 @@
 ###############################################################################
 #                                                                             #
 # IPFire.org - A linux based firewall                                         #
-# Copyright (C) 2013  IPFire Team  <info@ipfire.org>                          #
+# Copyright (C) 2007-2023  IPFire Team  <info@ipfire.org>                     #
 #                                                                             #
 # This program is free software: you can redistribute it and/or modify        #
 # it under the terms of the GNU General Public License as published by        #
@@ -20,14 +20,13 @@
 ###############################################################################
 
 use strict;
-use Locale::Codes::Country;
 
 # enable only the following on debugging purpose
-use warnings;
-use CGI::Carp 'fatalsToBrowser';
+#use warnings;
+#use CGI::Carp 'fatalsToBrowser';
 
 require '/var/ipfire/general-functions.pl';
-require "${General::swroot}/geoip-functions.pl";
+require "${General::swroot}/location-functions.pl";
 require "${General::swroot}/lang.pl";
 require "${General::swroot}/header.pl";
 
@@ -36,10 +35,10 @@ my @dummy = ( ${Header::colouryellow} );
 undef (@dummy);
 
 my @bandwidth_limits = (
-	1000 * 1024, # 1G
+	1000 * 1024, # 1 GBit/s
 	 500 * 1024,
 	 200 * 1024,
-	 100 * 1024, # 100M
+	 100 * 1024, # 100 MBit/s
 	  64 * 1024,
 	  50 * 1024,
 	  25 * 1024,
@@ -49,10 +48,7 @@ my @bandwidth_limits = (
 	   8 * 1024,
 	   4 * 1024,
 	   2 * 1024,
-	       1024, # 1M
-	        512,
-	        256,
-	        160
+	       1024  # 1 MBit/s
 );
 my @accounting_periods = ('daily', 'weekly', 'monthly');
 
@@ -92,7 +88,7 @@ our %netsettings = ();
 our %color = ();
 our %mainsettings = ();
 &General::readhash("${General::swroot}/main/settings", \%mainsettings);
-&General::readhash("/srv/web/ipfire/html/themes/".$mainsettings{'THEME'}."/include/colors.txt", \%color);
+&General::readhash("/srv/web/ipfire/html/themes/ipfire/include/colors.txt", \%color);
 
 our %settings = ();
 
@@ -100,13 +96,15 @@ $settings{'TOR_ENABLED'} = 'off';
 $settings{'TOR_SOCKS_PORT'} = 9050;
 $settings{'TOR_EXIT_COUNTRY'} = '';
 $settings{'TOR_USE_EXIT_NODES'} = '';
+$settings{'TOR_GUARD_COUNTRY'} = '';
+$settings{'TOR_USE_GUARD_NODES'} = '';
 $settings{'TOR_ALLOWED_SUBNETS'} = "$netsettings{'GREEN_NETADDRESS'}\/$netsettings{'GREEN_NETMASK'}";
 if (&Header::blue_used()) {
 	$settings{'TOR_ALLOWED_SUBNETS'} .= ",$netsettings{'BLUE_NETADDRESS'}\/$netsettings{'BLUE_NETMASK'}";
 }
 
 $settings{'TOR_RELAY_ENABLED'} = 'off';
-$settings{'TOR_RELAY_MODE'} = 'exit';
+$settings{'TOR_RELAY_MODE'} = 'relay';
 $settings{'TOR_RELAY_ADDRESS'} = '';
 $settings{'TOR_RELAY_PORT'} = 9001;
 $settings{'TOR_RELAY_DIRPORT'} = 0;
@@ -182,6 +180,15 @@ if ($settings{'ACTION'} eq $Lang::tr{'save'}) {
 		}
 	}
 
+	@temp = split(/[\n,]/,$settings{'TOR_USE_GUARD_NODES'});
+	$settings{'TOR_USE_GUARD_NODES'} = "";
+	foreach (@temp) {
+		s/^\s+//g; s/\s+$//g;
+		if ($_) {
+			$settings{'TOR_USE_GUARD_NODES'} .= $_.",";
+		}
+	}
+
 	# Burst bandwidth must be less or equal to bandwidth rate.
 	if ($settings{'TOR_RELAY_BANDWIDTH_RATE'} == 0) {
 		$settings{'TOR_RELAY_BANDWIDTH_BURST'} = 0;
@@ -234,26 +241,11 @@ sub showMainBox() {
 
 	&Header::openbox('100%', 'center', $Lang::tr{'tor'});
 
-
-if ( ($memory != 0) && (@pid[0] ne "///") ){
-		print "<table width='95%' cellspacing='0' class='tbl'>";
-		print "<tr><th bgcolor='$color{'color20'}' colspan='3' align='left'><strong>$Lang::tr{'tor service'}</strong></th></tr>";
-		print "<tr><td class='base'>$Lang::tr{'tor daemon'}</td>";
-		print "<td align='center' colspan='2' width='75%' bgcolor='${Header::colourgreen}'><font color='white'><strong>$Lang::tr{'running'}</strong></font></td></tr>";
-		print "<tr><td class='base'></td>";
-		print "<td bgcolor='$color{'color20'}' align='center'><strong>PID</strong></td>";
-		print "<td bgcolor='$color{'color20'}' align='center'><strong>$Lang::tr{'memory'}</strong></td></tr>";
-		print "<tr><td class='base'></td>";
-		print "<td bgcolor='$color{'color22'}' align='center'>@pid[0]</td>";
-		print "<td bgcolor='$color{'color22'}' align='center'>$memory KB</td></tr>";
-		print "</table>";
-	} else {
-		print "<table width='95%' cellspacing='0' class='tbl'>";
-		print "<tr><th bgcolor='$color{'color20'}' colspan='3' align='left'><strong>$Lang::tr{'tor service'}</strong></th></tr>";
-		print "<tr><td class='base'>$Lang::tr{'tor daemon'}</td>";
-		print "<td align='center' width='75%' bgcolor='${Header::colourred}'><font color='white'><strong>$Lang::tr{'stopped'}</strong></font></td></tr>";
-		print "</table>";
-	}
+	&Header::ServiceStatus({
+		$Lang::tr{'tor service'} => {
+			"process" => "tor",
+		}
+	});
 
 	&Header::closebox();
 
@@ -285,6 +277,9 @@ END
 	@temp = split(",", $settings{'TOR_USE_EXIT_NODES'});
 	$settings{'TOR_USE_EXIT_NODES'} = join("\n", @temp);
 
+	@temp = split(",", $settings{'TOR_USE_GUARD_NODES'});
+	$settings{'TOR_USE_GUARD_NODES'} = join("\n", @temp);
+
 	print <<END;
 		<br>
 		<br>
@@ -307,8 +302,57 @@ END
 			</tr>
 		</table>
 
-		<br>
-		<br>
+		<br />
+		<br />
+
+		<table width='95%'>
+			<tr>
+				<td colspan='4' class='base' bgcolor='$color{'color20'}'><b>$Lang::tr{'tor guard nodes'}</b></td>
+			</tr>
+			<tr>
+				<td colspan='2' class='base' width='55%'></td>
+				<td colspan='2' class='base' width='45%'>$Lang::tr{'tor use guard nodes'}:</td>
+			</tr>
+			<tr>
+				<td width='50%' colspan='2'>
+					<select name='TOR_GUARD_COUNTRY' multiple='multiple'>
+						<option value=''>- $Lang::tr{'tor guard country any'} -</option>
+END
+
+		# Convert Guard country strings into lists to make comparison easier
+		my @guard_countries;
+		if ($settings{'TOR_GUARD_COUNTRY'} ne '') {
+			@guard_countries = split(/\|/, $settings{'TOR_GUARD_COUNTRY'});
+		}
+
+		my @country_codes = &Location::Functions::get_locations("no_special_locations");
+		foreach my $country_code (@country_codes) {
+			# Convert country code into upper case format.
+			$country_code = uc($country_code);
+
+			# Get country name.
+			my $country_name = &Location::Functions::get_full_country_name($country_code);
+
+			print "<option value='$country_code'";
+
+			if ($settings{'TOR_GUARD_COUNTRY'} ne '') {
+				print " selected" if grep /$country_code/, @guard_countries;
+			}
+
+			print ">$country_name ($country_code)</option>\n";
+		}
+
+	print <<END;
+					</select>
+				</td>
+				<td width='50%' colspan='2'>
+					<textarea name='TOR_USE_GUARD_NODES' cols='32' rows='3' wrap='off'>$settings{'TOR_USE_GUARD_NODES'}</textarea>
+				</td>
+			</tr>
+		</table>
+
+		<br />
+		<br />
 
 		<table width='95%'>
 			<tr>
@@ -320,18 +364,28 @@ END
 			</tr>
 			<tr>
 				<td width='50%' colspan='2'>
-					<select name='TOR_EXIT_COUNTRY'>
+					<select name='TOR_EXIT_COUNTRY' multiple='multiple'>
 						<option value=''>- $Lang::tr{'tor exit country any'} -</option>
 END
+		my @country_codes = &Location::Functions::get_locations("no_special_locations");
 
-		my @country_names = Locale::Codes::Country::all_country_names();
-		foreach my $country_name (sort @country_names) {
-			my $country_code = Locale::Codes::Country::country2code($country_name);
+		# Convert Exit country strings into lists to make comparison easier
+		my @exit_countries;
+		if ($settings{'TOR_EXIT_COUNTRY'} ne '') {
+			@exit_countries = split(/\|/, $settings{'TOR_EXIT_COUNTRY'});
+		}
+
+		foreach my $country_code (@country_codes) {
+			# Convert country code into upper case format.
 			$country_code = uc($country_code);
+
+			# Get country name.
+			my $country_name = &Location::Functions::get_full_country_name($country_code);
+
 			print "<option value='$country_code'";
 
-			if ($settings{'TOR_EXIT_COUNTRY'} eq $country_code) {
-				print " selected";
+			if ($settings{'TOR_EXIT_COUNTRY'} ne '') {
+				print " selected" if grep /$country_code/, @exit_countries;
 			}
 
 			print ">$country_name ($country_code)</option>\n";
@@ -432,9 +486,9 @@ END
 
 	foreach (@bandwidth_limits) {
 		if ($_ >= 1024) {
-			print "<option value='$_' $selected{'TOR_RELAY_BANDWIDTH_RATE'}{$_}>". $_ / 1024 ." MBit/s</option>\n";
+			print "<option value='$_' $selected{'TOR_RELAY_BANDWIDTH_RATE'}{$_}>". $_ / 1024 ." Mbit/s</option>\n";
 		} else {
-			print "<option value='$_' $selected{'TOR_RELAY_BANDWIDTH_RATE'}{$_}>$_ kBit/s</option>\n";
+			print "<option value='$_' $selected{'TOR_RELAY_BANDWIDTH_RATE'}{$_}>$_ kbit/s</option>\n";
 		}
 	}
 
@@ -455,9 +509,9 @@ END
 
 	foreach (@bandwidth_limits) {
 		if ($_ >= 1024) {
-			print "<option value='$_' $selected{'TOR_RELAY_BANDWIDTH_BURST'}{$_}>". $_ / 1024 ." MBit/s</option>\n";
+			print "<option value='$_' $selected{'TOR_RELAY_BANDWIDTH_BURST'}{$_}>". $_ / 1024 ." Mbit/s</option>\n";
 		} else {
-			print "<option value='$_' $selected{'TOR_RELAY_BANDWIDTH_BURST'}{$_}>$_ kBit/s</option>\n";
+			print "<option value='$_' $selected{'TOR_RELAY_BANDWIDTH_BURST'}{$_}>$_ kbit/s</option>\n";
 		}
 	}
 	print <<END;
@@ -519,7 +573,7 @@ END
 					<tr>
 						<td width='40%' class='base'>$Lang::tr{'tor relay fingerprint'}:</td>
 						<td width='60%'>
-							<a href='https://atlas.torproject.org/#details/$fingerprint' target='_blank'>$fingerprint</a>
+							<a href='https://metrics.torproject.org/rs.html#details/$fingerprint' target='_blank'>$fingerprint</a>
 						</td>
 					</tr>
 END
@@ -612,7 +666,7 @@ END
 				print <<END;
 					<tr>
 						<td width='40%'>
-							<a href='https://atlas.torproject.org/#details/$node->{'fingerprint'}' target='_blank'>
+							<a href='https://metrics.torproject.org/rs.html#details/$node->{'fingerprint'}' target='_blank'>
 								$node->{'name'}
 							</a>
 						</td>
@@ -621,7 +675,7 @@ END
 
 				if (exists($node->{'country_code'})) {
 					# Get the flag icon of the country.
-					my $flag_icon = &GeoIP::get_flag_icon($node->{'country_code'});
+					my $flag_icon = &Location::Functions::get_flag_icon($node->{'country_code'});
 
 					# Check if a flag for the given country is available.
 					if ($flag_icon) {
@@ -661,6 +715,9 @@ sub BuildConfiguration() {
 	open(FILE, ">$torrc");
 
 	# Global settings.
+	print FILE "Sandbox 1\n";
+	print FILE "HardwareAccel 1\n";
+	print FILE "ClientUseIPv6 0\n";
 	print FILE "ControlPort $TOR_CONTROL_PORT\n";
 
 	if ($settings{'TOR_ENABLED'} eq 'on') {
@@ -674,10 +731,43 @@ sub BuildConfiguration() {
 		}
 		print FILE "SocksPolicy reject *\n" if (@subnets);
 
-		if ($settings{'TOR_EXIT_COUNTRY'} ne '') {
+		if ($settings{'TOR_GUARD_COUNTRY'} ne '') {
+			$strict_nodes = 1;
+			my $countrylist;
+
+			for my $singlecountry (split(/\|/, $settings{'TOR_GUARD_COUNTRY'})) {
+				if ($countrylist eq '') {
+					$countrylist = "{" . lc $singlecountry . "}";
+				} else {
+					$countrylist = $countrylist . "," . "{" . lc $singlecountry . "}";
+				}
+			}
+
+			print FILE "EntryNodes $countrylist\n";
+		}
+
+		if ($settings{'TOR_USE_GUARD_NODES'} ne '') {
 			$strict_nodes = 1;
 
-			print FILE "ExitNodes {$settings{'TOR_EXIT_COUNTRY'}}\n";
+			my @nodes = split(",", $settings{'TOR_USE_GUARD_NODES'});
+			foreach (@nodes) {
+				print FILE "EntryNode $_\n";
+			}
+		}
+
+		if ($settings{'TOR_EXIT_COUNTRY'} ne '') {
+			$strict_nodes = 1;
+			my $countrylist;
+
+			for my $singlecountry (split(/\|/, $settings{'TOR_EXIT_COUNTRY'})) {
+				if ($countrylist eq '') {
+					$countrylist = "{" . lc $singlecountry . "}";
+				} else {
+					$countrylist = $countrylist . "," . "{" . lc $singlecountry . "}";
+				}
+			}
+
+			print FILE "ExitNodes $countrylist\n";
 		}
 
 		if ($settings{'TOR_USE_EXIT_NODES'} ne '') {
@@ -685,23 +775,25 @@ sub BuildConfiguration() {
 
 			my @nodes = split(",", $settings{'TOR_USE_EXIT_NODES'});
 			foreach (@nodes) {
-				print FILE "ExitNode $_\n";
+				print FILE "ExitNodes $_\n";
 			}
 		}
 
 		if ($strict_nodes > 0) {
 			print FILE "StrictNodes 1\n";
 		}
-	}
+	 } else {
+		print FILE "SocksPort 0\n";
+	 }
 
 	if ($settings{'TOR_RELAY_ENABLED'} eq 'on') {
 		# Reject access to private networks.
 		print FILE "ExitPolicyRejectPrivate 1\n";
 
-		print FILE "ORPort $settings{'TOR_RELAY_PORT'}\n";
+		print FILE "ORPort $settings{'TOR_RELAY_PORT'} IPv4Only\n";
 
 		if ($settings{'TOR_RELAY_DIRPORT'} ne '0') {
-			print FILE "DirPort $settings{'TOR_RELAY_DIRPORT'}\n";
+			print FILE "DirPort $settings{'TOR_RELAY_DIRPORT'} IPv4Only\n";
 		}
 
 		if ($settings{'TOR_RELAY_ADDRESS'} ne '') {
@@ -771,9 +863,9 @@ sub BuildConfiguration() {
 
 	# Restart the service.
 	if (($settings{'TOR_ENABLED'} eq 'on') || ($settings{'TOR_RELAY_ENABLED'} eq 'on')) {
-		system("/usr/local/bin/torctrl restart &>/dev/null");
+		&General::system("/usr/local/bin/torctrl", "restart");
 	} else {
-		system("/usr/local/bin/torctrl stop &>/dev/null");
+		&General::system("/usr/local/bin/torctrl", "stop");
 	}
 	# Update pid and memory
 	daemonstats();
@@ -910,7 +1002,7 @@ sub TorNodeDescription() {
 			$node->{'address'} = $3;
 			$node->{'port'}    = $4;
 
-			my $country_code = &TorGetInfo($tor, "ip-to-country/$node->{'address'}");
+			my $country_code = &Location::Functions::lookup_country_code($node->{'address'});
 			$node->{'country_code'} = $country_code;
 
 		# Flags
@@ -978,7 +1070,7 @@ sub FormatBytes() {
 sub FormatBitsPerSecond() {
 	my $bits = shift;
 
-	my @units = ("Bit/s", "KBit/s", "MBit/s", "GBit/s", "TBit/s");
+	my @units = ("bit/s", "kbit/s", "Mbit/s", "Gbit/s", "Tbit/s");
 	my $units_index = 0;
 
 	while (($units_index <= $#units) && ($bits >= 1024)) {

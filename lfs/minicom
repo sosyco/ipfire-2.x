@@ -1,7 +1,7 @@
 ###############################################################################
 #                                                                             #
 # IPFire.org - A linux based firewall                                         #
-# Copyright (C) 2009  Michael Tremer & Christian Schmidt                      #
+# Copyright (C) 2007-2023  IPFire Team  <info@ipfire.org>                     #
 #                                                                             #
 # This program is free software: you can redistribute it and/or modify        #
 # it under the terms of the GNU General Public License as published by        #
@@ -24,7 +24,9 @@
 
 include Config
 
-VER        = 2.4
+SUMMARY    = A Terminal Program
+
+VER        = 2.9
 
 THISAPP    = minicom-$(VER)
 DL_FILE    = $(THISAPP).tar.gz
@@ -32,9 +34,13 @@ DL_FROM    = $(URL_IPFIRE)
 DIR_APP    = $(DIR_SRC)/$(THISAPP)
 TARGET     = $(DIR_INFO)/$(THISAPP)
 PROG       = minicom
-PAK_VER    = 0
+PAK_VER    = 3
 
-DEPS       = ""
+DEPS       =
+
+SERVICES   =
+
+CFLAGS    += -fcommon
 
 ###############################################################################
 # Top-level Rules
@@ -44,7 +50,7 @@ objects = $(DL_FILE)
 
 $(DL_FILE) = $(DL_FROM)/$(DL_FILE)
 
-$(DL_FILE)_MD5 = 700976a3c2dcc8bbd50ab9bb1c08837b
+$(DL_FILE)_BLAKE2 = 4c17f235d770ff9b4719c0ce9d3dfdb01603986d08cec245b1bfba5addbea597032bb06fc73c585886e035915dec990f37e9690b58d0a80a3e6faf8675485f96
 
 install : $(TARGET)
 
@@ -52,13 +58,13 @@ check : $(patsubst %,$(DIR_CHK)/%,$(objects))
 
 download :$(patsubst %,$(DIR_DL)/%,$(objects))
 
-md5 : $(subst %,%_MD5,$(objects))
+b2 : $(subst %,%_BLAKE2,$(objects))
 
-dist: 
+dist:
 	@$(PAK)
 
 ###############################################################################
-# Downloading, checking, md5sum
+# Downloading, checking, b2sum
 ###############################################################################
 
 $(patsubst %,$(DIR_CHK)/%,$(objects)) :
@@ -67,8 +73,8 @@ $(patsubst %,$(DIR_CHK)/%,$(objects)) :
 $(patsubst %,$(DIR_DL)/%,$(objects)) :
 	@$(LOAD)
 
-$(subst %,%_MD5,$(objects)) :
-	@$(MD5)
+$(subst %,%_BLAKE2,$(objects)) :
+	@$(B2SUM)
 
 ###############################################################################
 # Installation Details
@@ -77,6 +83,7 @@ $(subst %,%_MD5,$(objects)) :
 $(TARGET) : $(patsubst %,$(DIR_DL)/%,$(objects))
 	@$(PREBUILD)
 	@rm -rf $(DIR_APP) && cd $(DIR_SRC) && tar zxf $(DIR_DL)/$(DL_FILE)
+	$(UPDATE_AUTOMAKE)
 	cd $(DIR_APP) && \
 		./configure \
 			--prefix=/usr

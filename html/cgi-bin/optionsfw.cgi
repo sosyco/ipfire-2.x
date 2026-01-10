@@ -1,16 +1,24 @@
 #!/usr/bin/perl
-#
-# SmoothWall CGIs
-#
-# This code is distributed under the terms of the GPL
-#
-# (c) The SmoothWall Team
-#
-# Copyright (C) 01-02-2002 Graham Smith <grhm@grhm.co.uk>
-#
-# $Id: optionsfw.cgi,v 1.1.2.10 2005/10/03 00:34:10 gespinasse Exp $
-#
-#
+###############################################################################
+#                                                                             #
+# IPFire.org - A linux based firewall                                         #
+# Copyright (C) 2007-2024  IPFire Team  <info@ipfire.org>                     #
+#                                                                             #
+# This program is free software: you can redistribute it and/or modify        #
+# it under the terms of the GNU General Public License as published by        #
+# the Free Software Foundation, either version 3 of the License, or           #
+# (at your option) any later version.                                         #
+#                                                                             #
+# This program is distributed in the hope that it will be useful,             #
+# but WITHOUT ANY WARRANTY; without even the implied warranty of              #
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the               #
+# GNU General Public License for more details.                                #
+#                                                                             #
+# You should have received a copy of the GNU General Public License           #
+# along with this program.  If not, see <http://www.gnu.org/licenses/>.       #
+#                                                                             #
+###############################################################################
+
 # enable only the following on debugging purpose
 #use warnings;
 #use CGI::Carp 'fatalsToBrowser';
@@ -41,7 +49,7 @@ if ($settings{'ACTION'} eq $Lang::tr{'save'}) {
 	if ($settings{'defpol'} ne '1'){
 		$errormessage .= $Lang::tr{'new optionsfw later'};
 		&General::writehash($filename, \%settings);             # Save good settings
-		system("/usr/local/bin/firewallctrl");
+		&General::system("/usr/local/bin/firewallctrl");
 	}else{
 		if ($settings{'POLICY'} ne ''){
 			$fwdfwsettings{'POLICY'} = $settings{'POLICY'};
@@ -56,7 +64,7 @@ if ($settings{'ACTION'} eq $Lang::tr{'save'}) {
 		$fwdfwsettings{'POLICY1'} = "$MODE1";
 		&General::writehash("${General::swroot}/firewall/settings", \%fwdfwsettings);
 		&General::readhash("${General::swroot}/firewall/settings", \%fwdfwsettings);
-		system("/usr/local/bin/firewallctrl");
+		&General::system("/usr/local/bin/firewallctrl");
 	}
 	&General::readhash($filename, \%settings);             # Load good settings
 }
@@ -80,6 +88,21 @@ if (!$settings{'MASQUERADE_ORANGE'}) {
 if (!$settings{'MASQUERADE_BLUE'}) {
 	$settings{'MASQUERADE_BLUE'} = 'on';
 }
+if (!$settings{'DROPSPOOFEDMARTIAN'}) {
+	$settings{'DROPSPOOFEDMARTIAN'} = 'on';
+}
+if (!$settings{'DROPHOSTILE'}) {
+	$settings{'DROPHOSTILE'} = 'off';
+}
+if (!$settings{'LOGDROPHOSTILEIN'}) {
+	$settings{'LOGDROPHOSTILEIN'} = 'on';
+}
+if (!$settings{'LOGDROPHOSTILEOUT'}) {
+	$settings{'LOGDROPHOSTILEOUT'} = 'on';
+}
+if (!$settings{'LOGDROPCTINVALID'}) {
+	$settings{'LOGDROPCTINVALID'} = 'on';
+}
 
 $checked{'DROPNEWNOTSYN'}{'off'} = '';
 $checked{'DROPNEWNOTSYN'}{'on'} = '';
@@ -102,6 +125,21 @@ $checked{'DROPWIRELESSINPUT'}{$settings{'DROPWIRELESSINPUT'}} = "checked='checke
 $checked{'DROPWIRELESSFORWARD'}{'off'} = '';
 $checked{'DROPWIRELESSFORWARD'}{'on'} = '';
 $checked{'DROPWIRELESSFORWARD'}{$settings{'DROPWIRELESSFORWARD'}} = "checked='checked'";
+$checked{'DROPSPOOFEDMARTIAN'}{'off'} = '';
+$checked{'DROPSPOOFEDMARTIAN'}{'on'} = '';
+$checked{'DROPSPOOFEDMARTIAN'}{$settings{'DROPSPOOFEDMARTIAN'}} = "checked='checked'";
+$checked{'DROPHOSTILE'}{'off'} = '';
+$checked{'DROPHOSTILE'}{'on'} = '';
+$checked{'DROPHOSTILE'}{$settings{'DROPHOSTILE'}} = "checked='checked'";
+$checked{'LOGDROPHOSTILEIN'}{'off'} = '';
+$checked{'LOGDROPHOSTILEIN'}{'on'} = '';
+$checked{'LOGDROPHOSTILEIN'}{$settings{'LOGDROPHOSTILEIN'}} = "checked='checked'";
+$checked{'LOGDROPHOSTILEOUT'}{'off'} = '';
+$checked{'LOGDROPHOSTILEOUT'}{'on'} = '';
+$checked{'LOGDROPHOSTILEOUT'}{$settings{'LOGDROPHOSTILEOUT'}} = "checked='checked'";
+$checked{'LOGDROPCTINVALID'}{'off'} = '';
+$checked{'LOGDROPCTINVALID'}{'on'} = '';
+$checked{'LOGDROPCTINVALID'}{$settings{'LOGDROPCTINVALID'}} = "checked='checked'";
 $checked{'DROPPROXY'}{'off'} = '';
 $checked{'DROPPROXY'}{'on'} = '';
 $checked{'DROPPROXY'}{$settings{'DROPPROXY'}} = "checked='checked'";
@@ -187,43 +225,124 @@ END
 	<br>
 
 <table width='95%' cellspacing='0'>
-<tr bgcolor='$color{'color20'}'><td colspan='2' align='left'><b>$Lang::tr{'fw logging'}</b></td></tr>
-<tr><td align='left' width='60%'>$Lang::tr{'drop newnotsyn'}</td><td align='left'>on <input type='radio' name='DROPNEWNOTSYN' value='on' $checked{'DROPNEWNOTSYN'}{'on'} />/
-																						<input type='radio' name='DROPNEWNOTSYN' value='off' $checked{'DROPNEWNOTSYN'}{'off'} /> off</td></tr>
-<tr><td align='left' width='60%'>$Lang::tr{'drop input'}</td><td align='left'>on <input type='radio' name='DROPINPUT' value='on' $checked{'DROPINPUT'}{'on'} />/
-																						<input type='radio' name='DROPINPUT' value='off' $checked{'DROPINPUT'}{'off'} /> off</td></tr>
-<tr><td align='left' width='60%'>$Lang::tr{'drop forward'}</td><td align='left'>on <input type='radio' name='DROPFORWARD' value='on' $checked{'DROPFORWARD'}{'on'} />/
-																						<input type='radio' name='DROPFORWARD' value='off' $checked{'DROPFORWARD'}{'off'} /> off</td></tr>
-<tr><td align='left' width='60%'>$Lang::tr{'drop outgoing'}</td><td align='left'>on <input type='radio' name='DROPOUTGOING' value='on' $checked{'DROPOUTGOING'}{'on'} />/
-																						<input type='radio' name='DROPOUTGOING' value='off' $checked{'DROPOUTGOING'}{'off'} /> off</td></tr>																						
-<tr><td align='left' width='60%'>$Lang::tr{'drop portscan'}</td><td align='left'>on <input type='radio' name='DROPPORTSCAN' value='on' $checked{'DROPPORTSCAN'}{'on'} />/
-																						<input type='radio' name='DROPPORTSCAN' value='off' $checked{'DROPPORTSCAN'}{'off'} /> off</td></tr>
-<tr><td align='left' width='60%'>$Lang::tr{'drop wirelessinput'}</td><td align='left'>on <input type='radio' name='DROPWIRELESSINPUT' value='on' $checked{'DROPWIRELESSINPUT'}{'on'} />/
-																						<input type='radio' name='DROPWIRELESSINPUT' value='off' $checked{'DROPWIRELESSINPUT'}{'off'} /> off</td></tr>
-<tr><td align='left' width='60%'>$Lang::tr{'drop wirelessforward'}</td><td align='left'>on <input type='radio' name='DROPWIRELESSFORWARD' value='on' $checked{'DROPWIRELESSFORWARD'}{'on'} />/
-																						<input type='radio' name='DROPWIRELESSFORWARD' value='off' $checked{'DROPWIRELESSFORWARD'}{'off'} /> off</td></tr>
+	<tr bgcolor='$color{'color20'}'>
+		<td colspan='2' align='left'><b>$Lang::tr{'fw red'}</b></td>
+	</tr>
+	<tr>
+		<td align='left' width='60%'>$Lang::tr{'drop hostile'}</td>
+		<td align='left'>
+			$Lang::tr{'on'} <input type='radio' name='DROPHOSTILE' value='on' $checked{'DROPHOSTILE'}{'on'} />/
+			<input type='radio' name='DROPHOSTILE' value='off' $checked{'DROPHOSTILE'}{'off'} /> $Lang::tr{'off'}
+		</td>
+	</tr>
+</table>
+<br>
+
+<table width='95%' cellspacing='0'>
+<tr bgcolor='$color{'color20'}'><td colspan='2' align='left'><b>$Lang::tr{'fw blue'}</b></td></tr>
+<tr><td align='left' width='60%'>$Lang::tr{'drop proxy'}</td><td align='left'>$Lang::tr{'on'} <input type='radio' name='DROPPROXY' value='on' $checked{'DROPPROXY'}{'on'} />/
+																						<input type='radio' name='DROPPROXY' value='off' $checked{'DROPPROXY'}{'off'} /> $Lang::tr{'off'}</td></tr>
+<tr><td align='left' width='60%'>$Lang::tr{'drop samba'}</td><td align='left'>$Lang::tr{'on'} <input type='radio' name='DROPSAMBA' value='on' $checked{'DROPSAMBA'}{'on'} />/
+																						<input type='radio' name='DROPSAMBA' value='off' $checked{'DROPSAMBA'}{'off'} /> $Lang::tr{'off'}</td></tr>
+</table>
+<br>
+
+<table width='95%' cellspacing='0'>
+	<tr bgcolor='$color{'color20'}'>
+		<td colspan='2' align='left'><b>$Lang::tr{'fw logging'}</b></td>
+	</tr>
+	<tr>
+		<td align='left' width='60%'>$Lang::tr{'drop newnotsyn'}</td>
+		<td align='left'>
+			$Lang::tr{'on'} <input type='radio' name='DROPNEWNOTSYN' value='on' $checked{'DROPNEWNOTSYN'}{'on'} />/
+			<input type='radio' name='DROPNEWNOTSYN' value='off' $checked{'DROPNEWNOTSYN'}{'off'} /> $Lang::tr{'off'}
+		</td>
+	</tr>
+	<tr>
+		<td align='left' width='60%'>$Lang::tr{'log dropped conntrack invalids'}</td>
+		<td align='left'>
+			$Lang::tr{'on'} <input type='radio' name='LOGDROPCTINVALID' value='on' $checked{'LOGDROPCTINVALID'}{'on'} />/
+			<input type='radio' name='LOGDROPCTINVALID' value='off' $checked{'LOGDROPCTINVALID'}{'off'} /> $Lang::tr{'off'}
+		</td>
+	</tr>
+	<tr>
+		<td align='left' width='60%'>$Lang::tr{'drop input'}</td>
+		<td align='left'>
+			$Lang::tr{'on'} <input type='radio' name='DROPINPUT' value='on' $checked{'DROPINPUT'}{'on'} />/
+			<input type='radio' name='DROPINPUT' value='off' $checked{'DROPINPUT'}{'off'} /> $Lang::tr{'off'}
+		</td>
+	</tr>
+	<tr>
+		<td align='left' width='60%'>$Lang::tr{'drop forward'}</td>
+		<td align='left'>
+			$Lang::tr{'on'} <input type='radio' name='DROPFORWARD' value='on' $checked{'DROPFORWARD'}{'on'} />/
+			<input type='radio' name='DROPFORWARD' value='off' $checked{'DROPFORWARD'}{'off'} /> $Lang::tr{'off'}
+		</td>
+	</tr>
+	<tr>
+		<td align='left' width='60%'>$Lang::tr{'drop outgoing'}</td>
+		<td align='left'>
+			$Lang::tr{'on'} <input type='radio' name='DROPOUTGOING' value='on' $checked{'DROPOUTGOING'}{'on'} />/
+			<input type='radio' name='DROPOUTGOING' value='off' $checked{'DROPOUTGOING'}{'off'} /> $Lang::tr{'off'}
+		</td>
+	</tr>
+	<tr>
+		<td align='left' width='60%'>$Lang::tr{'drop portscan'}</td>
+		<td align='left'>
+			$Lang::tr{'on'} <input type='radio' name='DROPPORTSCAN' value='on' $checked{'DROPPORTSCAN'}{'on'} />/
+			<input type='radio' name='DROPPORTSCAN' value='off' $checked{'DROPPORTSCAN'}{'off'} /> $Lang::tr{'off'}
+		</td>
+	</tr>
+	<tr>
+		<td align='left' width='60%'>$Lang::tr{'drop wirelessinput'}</td>
+		<td align='left'>
+			$Lang::tr{'on'} <input type='radio' name='DROPWIRELESSINPUT' value='on' $checked{'DROPWIRELESSINPUT'}{'on'} />/
+			<input type='radio' name='DROPWIRELESSINPUT' value='off' $checked{'DROPWIRELESSINPUT'}{'off'} /> $Lang::tr{'off'}
+		</td>
+	</tr>
+	<tr>
+		<td align='left' width='60%'>$Lang::tr{'drop wirelessforward'}</td>
+		<td align='left'>
+			$Lang::tr{'on'} <input type='radio' name='DROPWIRELESSFORWARD' value='on' $checked{'DROPWIRELESSFORWARD'}{'on'} />/
+			<input type='radio' name='DROPWIRELESSFORWARD' value='off' $checked{'DROPWIRELESSFORWARD'}{'off'} /> $Lang::tr{'off'}
+		</td>
+	</tr>
+	<tr>
+		<td align='left' width='60%'>$Lang::tr{'drop spoofed martians'}</td>
+		<td align='left'>
+			$Lang::tr{'on'} <input type='radio' name='DROPSPOOFEDMARTIAN' value='on' $checked{'DROPSPOOFEDMARTIAN'}{'on'} />/
+			<input type='radio' name='DROPSPOOFEDMARTIAN' value='off' $checked{'DROPSPOOFEDMARTIAN'}{'off'} /> $Lang::tr{'off'}
+		</td>
+	</tr>
+	<tr>
+		<td align='left' width='60%'>$Lang::tr{'log drop hostile in'}</td>
+		<td align='left'>
+			$Lang::tr{'on'} <input type='radio' name='LOGDROPHOSTILEIN' value='on' $checked{'LOGDROPHOSTILEIN'}{'on'} />/
+			<input type='radio' name='LOGDROPHOSTILEIN' value='off' $checked{'LOGDROPHOSTILEIN'}{'off'} /> $Lang::tr{'off'}
+		</td>
+	</tr>
+	<tr>
+		<td align='left' width='60%'>$Lang::tr{'log drop hostile out'}</td>
+		<td align='left'>
+			$Lang::tr{'on'} <input type='radio' name='LOGDROPHOSTILEOUT' value='on' $checked{'LOGDROPHOSTILEOUT'}{'on'} />/
+			<input type='radio' name='LOGDROPHOSTILEOUT' value='off' $checked{'LOGDROPHOSTILEOUT'}{'off'} /> $Lang::tr{'off'}
+		</td>
+	</tr>
 </table>
 <br/>
 
 <table width='95%' cellspacing='0'>
-<tr bgcolor='$color{'color20'}'><td colspan='2' align='left'><b>$Lang::tr{'fw blue'}</b></td></tr>
-<tr><td align='left' width='60%'>$Lang::tr{'drop proxy'}</td><td align='left'>on <input type='radio' name='DROPPROXY' value='on' $checked{'DROPPROXY'}{'on'} />/
-																						<input type='radio' name='DROPPROXY' value='off' $checked{'DROPPROXY'}{'off'} /> off</td></tr>
-<tr><td align='left' width='60%'>$Lang::tr{'drop samba'}</td><td align='left'>on <input type='radio' name='DROPSAMBA' value='on' $checked{'DROPSAMBA'}{'on'} />/
-																						<input type='radio' name='DROPSAMBA' value='off' $checked{'DROPSAMBA'}{'off'} /> off</td></tr>
-</table>
-<br>
-<table width='95%' cellspacing='0'>
 <tr bgcolor='$color{'color20'}'><td colspan='2' align='left'><b>$Lang::tr{'fw settings'}</b></td></tr>
-<tr><td align='left' width='60%'>$Lang::tr{'fw settings color'}</td><td align='left'>on <input type='radio' name='SHOWCOLORS' value='on' $checked{'SHOWCOLORS'}{'on'} />/
-																						<input type='radio' name='SHOWCOLORS' value='off' $checked{'SHOWCOLORS'}{'off'} /> off</td></tr>
-<tr><td align='left' width='60%'>$Lang::tr{'fw settings remark'}</td><td align='left'>on <input type='radio' name='SHOWREMARK' value='on' $checked{'SHOWREMARK'}{'on'} />/
-																						<input type='radio' name='SHOWREMARK' value='off' $checked{'SHOWREMARK'}{'off'} /> off</td></tr>		
-<tr><td align='left' width='60%'>$Lang::tr{'fw settings ruletable'}</td><td align='left'>on <input type='radio' name='SHOWTABLES' value='on' $checked{'SHOWTABLES'}{'on'} />/
-																						<input type='radio' name='SHOWTABLES' value='off' $checked{'SHOWTABLES'}{'off'} /> off</td></tr>
-<tr><td align='left' width='60%'>$Lang::tr{'fw settings dropdown'}</td><td align='left'>on <input type='radio' name='SHOWDROPDOWN' value='on' $checked{'SHOWDROPDOWN'}{'on'} />/
-																						<input type='radio' name='SHOWDROPDOWN' value='off' $checked{'SHOWDROPDOWN'}{'off'} /> off</td></tr>																																																												
-</table>																						
+<tr><td align='left' width='60%'>$Lang::tr{'fw settings color'}</td><td align='left'>$Lang::tr{'on'} <input type='radio' name='SHOWCOLORS' value='on' $checked{'SHOWCOLORS'}{'on'} />/
+																						<input type='radio' name='SHOWCOLORS' value='off' $checked{'SHOWCOLORS'}{'off'} /> $Lang::tr{'off'}</td></tr>
+<tr><td align='left' width='60%'>$Lang::tr{'fw settings remark'}</td><td align='left'>$Lang::tr{'on'} <input type='radio' name='SHOWREMARK' value='on' $checked{'SHOWREMARK'}{'on'} />/
+																						<input type='radio' name='SHOWREMARK' value='off' $checked{'SHOWREMARK'}{'off'} /> $Lang::tr{'off'}</td></tr>
+<tr><td align='left' width='60%'>$Lang::tr{'fw settings ruletable'}</td><td align='left'>$Lang::tr{'on'} <input type='radio' name='SHOWTABLES' value='on' $checked{'SHOWTABLES'}{'on'} />/
+																						<input type='radio' name='SHOWTABLES' value='off' $checked{'SHOWTABLES'}{'off'} /> $Lang::tr{'off'}</td></tr>
+<tr><td align='left' width='60%'>$Lang::tr{'fw settings dropdown'}</td><td align='left'>$Lang::tr{'on'} <input type='radio' name='SHOWDROPDOWN' value='on' $checked{'SHOWDROPDOWN'}{'on'} />/
+																						<input type='radio' name='SHOWDROPDOWN' value='off' $checked{'SHOWDROPDOWN'}{'off'} /> $Lang::tr{'off'}</td></tr>
+</table>
+
 <br />
 <table width='95%' cellspacing='0'>
 <tr bgcolor='$color{'color20'}'><td colspan='2' align='left'><b>$Lang::tr{'fw default drop'}</b></td></tr>
@@ -244,7 +363,7 @@ END
 <br />
 <table width='100%' cellspacing='0'>
 <tr><td align='right'><form method='post' action='$ENV{'SCRIPT_NAME'}'>
-<input type='submit' name='ACTION' value=$Lang::tr{'save'} />
+<input type='submit' name='ACTION' value='$Lang::tr{'save'}' />
 </form></td></tr>
 </table>
 </form>
@@ -266,7 +385,7 @@ print <<END;
 		<tr><td width='15%' align='left'>	<select name='POLICY' style="width: 100px">
 		<option value='MODE1' $selected{'POLICY'}{'MODE1'}>$Lang::tr{'fwdfw pol block'}</option>
 		<option value='MODE2' $selected{'POLICY'}{'MODE2'}>$Lang::tr{'fwdfw pol allow'}</option></select>
-	    <input type='submit' name='ACTION' value=$Lang::tr{'save'} /><input type='hidden' name='defpol' value='1'></td>
+	    <input type='submit' name='ACTION' value='$Lang::tr{'save'}' /><input type='hidden' name='defpol' value='1'></td>
 END
 	print "</tr></table></form>";
 	print"<br><br>";

@@ -1,0 +1,91 @@
+# Assign manual page URL path to CGI file ([cgi file]=[path/to/page])
+# The CGI files are referenced relative to the "/cgi-bin/" path
+
+# Fixed base URL (without trailing slash)
+BASE_URL=https://www.ipfire.org/docs
+
+#	System menu
+index.cgi=configuration/system/startpage
+mail.cgi=configuration/system/mail_service
+remote.cgi=configuration/system/ssh
+backup.cgi=configuration/system/backup
+gui.cgi=configuration/system/userinterface
+fireinfo.cgi=fireinfo
+vulnerabilities.cgi=configuration/system/vulnerabilities
+shutdown.cgi=configuration/system/shutdown
+credits.cgi=configuration/system/credits
+
+#	Status menu
+system.cgi=configuration/status/system
+memory.cgi=configuration/status/memory
+services.cgi=configuration/status/services
+media.cgi=configuration/status/drives
+netexternal.cgi=configuration/status/network_ext
+netinternal.cgi=configuration/status/network_int
+netother.cgi=configuration/status/network_other
+netovpnrw.cgi=configuration/status/network_ovpnrw
+netovpnsrv.cgi=configuration/status/network_ovpnn2n
+wio.cgi=addons/wio
+hardwaregraphs.cgi=configuration/status/hardware_diagrams
+connections.cgi=configuration/status/connections
+traffic.cgi=configuration/status/nettraffic
+mdstat.cgi=configuration/status/mdstat
+
+#	Network menu
+zoneconf.cgi=configuration/network/zoneconf
+dns.cgi=configuration/network/dns-server
+proxy.cgi=configuration/network/proxy
+urlfilter.cgi=configuration/network/proxy/url-filter
+updatexlrator.cgi=configuration/network/proxy/update_accelerator
+dhcp.cgi=configuration/network/dhcp
+lldp.cgi=configuration/network/lldp
+captive.cgi=configuration/network/captive
+connscheduler.cgi=configuration/network/connectionscheduler
+hosts.cgi=configuration/network/hosts
+dnsforward.cgi=configuration/network/dnsforward
+routing.cgi=configuration/network/static
+mac.cgi=configuration/network/mac-address
+wakeonlan.cgi=configuration/network/wake-on-lan
+aliases.cgi=configuration/network/aliases
+
+#	Services menu
+vpnmain.cgi=configuration/services/ipsec
+wireguard.cgi=configuration/services/wireguard
+ovpnmain.cgi=configuration/services/openvpn
+ddns.cgi=configuration/services/dyndns
+time.cgi=configuration/services/ntp
+qos.cgi=configuration/services/qos
+guardian.cgi=addons/guardian
+extrahd.cgi=configuration/services/extrahd
+
+#	Firewall menu
+firewall.cgi=configuration/firewall
+fwhosts.cgi=configuration/firewall/fwgroups
+optionsfw.cgi=configuration/firewall/options
+ids.cgi=configuration/firewall/ips
+ipblocklist.cgi=configuration/firewall/ipblocklist
+location-block.cgi=configuration/firewall/geoip-block
+wireless.cgi=configuration/firewall/accesstoblue
+iptables.cgi=configuration/firewall/iptables
+
+#	IPfire menu
+pakfire.cgi=configuration/ipfire/pakfire
+wlanap.cgi=addons/wireless
+tor.cgi=addons/tor
+samba.cgi=addons/samba
+
+#	Logs menu
+logs.cgi/summary.dat=configuration/logs/summary
+logs.cgi/config.dat=configuration/logs/logsettings
+logs.cgi/proxylog.dat=configuration/logs/proxy
+logs.cgi/calamaris.dat=configuration/logs/proxyreports
+accounting.cgi=addons/accounting
+logs.cgi/firewalllog.dat=configuration/logs/firewall
+logs.cgi/firewalllogip.dat=configuration/logs/firewall-ip
+logs.cgi/firewalllogport.dat=configuration/logs/firewall-port
+logs.cgi/firewalllogcountry.dat=configuration/logs/firewall-country
+logs.cgi/ids.dat=configuration/logs/ips
+logs.cgi/ipblocklists.dat=configuration/firewall/ipblocklist
+logs.cgi/ovpnclients.dat=configuration/logs/ovpnrw
+logs.cgi/urlfilter.dat=configuration/logs/url-filter
+logs.cgi/log.dat=configuration/logs/system

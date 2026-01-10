@@ -1,9 +1,8 @@
 #!/usr/bin/perl
-
 ###############################################################################
 #                                                                             #
 # IPFire.org - A linux based firewall                                         #
-# Copyright (C) 2008-2013  IPFire Team  <info@ipfire.org>                     #
+# Copyright (C) 2007-2022  IPFire Team  <info@ipfire.org>                     #
 #                                                                             #
 # This program is free software: you can redistribute it and/or modify        #
 # it under the terms of the GNU General Public License as published by        #
@@ -36,7 +35,7 @@ my $path_smartctl = "/usr/sbin/smartctl";
 my %color = ();
 my %mainsettings = ();
 &General::readhash("${General::swroot}/main/settings", \%mainsettings);
-&General::readhash("/srv/web/ipfire/html/themes/".$mainsettings{'THEME'}."/include/colors.txt", \%color);
+&General::readhash("/srv/web/ipfire/html/themes/ipfire/include/colors.txt", \%color);
 
 if ( $mainsettings{'RRDLOG'} eq "" ){
 	$mainsettings{'RRDLOG'}="/var/log/rrd";
@@ -85,10 +84,17 @@ sub updatehdddata{
 		my $smart_output = '';
 		system("$path_smartctl -iHA /dev/$disk > /var/run/smartctl_out_hddtemp-$disk");
 		if ( -e "/var/run/smartctl_out_hddtemp-".$array[$#array] ){
-			my $hdd_output = `cat /var/run/smartctl_out_hddtemp-$array[$#array] | grep Temperature_`;
-			my @t = split(/\s+/,$hdd_output);
-			$temp = $t[9];
-		}else{$temp = 0;}
+			my $hdd_nvme = `grep "NVMe Log" /var/run/smartctl_out_hddtemp-$array[$#array]`;
+			if ( $hdd_nvme !~/NVMe Log/ ) {
+				my $hdd_output = `cat /var/run/smartctl_out_hddtemp-$array[$#array] | grep Temperature_`;
+				my @t = split(/\s+/,$hdd_output);
+				$temp = $t[9];
+			} else {
+				my $hdd_output = `cat /var/run/smartctl_out_hddtemp-$array[$#array] | grep Temperature:`;
+				my @t = split(/\s+/,$hdd_output);
+				$temp = $t[1];
+			}
+		} else { $temp = 0; }
 		print "Temperature for ".$array[$#array]."->".$temp."<-\n";
 		# Nur ins RDD wenn nicht 0 (sonst klappt die min Anzeige nicht)
 		if ($temp){
@@ -99,10 +105,7 @@ sub updatehdddata{
 	}
 }
 
-## Update vnstat
-system ('/usr/bin/vnstat -u');
-
-my @disks = `ls -1 /sys/block | grep -E '^sd|^mmcblk|^xvd|^vd|^md' | sort | uniq`;
+my @disks = `ls -1 /sys/block | grep -E '^sd|^nvme|^mmcblk|^xvd|^vd|^md' | sort | uniq`;
 system("unlink /var/run/hddstatus 2>/dev/null && touch /var/run/hddstatus");
 foreach (@disks){
 	my $disk = $_;
@@ -116,7 +119,7 @@ foreach (@disks){
 
 	$diskstats = `cat /var/run/hddstats-$array[$#array] 2>/dev/null`;
 	chomp $diskstats;
-	my $newdiskstats = `/usr/bin/iostat -d -t $disk | tail -2 | head -1 | awk '{ print \$5","\$6}'`;
+	my $newdiskstats = `/usr/bin/iostat -d -t $disk | tail -3 | head -1 | awk '{ print \$6","\$7}'`;
 	chomp $newdiskstats;
 	my $status = `hdparm -C /dev/$disk | tail -1 | cut -d: -f2`;
 	chomp $status;
@@ -133,4 +136,13 @@ foreach (@disks){
 	close(DATEI);
 
 	updatehdddata($disk);
+
+	if ( $diskstats eq $newdiskstats ) {
+		# update diskstat because read temp change the status
+		my $newdiskstats = `/usr/bin/iostat -d -t $disk | tail -3 | head -1 | awk '{ print \$6","\$7}'`;
+		chomp $newdiskstats;
+		open(DATEI, ">/var/run/hddstats-$array[$#array]") || die "Datei nicht gefunden";
+		print DATEI $newdiskstats;
+		close(DATEI);
+	}
 }

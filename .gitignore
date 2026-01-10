@@ -1,14 +1,23 @@
-.config
+/.DS_Store
+/.config
 /build
+/build_*
 /cache
 /ccache
-/doc/ChangeLog
-/doc/packages-list.txt
+/images_*
 /log
+/log_*
 /packages
 /tmp
 /*.diff
+._*
 *.img.gz
+*.img.xz
 *.iso
 *.tar.bz2
 /*.md5
+/*.b2
+
+# These files have been removed but could still be around in older environments
+/doc/ChangeLog
+/doc/packages-list.txt

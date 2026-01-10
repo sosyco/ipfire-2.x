@@ -23,11 +23,12 @@
 #include <libintl.h>
 #define _(x) dgettext("installer", x)
 
-#define INST_FILECOUNT 21000
-#define LICENSE_FILE	"/cdrom/COPYING"
+#define INST_FILECOUNT 30000
 #define SOURCE_TEMPFILE "/tmp/downloads/image.iso"
 
 extern char url[STRING_SIZE];
+
+FILE* flog = NULL;
 
 static int newtChecklist(const char* title, const char* message,
 		unsigned int width, unsigned int height, unsigned int num_entries,
@@ -160,42 +161,12 @@ static int newtWinOkCancel(const char* title, const char* message, int width, in
 	return ret;
 }
 
-static int newtLicenseBox(const char* title, const char* text, int width, int height) {
-	int ret = 1;
-
-	newtCenteredWindow(width, height, title);
-
-	newtComponent form = newtForm(NULL, NULL, 0);
-
-	newtComponent textbox = newtTextbox(1, 1, width - 2, height - 7,
-		NEWT_FLAG_WRAP|NEWT_FLAG_SCROLL);
-	newtTextboxSetText(textbox, text);
-	newtFormAddComponent(form, textbox);
-
-	char choice;
-	newtComponent checkbox = newtCheckbox(3, height - 3, _("I accept this license"),
-		' ', " *", &choice);
-
-	newtComponent btn = newtButton(width - 15, height - 4, _("OK"));
-
-	newtFormAddComponents(form, checkbox, btn, NULL);
-
-	newtComponent answer = newtRunForm(form);
-	if (answer == btn && choice == '*')
-		ret = 0;
-
-	newtFormDestroy(form);
-	newtPopWindow();
-
-	return ret;
-}
-
-int write_lang_configs(char* lang) {
+int write_lang_configs(const char* lang) {
 	struct keyvalue *kv = initkeyvalues();
 
 	/* default stuff for main/settings. */
-	replacekeyvalue(kv, "LANGUAGE", lang);
-	replacekeyvalue(kv, "HOSTNAME", SNAME);
+	replacekeyvalue(kv, "LANGUAGE", (char*)lang);
+	replacekeyvalue(kv, "HOSTNAME", DISTRO_SNAME);
 	replacekeyvalue(kv, "THEME", "ipfire");
 	writekeyvalues(kv, "/harddisk" CONFIG_ROOT "/main/settings");
 	freekeyvalues(kv);
@@ -245,26 +216,26 @@ static char* center_string(const char* str, int width) {
 	return string;
 }
 
-#define DEFAULT_LANG "en.utf8"
+#define DEFAULT_LANG "en_US.utf8"
 #define NUM_LANGS 13
 
 static struct lang {
 	const char* code;
 	char* name;
 } languages[NUM_LANGS + 1] = {
-	{ "fa.utf8",    "فارسی (Persian)" },
-	{ "da.utf8",    "Dansk (Danish)" },
-	{ "es.utf8",    "Español (Spanish)" },
-	{ "en.utf8",    "English" },
-	{ "fr.utf8",    "Français (French)" },
-	{ "hr.utf8",    "Hrvatski (Croatian)" },
-	{ "it.utf8",    "Italiano (Italian)" },
-	{ "de.utf8",    "Deutsch (German)" },
-	{ "nl.utf8",    "Nederlands (Dutch)" },
-	{ "pl.utf8",    "Polski (Polish)" },
-	{ "pt.utf8",    "Portuguese (Brasil)" },
-	{ "ru.utf8",    "Русский (Russian)" },
-	{ "tr.utf8",    "Türkçe (Turkish)" },
+	{ "da_DK.utf8", "Dansk (Danish)" },
+	{ "de_DE.utf8", "Deutsch (German)" },
+	{ "en_US.utf8", "English" },
+	{ "es_ES.utf8", "Español (Spanish)" },
+	{ "fa_IR.utf8", "فارسی (Persian)" },
+	{ "fr_FR.utf8", "Français (French)" },
+	{ "hr_HR.utf8", "Hrvatski (Croatian)" },
+	{ "it_IT.utf8", "Italiano (Italian)" },
+	{ "nl_NL.utf8", "Nederlands (Dutch)" },
+	{ "pl_PL.utf8", "Polski (Polish)" },
+	{ "pt_PT.utf8", "Portuguese (Brasil)" },
+	{ "ru_RU.utf8", "Русский (Russian)" },
+	{ "tr_TR.utf8", "Türkçe (Turkish)" },
 	{ NULL, NULL },
 };
 
@@ -277,7 +248,7 @@ static struct config {
 	int disable_swap;
 	char download_url[STRING_SIZE];
 	char postinstall[STRING_SIZE];
-	char* language;
+	const char* language;
 } config = {
 	.unattended = 0,
 	.serial_console = 0,
@@ -290,20 +261,26 @@ static struct config {
 	.language = DEFAULT_LANG,
 };
 
-static void parse_command_line(struct config* c) {
+static void parse_command_line(FILE* flog, struct config* c) {
 	char buffer[STRING_SIZE];
 	char cmdline[STRING_SIZE];
 
 	FILE* f = fopen("/proc/cmdline", "r");
-	if (!f)
+	if (!f) {
+		fprintf(flog, "Could not open /proc/cmdline: %m");
 		return;
+	}
 
 	int r = fread(&cmdline, 1, sizeof(cmdline) - 1, f);
 	if (r > 0) {
-		char* token = strtok(cmdline, " ");
+		// Remove the trailing newline
+		if (cmdline[r-1] == '\n')
+			cmdline[r-1] = '\0';
 
+		char* token = strtok(cmdline, " ");
 		while (token) {
-			strncpy(buffer, token, sizeof(buffer));
+			snprintf(buffer, sizeof(buffer), "%s", token);
+
 			char* val = buffer;
 			char* key = strsep(&val, "=");
 
@@ -329,7 +306,7 @@ static void parse_command_line(struct config* c) {
 
 			// download url
 			else if (strcmp(key, "installer.download-url") == 0) {
-				strncpy(c->download_url, val, sizeof(c->download_url));
+				snprintf(c->download_url, sizeof(c->download_url), "%s", val);
 				c->perform_download = 1;
 
 				// Require networking for the download
@@ -337,7 +314,7 @@ static void parse_command_line(struct config* c) {
 
 			// postinstall script
 			} else if (strcmp(key, "installer.postinstall") == 0) {
-				strncpy(c->postinstall, val, sizeof(c->postinstall));
+				snprintf(c->postinstall, sizeof(c->postinstall), "%s", val);
 
 				// Require networking for the download
 				c->require_networking = 1;
@@ -357,22 +334,20 @@ int main(int argc, char *argv[]) {
 	// Read /etc/system-release
 	char* system_release = get_system_release();
 
-	char discl_msg[40000] =	"Disclaimer\n";
-
 	char* sourcedrive = NULL;
+	struct hw_destination* destination = NULL;
+	struct hw_disk** selected_disks = NULL;
 	int rc = 0;
 	char commandstring[STRING_SIZE];
 	int choice;
 	char message[STRING_SIZE];
 	char title[STRING_SIZE];
 	int allok = 0;
-	FILE *copying;
 
 	setlocale(LC_ALL, "");
-	sethostname(SNAME, 10);
+	sethostname(DISTRO_SNAME, strlen(DISTRO_SNAME));
 
 	/* Log file/terminal stuff. */
-	FILE* flog = NULL;
 	if (argc >= 2) {
 		logfile = argv[1];
 
@@ -383,7 +358,9 @@ int main(int argc, char *argv[]) {
 	}
 
 	fprintf(flog, "Install program started.\n");
-		
+	if (hw->efi)
+		fprintf(flog, "EFI mode enabled\n");
+
 	newtInit();
 	newtCls();
 
@@ -398,17 +375,18 @@ int main(int argc, char *argv[]) {
 	if (roottext)
 		newtDrawRootText(0, 0, roottext);
 
-	snprintf(title, sizeof(title), "%s - %s", NAME, SLOGAN);
+	snprintf(title, sizeof(title), "%s - %s", DISTRO_NAME, DISTRO_SLOGAN);
 
 	// Parse parameters from the kernel command line
-	parse_command_line(&config);
+	parse_command_line(flog, &config);
 
 	if (config.unattended) {
 		splashWindow(title, _("Warning: Unattended installation will start in 10 seconds..."), 10);
 	}
 
 	// Load common modules
-	mysystem(logfile, "/sbin/modprobe vfat"); // USB key
+	mysystem(logfile, "/sbin/modprobe vfat");  // USB key
+	mysystem(logfile, "/sbin/modprobe ntfs3"); // USB key
 	hw_stop_all_raid_arrays(logfile);
 
 	if (!config.unattended) {
@@ -448,7 +426,7 @@ int main(int argc, char *argv[]) {
 	if (!config.unattended) {
 		snprintf(message, sizeof(message),
 			_("Welcome to the %s installation program.\n\n"
-			"Selecting Cancel on any of the following screens will reboot the computer."), NAME);
+			"Selecting Cancel on any of the following screens will reboot the computer."), DISTRO_NAME);
 		newtWinMessage(title, _("Start installation"), message);
 	}
 
@@ -531,7 +509,7 @@ int main(int argc, char *argv[]) {
 				} else {
 					char reason[STRING_SIZE] = "-";
 					if (rc == 2)
-						snprintf(reason, sizeof(STRING_SIZE), _("MD5 checksum mismatch"));
+						snprintf(reason, sizeof(STRING_SIZE), _("BLAKE2 checksum mismatch"));
 
 					snprintf(message, sizeof(message),
 						_("The installation image could not be downloaded.\n  Reason: %s\n\n%s"),
@@ -548,41 +526,25 @@ int main(int argc, char *argv[]) {
 	assert(sourcedrive);
 
 	int r = hw_mount(sourcedrive, SOURCE_MOUNT_PATH, "iso9660", MS_RDONLY);
-	if (r) {
+	if (r) r = hw_mount(sourcedrive, SOURCE_MOUNT_PATH, "ntfs3", MS_RDONLY);
+	if (r) r = hw_mount(sourcedrive, SOURCE_MOUNT_PATH, "vfat", MS_RDONLY);
+	if (r)
+		{
 		snprintf(message, sizeof(message), _("Could not mount %s to %s:\n  %s\n"),
 			sourcedrive, SOURCE_MOUNT_PATH, strerror(errno));
 		errorbox(message);
 		goto EXIT;
 	}
 
-	if (!config.unattended) {
-		// Read the license file.
-		if (!(copying = fopen(LICENSE_FILE, "r"))) {
-			sprintf(discl_msg, "Could not open license file: %s\n", LICENSE_FILE);
-			fprintf(flog, "%s", discl_msg);
-		} else {
-			fread(discl_msg, 1, 40000, copying);
-			fclose(copying);
-
-			if (newtLicenseBox(_("License Agreement"), discl_msg, 75, 20)) {
-				errorbox(_("License not accepted!"));
-
-				goto EXIT;
-			}
-		}
-	}
-
 	int part_type = HW_PART_TYPE_NORMAL;
 
 	// Scan for disks to install on.
 	struct hw_disk** disks = hw_find_disks(hw, sourcedrive);
-
-	struct hw_disk** selected_disks = NULL;
 	unsigned int num_selected_disks = 0;
 
 	// Check how many disks have been found and what
 	// we can do with them.
-	unsigned int num_disks = hw_count_disks((const struct hw_disk**)disks);
+	unsigned int num_disks = hw_count_disks(disks);
 
 	while (1) {
 		// no harddisks found
@@ -594,7 +556,7 @@ int main(int argc, char *argv[]) {
 		// or if we are running in unattended mode, we will select
 		// the first disk and go with that one
 		} else if ((num_disks == 1) || (config.unattended && num_disks >= 1)) {
-			selected_disks = hw_select_first_disk((const struct hw_disk**)disks);
+			selected_disks = hw_select_first_disk(disks);
 
 		// more than one usable disk has been found and
 		// the user needs to choose what to do with them
@@ -634,7 +596,7 @@ int main(int argc, char *argv[]) {
 		if (config.unattended)
 			break;
 
-		num_selected_disks = hw_count_disks((const struct hw_disk**)selected_disks);
+		num_selected_disks = hw_count_disks(selected_disks);
 
 		if (num_selected_disks == 1) {
 			snprintf(message, sizeof(message),
@@ -673,42 +635,17 @@ int main(int argc, char *argv[]) {
 
 	hw_free_disks(disks);
 
-	struct hw_destination* destination = hw_make_destination(part_type, selected_disks, config.disable_swap);
-
-	if (!destination) {
-		errorbox(_("Your harddisk is too small."));
-		goto EXIT;
-	}
-
-	fprintf(flog, "Destination drive: %s\n", destination->path);
-	fprintf(flog, "  bootldr: %s (%lluMB)\n", destination->part_bootldr, BYTES2MB(destination->size_bootldr));
-	fprintf(flog, "  boot   : %s (%lluMB)\n", destination->part_boot, BYTES2MB(destination->size_boot));
-	fprintf(flog, "  swap   : %s (%lluMB)\n", destination->part_swap, BYTES2MB(destination->size_swap));
-	fprintf(flog, "  root   : %s (%lluMB)\n", destination->part_root, BYTES2MB(destination->size_root));
-	fprintf(flog, "  data   : %s (%lluMB)\n", destination->part_data, BYTES2MB(destination->size_data));
-	fprintf(flog, "Memory   : %lluMB\n", BYTES2MB(hw_memory()));
-
-	// Warn the user if there is not enough space to create a swap partition
-	if (!config.unattended) {
-		if (!config.disable_swap && !*destination->part_swap) {
-			rc = newtWinChoice(title, _("OK"), _("Cancel"),
-				_("Your harddisk is very small, but you can continue without a swap partition."));
-
-			if (rc != 1)
-				goto EXIT;
-		}
-	}
-
 	// Filesystem selection
+	int filesystem = HW_FS_DEFAULT;
+
 	if (!config.unattended) {
 		struct filesystems {
 			int fstype;
 			char* description;
 		} filesystems[] = {
 			{ HW_FS_EXT4,            _("ext4 Filesystem") },
-			{ HW_FS_EXT4_WO_JOURNAL, _("ext4 Filesystem without journal") },
 			{ HW_FS_XFS,             _("XFS Filesystem") },
-			{ HW_FS_REISERFS,        _("ReiserFS Filesystem") },
+			{ HW_FS_BTRFS,           _("BTRFS Filesystem (EXPERIMENTAL)") },
 			{ 0, NULL },
 		};
 		unsigned int num_filesystems = sizeof(filesystems) / sizeof(*filesystems);
@@ -723,12 +660,38 @@ int main(int argc, char *argv[]) {
 		}
 
 		rc = newtWinMenu(_("Filesystem Selection"), _("Please choose your filesystem:"),
-			50, 5, 5, 6, fs_names, &fs_choice, _("OK"), _("Cancel"), NULL);
+			50, 5, 5, 5, fs_names, &fs_choice, _("OK"), _("Cancel"), NULL);
 
 		if (rc == 2)
 			goto EXIT;
 
-		destination->filesystem = filesystems[fs_choice].fstype;
+		filesystem = filesystems[fs_choice].fstype;
+	}
+
+	destination = hw_make_destination(hw, part_type, selected_disks, config.disable_swap, filesystem);
+
+	if (!destination) {
+		errorbox(_("Your harddisk is too small."));
+		goto EXIT;
+	}
+
+	fprintf(flog, "Destination drive: %s\n", destination->path);
+	fprintf(flog, "  bootldr: %s (%lluMB)\n", destination->part_bootldr, BYTES2MB(destination->size_bootldr));
+	fprintf(flog, "  boot   : %s (%lluMB)\n", destination->part_boot, BYTES2MB(destination->size_boot));
+	fprintf(flog, "  ESP    : %s (%lluMB)\n", destination->part_boot_efi, BYTES2MB(destination->size_boot_efi));
+	fprintf(flog, "  swap   : %s (%lluMB)\n", destination->part_swap, BYTES2MB(destination->size_swap));
+	fprintf(flog, "  root   : %s (%lluMB)\n", destination->part_root, BYTES2MB(destination->size_root));
+	fprintf(flog, "Memory   : %lluMB\n", BYTES2MB(hw_memory()));
+
+	// Warn the user if there is not enough space to create a swap partition
+	if (!config.unattended) {
+		if (!config.disable_swap && !*destination->part_swap) {
+			rc = newtWinChoice(title, _("OK"), _("Cancel"),
+				_("Your harddisk is very small, but you can continue without a swap partition."));
+
+			if (rc != 1)
+				goto EXIT;
+		}
 	}
 
 	// Setting up RAID if needed.
@@ -778,7 +741,7 @@ int main(int argc, char *argv[]) {
 
 	// Extract files...
 	snprintf(commandstring, STRING_SIZE,
-		"/bin/tar -C /harddisk  -xvf /cdrom/distro.img --lzma 2>/dev/null");
+		"/bin/tar --acls --xattrs --xattrs-include='*' -C /harddisk -xvf /cdrom/distro.img --zstd 2>/dev/null");
 
 	if (runcommandwithprogress(60, 4, title, commandstring, INST_FILECOUNT,
 			_("Installing the system..."), logfile)) {
@@ -803,6 +766,13 @@ int main(int argc, char *argv[]) {
 		goto EXIT;
 	}
 
+	/* trigger udev to add disk-by-uuid entries */
+	snprintf(commandstring, STRING_SIZE, "/usr/sbin/chroot /harddisk /bin/udevadm trigger");
+	if (runcommandwithstatus(commandstring, title, _("Trigger udev to redetect partitions..."), logfile)) {
+		errorbox(_("Error triggering udev to redetect partitions."));
+		goto EXIT;
+	}
+
 	// Installing bootloader...
 	statuswindow(60, 4, title, _("Installing the bootloader..."));
 
@@ -819,16 +789,7 @@ int main(int argc, char *argv[]) {
 		fprintf(f, "GRUB_SERIAL_COMMAND=\"serial --unit=0 --speed=%d\"\n", SERIAL_BAUDRATE);
 		fclose(f);
 
-		replace(DESTINATION_MOUNT_PATH "/etc/default/grub", "panic=10", "panic=10 console=ttyS0,115200n8");
-
-		/* inittab */
-		replace("/harddisk/etc/inittab", "1:2345:respawn:", "#1:2345:respawn:");
-		replace("/harddisk/etc/inittab", "2:2345:respawn:", "#2:2345:respawn:");
-		replace("/harddisk/etc/inittab", "3:2345:respawn:", "#3:2345:respawn:");
-		replace("/harddisk/etc/inittab", "4:2345:respawn:", "#4:2345:respawn:");
-		replace("/harddisk/etc/inittab", "5:2345:respawn:", "#5:2345:respawn:");
-		replace("/harddisk/etc/inittab", "6:2345:respawn:", "#6:2345:respawn:");
-		replace("/harddisk/etc/inittab", "#7:2345:respawn:", "7:2345:respawn:");
+		replace(DESTINATION_MOUNT_PATH "/etc/default/grub", "console=tty1", "console=ttyS0,115200n8");
 	}
 
 	/* novga */
@@ -844,19 +805,13 @@ int main(int argc, char *argv[]) {
 		fclose(f);
 	}
 
-	rc = hw_install_bootloader(destination, logfile);
+	rc = hw_install_bootloader(hw, destination, logfile);
 	if (rc) {
 		errorbox(_("Unable to install the bootloader."));
 		goto EXIT;
 	}
 
 	newtPopWindow();
-
-	/* Set marker that the user has already accepted the GPL if the license has been shown
-	 * in the installation process. In unatteded mode, the user will be presented the
-	 * license when he or she logs on to the web user interface for the first time. */
-	if (!config.unattended)
-		mysystem(logfile, "/usr/bin/touch /harddisk/var/ipfire/main/gpl_accepted");
 
 	/* Copy restore file from cdrom */
 	char* backup_file = hw_find_backup_file(logfile, SOURCE_MOUNT_PATH);
@@ -903,7 +858,7 @@ int main(int argc, char *argv[]) {
 	}
 
 	// Umount source drive and eject
-	hw_umount(SOURCE_MOUNT_PATH);
+	hw_umount(SOURCE_MOUNT_PATH, NULL);
 
 	// Free downloaded ISO image
 	if (strcmp(sourcedrive, SOURCE_TEMPFILE) == 0) {
@@ -933,7 +888,7 @@ int main(int argc, char *argv[]) {
 			"Please remove any installation mediums from this system and hit the reboot button. "
 			"Once the system has restarted you will be asked to setup networking and system passwords. "
 			"After that, you should point your web browser at https://%s:444 (or what ever you name "
-			"your %s) for the web configuration console."), NAME, SNAME, NAME);
+			"your %s) for the web configuration console."), DISTRO_NAME, DISTRO_SNAME, DISTRO_NAME);
 		newtWinMessage(_("Congratulations!"), _("Reboot"), message);
 	}
 

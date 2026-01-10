@@ -4,7 +4,7 @@
 #usr/include/slcurses.h
 #usr/lib/libslang.so
 usr/lib/libslang.so.2
-usr/lib/libslang.so.2.3.0
+usr/lib/libslang.so.2.3.3
 #usr/lib/pkgconfig/slang.pc
 #usr/lib/slang
 #usr/lib/slang/v2
@@ -27,7 +27,6 @@ usr/lib/slang/v2/modules/stats-module.so
 usr/lib/slang/v2/modules/sysconf-module.so
 usr/lib/slang/v2/modules/termios-module.so
 usr/lib/slang/v2/modules/varray-module.so
-usr/lib/slang/v2/modules/zlib-module.so
 #usr/share/doc/slang
 #usr/share/doc/slang/v2
 #usr/share/doc/slang/v2/COPYING
@@ -118,6 +117,7 @@ usr/lib/slang/v2/modules/zlib-module.so
 #usr/share/slsh/help/sockfuns.hlp
 #usr/share/slsh/help/statsfuns.hlp
 #usr/share/slsh/help/structfuns.hlp
+#usr/share/slsh/help/timestamp.hlp
 #usr/share/slsh/histogram.sl
 #usr/share/slsh/iconv.sl
 #usr/share/slsh/json.sl
@@ -144,6 +144,7 @@ usr/lib/slang/v2/modules/zlib-module.so
 #usr/share/slsh/scripts
 #usr/share/slsh/scripts/jpegsize
 #usr/share/slsh/scripts/lsrpm
+#usr/share/slsh/scripts/slcov
 #usr/share/slsh/scripts/sldb
 #usr/share/slsh/scripts/slprof
 #usr/share/slsh/scripts/slstkchk
@@ -158,9 +159,14 @@ usr/lib/slang/v2/modules/zlib-module.so
 #usr/share/slsh/slsmg.sl
 #usr/share/slsh/socket.sl
 #usr/share/slsh/stats.sl
+#usr/share/slsh/statslib
+#usr/share/slsh/statslib/ad_test.sl
+#usr/share/slsh/statslib/ks_test.sl
+#usr/share/slsh/statslib/kuiper.sl
 #usr/share/slsh/stkcheck.sl
 #usr/share/slsh/structfuns.sl
 #usr/share/slsh/sysconf.sl
 #usr/share/slsh/termios.sl
+#usr/share/slsh/timestamp.sl
 #usr/share/slsh/varray.sl
 #usr/share/slsh/zlib.sl

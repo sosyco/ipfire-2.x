@@ -1,0 +1,69 @@
+#!/bin/sh
+###############################################################################
+#                                                                             #
+# IPFire.org - A linux based firewall                                         #
+# Copyright (C) 2007-2022  IPFire Team  <info@ipfire.org>                     #
+#                                                                             #
+# This program is free software: you can redistribute it and/or modify        #
+# it under the terms of the GNU General Public License as published by        #
+# the Free Software Foundation, either version 3 of the License, or           #
+# (at your option) any later version.                                         #
+#                                                                             #
+# This program is distributed in the hope that it will be useful,             #
+# but WITHOUT ANY WARRANTY; without even the implied warranty of              #
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the               #
+# GNU General Public License for more details.                                #
+#                                                                             #
+# You should have received a copy of the GNU General Public License           #
+# along with this program.  If not, see <http://www.gnu.org/licenses/>.       #
+#                                                                             #
+###############################################################################
+
+. /etc/sysconfig/rc
+. ${rc_functions}
+
+case "${1}" in
+	start)
+	if ps ax | grep -v grep | grep /usr/bin/vmtoolsd > /dev/null
+   		then
+		boot_mesg "vmtoolsd is running..."
+		echo_warning
+	else
+		if /usr/bin/vmware-checkvm > /dev/null 2>&1; then
+			boot_mesg "Starting..."
+			/usr/bin/vmtoolsd &
+			echo_ok
+		else
+			boot_mesg "IPFire is not running in a virtual machine." 
+			echo_failure
+		fi
+	fi
+	;;
+
+	stop)
+	if ps ax | grep -v grep | grep /usr/bin/vmtoolsd > /dev/null
+   		then
+		boot_mesg "Stopping..."
+		killall  /usr/bin/vmtoolsd > /dev/null
+		echo_ok
+	else
+		boot_mesg "vmtoolsd is not running..."	
+		echo_warning
+	fi
+	;;
+
+	restart)
+		${0} stop
+		sleep 1
+		${0} start
+		;;
+
+	status)
+		statusproc /usr/bin/vmtoolsd
+		;;
+
+	*)
+		echo "Usage: ${0} {start|stop|restart}"
+		exit 1
+		;;
+esac

@@ -2,7 +2,7 @@
 ###############################################################################
 #                                                                             #
 # IPFire.org - A linux based firewall                                         #
-# Copyright (C) 2005-2010  IPFire Team                                        #
+# Copyright (C) 2005-2025  IPFire Team                                        #
 #                                                                             #
 # This program is free software: you can redistribute it and/or modify        #
 # it under the terms of the GNU General Public License as published by        #
@@ -95,9 +95,9 @@ my $ldesc='';
 my $gdesc='';
 
 if (! -d $dbdir) { mkdir("$dbdir"); }
-if (! -e $tcfile) { system("touch $tcfile"); }
-if (! -e $uqfile) { system("touch $uqfile"); }
-if (! -e $sourceurlfile) { system("touch $sourceurlfile"); }
+if (! -e $tcfile) { &General::system("touch", "$tcfile"); }
+if (! -e $uqfile) { &General::system("touch", "$uqfile"); }
+if (! -e $sourceurlfile) { &General::system("touch", "$sourceurlfile"); }
 
 &General::readhash("${General::swroot}/ethernet/settings", \%netsettings);
 &General::readhash("${General::swroot}/main/settings", \%mainsettings);
@@ -138,7 +138,6 @@ $filtersettings{'BLOCK_IP_ADDR'} = 'off';
 $filtersettings{'BLOCK_ALL'} = 'off';
 $filtersettings{'ENABLE_EMPTY_ADS'} = 'off';
 $filtersettings{'ENABLE_GLOBAL_WHITELIST'} = 'off';
-$filtersettings{'ENABLE_SAFESEARCH'} = 'off';
 $filtersettings{'ENABLE_LOG'} = 'off';
 $filtersettings{'ENABLE_USERNAME_LOG'} = 'off';
 $filtersettings{'ENABLE_CATEGORY_LOG'} = 'off';
@@ -227,7 +226,7 @@ if (($filtersettings{'ACTION'} eq $Lang::tr{'save'}) ||
 
 		if (!(-d "${General::swroot}/urlfilter/update")) { mkdir("${General::swroot}/urlfilter/update"); }
 
-		my $exitcode = system("/bin/tar --no-same-owner -xzf ${General::swroot}/urlfilter/blacklists.tar.gz -C ${General::swroot}/urlfilter/update");
+		my $exitcode = &General::system("/bin/tar", "--no-same-owner", "-xzf", "${General::swroot}/urlfilter/blacklists.tar.gz", "-C", "${General::swroot}/urlfilter/update");
 
 		if ($exitcode > 0)
 		{
@@ -236,18 +235,19 @@ if (($filtersettings{'ACTION'} eq $Lang::tr{'save'}) ||
 
 			if (-d "${General::swroot}/urlfilter/update/BL")
 			{
-				system("mv ${General::swroot}/urlfilter/update/BL ${General::swroot}/urlfilter/update/blacklists");
+				&General::system("mv", "${General::swroot}/urlfilter/update/BL", "${General::swroot}/urlfilter/update/blacklists");
 			}
 
 			if (-d "${General::swroot}/urlfilter/update/category")
 			{
-				system("mv ${General::swroot}/urlfilter/update/category ${General::swroot}/urlfilter/update/blacklists");
+				&General::system("mv", "${General::swroot}/urlfilter/update/category", "${General::swroot}/urlfilter/update/blacklists");
 			}
 
 			if (!(-d "${General::swroot}/urlfilter/update/blacklists"))
 			{
 				$errormessage = $Lang::tr{'urlfilter invalid content'};
 			} else {
+				# XXX Uses globbing
 				system("cp -r ${General::swroot}/urlfilter/update/blacklists/* $dbdir");
 
 				&readblockcategories;
@@ -256,11 +256,11 @@ if (($filtersettings{'ACTION'} eq $Lang::tr{'save'}) ||
 				&writeconfigfile;
 
 				$updatemessage = $Lang::tr{'urlfilter upload success'};
-				system("${General::swroot}/urlfilter/bin/prebuild.pl &");
-				system("logger -t installpackage[urlfilter] \"URL filter blacklist - Blacklist update from local source completed\"");
+				&General::system_background("${General::swroot}/urlfilter/bin/prebuild.pl");
+				&General::system("logger", "-t", "installpackage[urlfilter]", "URL filter blacklist - Blacklist update from local source completed");
 			}
 		}
-		if (-d "${General::swroot}/urlfilter/update") { system("rm -rf ${General::swroot}/urlfilter/update"); }
+		if (-d "${General::swroot}/urlfilter/update") { &General::system("rm", "-rf", "${General::swroot}/urlfilter/update"); }
 		if (-e "${General::swroot}/urlfilter/blacklists.tar.gz") { unlink("${General::swroot}/urlfilter/blacklists.tar.gz"); }
 		if ($errormessage) { goto ERROR; }
 	}
@@ -268,7 +268,7 @@ if (($filtersettings{'ACTION'} eq $Lang::tr{'save'}) ||
 	if ($filtersettings{'ACTION'} eq $Lang::tr{'urlfilter backup'})
 	{
 		$blistbackup = ($filtersettings{'ENABLE_FULLBACKUP'} eq 'on') ? "blacklists" : "blacklists/custom";
-		if (system("/bin/tar -C ${General::swroot}/urlfilter -czf ${General::swroot}/urlfilter/backup.tar.gz settings timeconst userquota autoupdate $blistbackup"))
+		if (&General::system("/bin/tar", "-C", "${General::swroot}/urlfilter", "-czf", "${General::swroot}/urlfilter/backup.tar.gz", "settings", "timeconst", "userquota", "autoupdate", "$blistbackup"))
 		{
 			$errormessage = $Lang::tr{'urlfilter backup error'};
 			goto ERROR;
@@ -307,7 +307,7 @@ if (($filtersettings{'ACTION'} eq $Lang::tr{'save'}) ||
 			$errormessage = $!;
 		}
 
-		my $exitcode = system("/bin/tar --no-same-owner --preserve-permissions -xzf ${General::swroot}/urlfilter/backup.tar.gz -C ${General::swroot}/urlfilter/restore");
+		my $exitcode = &General::system("/bin/tar", "--no-same-owner", "--preserve-permissions", "-xzf", "${General::swroot}/urlfilter/backup.tar.gz", "-C", "${General::swroot}/urlfilter/restore");
 		if ($exitcode > 0)
 		{
 			$errormessage = $Lang::tr{'urlfilter tar error'};
@@ -316,6 +316,7 @@ if (($filtersettings{'ACTION'} eq $Lang::tr{'save'}) ||
 			{
 				$errormessage = $Lang::tr{'urlfilter invalid restore file'};
 			} else {
+				# XXX uses globbing
 				system("cp -rp ${General::swroot}/urlfilter/restore/* ${General::swroot}/urlfilter/");
 				&readblockcategories;
 				&readcustomlists;
@@ -326,7 +327,7 @@ if (($filtersettings{'ACTION'} eq $Lang::tr{'save'}) ||
 		}
 
 		if (-e "${General::swroot}/urlfilter/backup.tar.gz") { unlink("${General::swroot}/urlfilter/backup.tar.gz"); }
-		if (-d "${General::swroot}/urlfilter/restore") { system("rm -rf ${General::swroot}/urlfilter/restore"); }
+		if (-d "${General::swroot}/urlfilter/restore") { &General::system("rm", "-rf", "${General::swroot}/urlfilter/restore"); }
 		if ($errormessage) { goto ERROR; }
 	}
 
@@ -352,7 +353,7 @@ if (($filtersettings{'ACTION'} eq $Lang::tr{'save'}) ||
               	$filtersettings{'VALID'} = 'yes';
 		&savesettings;
 
-		system('/usr/local/bin/squidctrl restart >/dev/null 2>&1');
+		&General::system('/usr/local/bin/squidctrl', 'restart');
 	}
 }
 
@@ -486,7 +487,7 @@ if (($tcsettings{'MODE'} eq 'TIMECONSTRAINT') && ($tcsettings{'ACTION'} eq $Lang
 		$errormessage = $Lang::tr{'urlfilter web proxy service required'};
 	}
 
-	if (!$errormessage) { system('/usr/local/bin/squidctrl restart >/dev/null 2>&1'); }
+	if (!$errormessage) { &General::system('/usr/local/bin/squidctrl', 'restart'); }
 	$tcsettings{'TCMODE'}='on';
 }
 
@@ -575,7 +576,7 @@ if (($uqsettings{'MODE'} eq 'USERQUOTA') && ($uqsettings{'ACTION'} eq $Lang::tr{
 
 	$_  = $uqsettings{'QUOTA_USERS'};
 	chomp; s/\n/|/g;
-	my $quota_users = $_;
+	my $quota_users = &Header::escape($_);
 
 	if ($uqsettings{'QUOTA_USERS'} =~ /\\/)
 	{
@@ -689,7 +690,7 @@ if (($uqsettings{'MODE'} eq 'USERQUOTA') && ($uqsettings{'ACTION'} eq $Lang::tr{
 		$errormessage = $Lang::tr{'urlfilter web proxy service required'};
 	}
 
-	if (!$errormessage) { system('/usr/local/bin/squidctrl restart >/dev/null 2>&1'); }
+	if (!$errormessage) { &General::system('/usr/local/bin/squidctrl', 'restart'); }
 	$uqsettings{'UQMODE'}='on';
 }
 
@@ -773,7 +774,7 @@ if (($besettings{'ACTION'} eq $Lang::tr{'urlfilter import blacklist'}) && ($bese
 			$errormessage = $!;
 		} else {
 
-			my $exitcode = system("/bin/tar --no-same-owner --preserve-permissions -xzf $editdir/blacklist.tar.gz -C $editdir");
+			my $exitcode = &General::system("/bin/tar", "--no-same-owner", "--preserve-permissions", "-xzf", "$editdir/blacklist.tar.gz", "-C", "$editdir");
 			if ($exitcode > 0)
 			{
 				$errormessage = $Lang::tr{'urlfilter tar error'};
@@ -820,7 +821,7 @@ if (($besettings{'ACTION'} eq $Lang::tr{'urlfilter import blacklist'}) && ($bese
 				}
 			}
 
-		if (-d $editdir) { system("rm -rf $editdir"); }
+		if (-d $editdir) { &General::system("rm", "-rf", "$editdir"); }
 
 		}
 	}
@@ -854,7 +855,7 @@ if (($besettings{'ACTION'} eq $Lang::tr{'urlfilter export blacklist'}) && ($bese
 		print FILE "$besettings{'BE_EXPRESSIONS'}\n";
 		close FILE;
 
-		if (system("/bin/tar -C $editdir -czf $editdir/$besettings{'BE_NAME'}.tar.gz blacklists"))
+		if (&General::system("/bin/tar", "-C", "$editdir", "-czf", "$editdir/$besettings{'BE_NAME'}.tar.gz", "blacklists"))
 		{
 			$errormessage = $Lang::tr{'urlfilter export error'};
 		}
@@ -870,7 +871,7 @@ if (($besettings{'ACTION'} eq $Lang::tr{'urlfilter export blacklist'}) && ($bese
 			while (<FILE>) { print; }
 			close (FILE);
 
-			if (-d $editdir) { system("rm -rf $editdir"); }
+			if (-d $editdir) { &General::system("rm", "-rf", "$editdir"); }
 			exit;
 		}
 	} else {
@@ -934,8 +935,15 @@ if (($besettings{'ACTION'} eq $Lang::tr{'urlfilter install blacklist'}) && ($bes
 		print FILE "}\n";
 		close FILE;
 
+		# XXX uses globbing
+		if(!($besettings{'BE_NAME'} =~ /^[a-zA-Z0-9-_]+$/))
+		{
+			$errormessage = 'Invalid blacklist name (use only alphanumeric characters plus hyphens or underscores)';
+			goto ERROR;
+		}
 		system("rm -f $dbdir/$besettings{'BE_NAME'}/*.db");
-		system("/usr/bin/squidGuard -c $editdir/install.conf -C all");
+		&General::system("/usr/bin/squidGuard", "-c", "$editdir/install.conf", "-C", "all");
+		# XXX uses globbing
 		system("chmod a+w $dbdir/$besettings{'BE_NAME'}/*.db");
 
 		&readblockcategories;
@@ -943,9 +951,9 @@ if (($besettings{'ACTION'} eq $Lang::tr{'urlfilter install blacklist'}) && ($bes
 
 		&writeconfigfile;
 
-		system('/usr/local/bin/squidctrl restart >/dev/null 2>&1') unless ($besettings{'NORESTART'} eq 'on');
+		&General::system('/usr/local/bin/squidctrl', 'restart') unless ($besettings{'NORESTART'} eq 'on');
 
-		if (-d $editdir) { system("rm -rf $editdir"); }
+		if (-d $editdir) { &General::system("rm", "-rf", "$editdir"); }
 	} else {
 		$errormessage = $Lang::tr{'urlfilter category data error'};
 	}
@@ -967,17 +975,22 @@ if ($filtersettings{'ACTION'} eq $Lang::tr{'urlfilter save schedule'})
 
 		if (($filtersettings{'ENABLE_AUTOUPDATE'} eq 'on') && ($filtersettings{'UPDATE_SCHEDULE'} eq 'daily'))
 		{
-			system('/usr/local/bin/urlfilterctrl cron daily >/dev/null 2>&1');
+			&General::system('/usr/local/bin/urlfilterctrl', 'cron', 'daily');
 		}
 
 		if (($filtersettings{'ENABLE_AUTOUPDATE'} eq 'on') && ($filtersettings{'UPDATE_SCHEDULE'} eq 'weekly'))
 		{
-			system('/usr/local/bin/urlfilterctrl cron weekly >/dev/null 2>&1');
+			&General::system('/usr/local/bin/urlfilterctrl', 'cron', 'weekly');
 		}
 
 		if (($filtersettings{'ENABLE_AUTOUPDATE'} eq 'on') && ($filtersettings{'UPDATE_SCHEDULE'} eq 'monthly'))
 		{
-			system('/usr/local/bin/urlfilterctrl cron monthly >/dev/null 2>&1');
+			&General::system('/usr/local/bin/urlfilterctrl', 'cron', 'monthly');
+		}
+		
+		if ($filtersettings{'ENABLE_AUTOUPDATE'} eq 'off')
+		{
+			&General::system('/usr/local/bin/urlfilterctrl', 'cron', 'remove');
 		}
 	}
 }
@@ -990,10 +1003,10 @@ if ($filtersettings{'ACTION'} eq $Lang::tr{'urlfilter update now'})
 		{
 			$errormessage = $Lang::tr{'urlfilter custom url required'};
 		} else {
-			system("${General::swroot}/urlfilter/bin/autoupdate.pl $filtersettings{'CUSTOM_UPDATE_URL'} &");
+			&General::system_background("${General::swroot}/urlfilter/bin/autoupdate.pl", "$filtersettings{'CUSTOM_UPDATE_URL'}");
 		}
 	} else {
-		system("${General::swroot}/urlfilter/bin/autoupdate.pl $filtersettings{'UPDATE_SOURCE'} &");
+		&General::system_background("${General::swroot}/urlfilter/bin/autoupdate.pl", "$filtersettings{'UPDATE_SOURCE'}");
 	}
 }
 
@@ -1057,9 +1070,6 @@ $checked{'ENABLE_EMPTY_ADS'}{$filtersettings{'ENABLE_EMPTY_ADS'}} = "checked='ch
 $checked{'ENABLE_GLOBAL_WHITELIST'}{'off'} = '';
 $checked{'ENABLE_GLOBAL_WHITELIST'}{'on'} = '';
 $checked{'ENABLE_GLOBAL_WHITELIST'}{$filtersettings{'ENABLE_GLOBAL_WHITELIST'}} = "checked='checked'";
-$checked{'ENABLE_SAFESEARCH'}{'off'} = '';
-$checked{'ENABLE_SAFESEARCH'}{'on'} = '';
-$checked{'ENABLE_SAFESEARCH'}{$filtersettings{'ENABLE_SAFESEARCH'}} = "checked='checked'";
 $checked{'ENABLE_LOG'}{'off'} = '';
 $checked{'ENABLE_LOG'}{'on'} = '';
 $checked{'ENABLE_LOG'}{$filtersettings{'ENABLE_LOG'}} = "checked='checked'";
@@ -1474,20 +1484,16 @@ print <<END
 	<td><input type='checkbox' name='ENABLE_LOG' $checked{'ENABLE_LOG'}{'on'} /></td>
 </tr>
 <tr>
-	<td class='base'>$Lang::tr{'urlfilter safesearch'}:</td>
-	<td><input type='checkbox' name='ENABLE_SAFESEARCH' $checked{'ENABLE_SAFESEARCH'}{'on'} /></td>
+	<td class='base'>$Lang::tr{'urlfilter empty ads'}:</td>
+	<td><input type='checkbox' name='ENABLE_EMPTY_ADS' $checked{'ENABLE_EMPTY_ADS'}{'on'} /></td>
 	<td class='base'>$Lang::tr{'urlfilter username log'}:</td>
 	<td><input type='checkbox' name='ENABLE_USERNAME_LOG' $checked{'ENABLE_USERNAME_LOG'}{'on'} /></td>
 </tr>
 <tr>
-	<td class='base'>$Lang::tr{'urlfilter empty ads'}:</td>
-	<td><input type='checkbox' name='ENABLE_EMPTY_ADS' $checked{'ENABLE_EMPTY_ADS'}{'on'} /></td>
-	<td class='base'>$Lang::tr{'urlfilter category log'}:</td>
-	<td><input type='checkbox' name='ENABLE_CATEGORY_LOG' $checked{'ENABLE_CATEGORY_LOG'}{'on'} /></td>
-</tr>
-<tr>
 	<td class='base'>$Lang::tr{'urlfilter block ip'}:</td>
 	<td><input type='checkbox' name='BLOCK_IP_ADDR' $checked{'BLOCK_IP_ADDR'}{'on'} /></td>
+	<td class='base'>$Lang::tr{'urlfilter category log'}:</td>
+	<td><input type='checkbox' name='ENABLE_CATEGORY_LOG' $checked{'ENABLE_CATEGORY_LOG'}{'on'} /></td>
 </tr>
 <tr>
 	<td class='base'>$Lang::tr{'urlfilter block all'}:</td>
@@ -2046,6 +2052,10 @@ foreach $line (@tclist)
 	if ($temp[7] eq 'on') { $time.=$Lang::tr{'urlfilter sun'}; } else { $time.='='; }
 	$time=$time.' &nbsp; '.$temp[8].':'.$temp[9].' to '.$temp[10].':'.$temp[11];
 
+	$temp[12] = &Header::escape($temp[12]);
+	$temp[13] = &Header::escape($temp[13]);
+	$temp[16] = &Header::escape($temp[16]);
+
 print <<END
 		<td align='center'>$temp[0]</td>
 		<td align='center' nowrap>$time</td>
@@ -2541,11 +2551,11 @@ sub savesettings
 	delete $filtersettings{'BACKGROUND'};
 	delete $filtersettings{'UPDATEFILE'};
 
-	system("chown -R nobody.nobody $dbdir");
-	system('/usr/bin/squidGuard -C custom/allowed/domains >/dev/null 2>&1');
-	system('/usr/bin/squidGuard -C custom/allowed/urls >/dev/null 2>&1');
-	system('/usr/bin/squidGuard -C custom/blocked/domains >/dev/null 2>&1');
-	system('/usr/bin/squidGuard -C custom/blocked/urls >/dev/null 2>&1 ');
+	&General::system("chown", "-R", "nobody.nobody", "$dbdir");
+	&General::system('/usr/bin/squidGuard', '-C', 'custom/allowed/domains');
+	&General::system('/usr/bin/squidGuard', '-C', 'custom/allowed/urls');
+	&General::system('/usr/bin/squidGuard', '-C', 'custom/blocked/domains');
+	&General::system('/usr/bin/squidGuard', '-C', 'custom/blocked/urls');
 	&setpermissions ($dbdir);
 
 	&General::writehash("${General::swroot}/urlfilter/settings", \%filtersettings);
@@ -2702,12 +2712,13 @@ sub setpermissions
 	foreach $category (<$bldir/*>)
 	{
         	 if (-d $category){
-			system("chmod 755 $category &> /dev/null");
+			&General::system("chmod", "755", "$category");
 			foreach $blacklist (<$category/*>)
 			{
-         			if (-f $blacklist) { system("chmod 644 $blacklist &> /dev/null"); }
-         			if (-d $blacklist) { system("chmod 755 $blacklist &> /dev/null"); }
+         			if (-f $blacklist) { &General::system("chmod", "644", "$blacklist"); }
+         			if (-d $blacklist) { &General::system("chmod", "755", "$blacklist"); }
 			}
+			# XXX uses globbing
         	 	system("chmod 666 $category/*.db &> /dev/null");
 			&setpermissions ($category);
 		}
@@ -2834,47 +2845,15 @@ sub writeconfigfile
 		}
 	}
 
-	if ((($filtersettings{'ENABLE_REWRITE'} eq 'on') && (@repositoryfiles)) || ($filtersettings{'ENABLE_SAFESEARCH'} eq 'on'))
-	{
+	if (($filtersettings{'ENABLE_REWRITE'} eq 'on') && (@repositoryfiles)) {
 		print FILE "rewrite rew-rule-1 {\n";
 
-		if (($filtersettings{'ENABLE_REWRITE'} eq 'on') && (@repositoryfiles))
+		print FILE "    # rewrite localfiles\n";
+		foreach (@repositoryfiles)
 		{
-			print FILE "    # rewrite localfiles\n";
-			foreach (@repositoryfiles)
-			{
-				print FILE "    s@.*/$_\$\@http://$netsettings{'GREEN_ADDRESS'}:$http_port/repository/$_\@i\n";
-			}
+			print FILE "    s@.*/$_\$\@http://$netsettings{'GREEN_ADDRESS'}:$http_port/repository/$_\@i\n";
 		}
-
-		if ($filtersettings{'ENABLE_SAFESEARCH'} eq 'on')
-		{
-			print FILE "    # rewrite safesearch\n";
-			print FILE "    s@(.*\\Wgoogle\\.\\w+/(webhp|search|imghp|images|grphp|groups|nwshp|frghp|froogle)\\?)(.*)(\\bsafe=\\w+)(.*)\@\\1\\3safe=strict\\5\@i\n";
-			print FILE "    s@(.*\\Wgoogle\\.\\w+/(webhp|search|imghp|images|grphp|groups|nwshp|frghp|froogle)\\?)(.*)\@\\1safe=strict\\\&\\3\@i\n";
-			print FILE "    s@(.*\\Wsearch\\.yahoo\\.\\w+/search\\W)(.*)(\\bvm=\\w+)(.*)\@\\1\\2vm=r\\4\@i\n";
-			print FILE "    s@(.*\\Wsearch\\.yahoo\\.\\w+/search\\W.*)\@\\1\\\&vm=r\@i\n";
-			print FILE "    s@(.*\\Walltheweb\\.com/customize\\?)(.*)(\\bcopt_offensive=\\w+)(.*)\@\\1\\2copt_offensive=on\\4\@i\n";
-			print FILE "    s@(.*\\Wbing\\.\\w+/)(.*)(\\badlt=\\w+)(.*)\@\\1\\2adlt=strict\\4\@i\n";
-			print FILE "    s@(.*\\Wbing\\.\\w+/.*)\@\\1\\\&adlt=strict\@i\n";
-		}
-
 		print FILE "}\n\n";
-
-		if ((!($filtersettings{'UNFILTERED_CLIENTS'} eq '')) && ($filtersettings{'ENABLE_SAFESEARCH'} eq 'on')) {
-			print FILE "rewrite rew-rule-2 {\n";
-			if (($filtersettings{'ENABLE_REWRITE'} eq 'on') && (@repositoryfiles))
-			{
-				print FILE "    # rewrite localfiles\n";
-				foreach (@repositoryfiles)
-				{
-					print FILE "    s@.*/$_\$\@http://$netsettings{'GREEN_ADDRESS'}:$http_port/repository/$_\@i\n";
-				}
-			} else {
-				print FILE "    # rewrite nothing\n";
-			}
-			print FILE "}\n\n";
-		}
 	}
 
 	if (!($filtersettings{'UNFILTERED_CLIENTS'} eq '')) {
@@ -2989,10 +2968,10 @@ sub writeconfigfile
 	foreach $category (@categories) {
 		$blacklist = $category;
 		$category =~ s/\//_/g;
-		
+
 		if ( $filtersettings{"FILTER_".uc($category)} ne "on" ){
 			my $constraintrule = "false";
-			
+
 			foreach (@tclist){
 				chomp;
 				@tc = split(/\,/);
@@ -3001,12 +2980,12 @@ sub writeconfigfile
 					$constraintrule = "true";
 				}
 			}
-			
+
 			if ( $constraintrule eq "false"){
 				next;
 			}
 		}
-		
+
 		print FILE "dest $category {\n";
 		if (-e "$dbdir/$blacklist/domains") {
 			print FILE "    domainlist     $blacklist\/domains\n";
@@ -3083,10 +3062,6 @@ sub writeconfigfile
 	if (!($filtersettings{'UNFILTERED_CLIENTS'} eq '')) {
 		print FILE "    unfiltered {\n";
 		print FILE "        pass all\n";
-		if ($filtersettings{'ENABLE_SAFESEARCH'} eq 'on')
-		{
-			print FILE "        rewrite rew-rule-2\n";
-		}
 		print FILE "    }\n\n";
 	}
 	if (!($filtersettings{'BANNED_CLIENTS'} eq '')) {
@@ -3215,7 +3190,7 @@ sub writeconfigfile
 			print FILE "        logfile".$ident." urlfilter.log\n";
 		}
 	}
-	if ((($filtersettings{'ENABLE_REWRITE'} eq 'on') && (@repositoryfiles)) || ($filtersettings{'ENABLE_SAFESEARCH'} eq 'on'))
+	if (($filtersettings{'ENABLE_REWRITE'} eq 'on') && (@repositoryfiles))
 	{
 		print FILE "        rewrite rew-rule-1\n";
 	}

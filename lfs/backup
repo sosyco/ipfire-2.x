@@ -1,7 +1,7 @@
 ###############################################################################
 #                                                                             #
 # IPFire.org - A linux based firewall                                         #
-# Copyright (C) 2007  Michael Tremer & Christian Schmidt                      #
+# Copyright (C) 2007-2022  IPFire Team  <info@ipfire.org>                     #
 #                                                                             #
 # This program is free software: you can redistribute it and/or modify        #
 # it under the terms of the GNU General Public License as published by        #
@@ -24,15 +24,19 @@
 
 include Config
 
+SUMMARY    = IPFire backup extension
+
 VER        = ipfire
 
 THISAPP    = backup-$(VER)
 DIR_APP    = $(DIR_SRC)/$(THISAPP)
 TARGET     = $(DIR_INFO)/$(THISAPP)
 PROG       = backup
-PAK_VER    = 1
+PAK_VER    = 2
 
-DEPS       = ""
+DEPS       =
+
+SERVICES   =
 
 ###############################################################################
 # Top-level Rules
@@ -40,13 +44,13 @@ DEPS       = ""
 
 install : $(TARGET)
 
-check : 
+check :
 
 download :
 
-md5 : 
+b2 :
 
-dist: 
+dist:
 	@$(PAK)
 
 ###############################################################################
@@ -56,10 +60,12 @@ dist:
 $(TARGET) : $(patsubst %,$(DIR_DL)/%,$(objects))
 	@$(PREBUILD)
 	-mkdir -p /var/ipfire/backup/bin
-	install -v -m 755 $(DIR_SRC)/config/backup/backup.pl /var/ipfire/backup/bin
+	install -v -m 755 -o root $(DIR_SRC)/config/backup/backup.pl /var/ipfire/backup/bin
+	chown nobody:nobody -Rv /var/ipfire/backup/
+	chown root:root -Rv /var/ipfire/backup/bin/
+	chown root:root -v /var/ipfire/backup/{in,ex}clude*
 	install -v -m 644 $(DIR_SRC)/config/backup/include /var/ipfire/backup/
 	install -v -m 644 $(DIR_SRC)/config/backup/exclude /var/ipfire/backup/
-	chown nobody:nobody -R /var/ipfire/backup/
 	-mkdir -p /var/ipfire/backup/addons
 	-mkdir -p /var/ipfire/backup/addons/includes
 	-mkdir -p /var/ipfire/backup/addons/backup

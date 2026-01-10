@@ -2,7 +2,7 @@
 ###############################################################################
 #                                                                             #
 # IPFire.org - A linux based firewall                                         #
-# Copyright (C) 2007-2014  IPFire Team  <info@ipfire.org>                     #
+# Copyright (C) 2007-2025  IPFire Team  <info@ipfire.org>                     #
 #                                                                             #
 # This program is free software: you can redistribute it and/or modify        #
 # it under the terms of the GNU General Public License as published by        #
@@ -30,6 +30,7 @@ use Sort::Naturally;
 require '/var/ipfire/general-functions.pl';
 require "${General::swroot}/lang.pl";
 require "${General::swroot}/header.pl";
+require "${General::swroot}/wireguard-functions.pl";
 require "/opt/pakfire/lib/functions.pl";
 
 my %cgiparams=();
@@ -48,12 +49,6 @@ my $showbox=0;
 my $showipsec=0;
 my $showovpn=0;
 
-if ( ! -e "/var/ipfire/main/gpl_accepted" ) {
-	print "Status: 302 Moved Temporarily\n";
-	print "Location: gpl.cgi\n\n";
-	exit (0);
-}
-
 &Header::showhttpheaders();
 
 $cgiparams{'ACTION'} = '';
@@ -70,16 +65,14 @@ $pppsettings{'PROFILENAME'} = 'None';
 my %color = ();
 my %mainsettings = ();
 &General::readhash("${General::swroot}/main/settings", \%mainsettings);
-&General::readhash("/srv/web/ipfire/html/themes/".$mainsettings{'THEME'}."/include/colors.txt", \%color);
+&General::readhash("/srv/web/ipfire/html/themes/ipfire/include/colors.txt", \%color);
 
 my $connstate = &Header::connectionstatus();
 
-if ( -e "/var/ipfire/main/gpl-accepted" ) {
-	if ($connstate =~ /$Lang::tr{'connecting'}/ || /$Lang::tr{'connection closed'}/ ){
-		$refresh = "<meta http-equiv='refresh' content='5;'>";
-	}elsif ($connstate =~ /$Lang::tr{'dod waiting'}/ || -e "${General::swroot}/main/refreshindex") {
-		$refresh = "<meta http-equiv='refresh' content='30;'>";
-	}
+if ($connstate =~ /$Lang::tr{'connecting'}/ || /$Lang::tr{'connection closed'}/ ){
+	$refresh = "<meta http-equiv='refresh' content='5;'>";
+} elsif ($connstate =~ /$Lang::tr{'dod waiting'}/ || -e "${General::swroot}/main/refreshindex") {
+	$refresh = "<meta http-equiv='refresh' content='30;'>";
 }
 
 if ($cgiparams{'ACTION'} eq $Lang::tr{'dial profile'})
@@ -113,15 +106,15 @@ if ($cgiparams{'ACTION'} eq $Lang::tr{'dial profile'})
 	chmod 0600, "${General::swroot}/ppp/secrets";
 	close FILE;
 
-	&General::log("$Lang::tr{'profile made current'} $tempcgiparams{'PROFILENAME'}"); 
+	&General::log("$Lang::tr{'profile made current'} $tempcgiparams{'PROFILENAME'}");
 	$cgiparams{'ACTION'} = "$Lang::tr{'dial'}";
 }
 
 if ($cgiparams{'ACTION'} eq $Lang::tr{'dial'}) {
-	system('/usr/local/bin/redctrl start > /dev/null') == 0
+	&General::system('/usr/local/bin/redctrl', 'start') == 0
 	or &General::log("Dial failed: $?"); sleep 1;
 }elsif ($cgiparams{'ACTION'} eq $Lang::tr{'hangup'}) {
-	system('/usr/local/bin/redctrl stop > /dev/null') == 0
+	&General::system('/usr/local/bin/redctrl', 'stop') == 0
 	or &General::log("Hangup failed: $?"); sleep 1;
 }
 
@@ -138,7 +131,7 @@ for ($c = 1; $c <= $maxprofiles; $c++)
 }
 my %selected;
 for ($c = 1; $c <= $maxprofiles; $c++) {
-	$selected{'PROFILE'}{$c} = ''; 
+	$selected{'PROFILE'}{$c} = '';
 }
 $selected{'PROFILE'}{$pppsettings{'PROFILE'}} = "selected='selected'";
 my $dialButtonDisabled = "disabled='disabled'";
@@ -151,7 +144,7 @@ if (open(IPADDR,"${General::swroot}/red/local-ipaddress")) {
 	    chomp ($ipaddr);
 	}
 
-&Header::openbox('100%', 'center', '');
+&Header::opensection();
 if ( ( $pppsettings{'VALID'} eq 'yes' && $modemsettings{'VALID'} eq 'yes' ) || ( $netsettings{'CONFIG_TYPE'} =~ /^(1|2|3|4)$/ && $netsettings{'RED_TYPE'} =~ /^(DHCP|STATIC)$/ )) {
 	if (open(IPADDR,"${General::swroot}/ddns/ipcache")) {
    	    $ipaddr = <IPADDR>;
@@ -171,11 +164,11 @@ if ( ( $pppsettings{'VALID'} eq 'yes' && $modemsettings{'VALID'} eq 'yes' ) || (
 
 print <<END;
 <!-- Table of networks -->
-<table class='tbl' style='width:80%;'>
+<table class='tbl'>
   <tr>
-        <th style='background-color:$color{'color20'};'>$Lang::tr{'network'}</th>
-        <th style='background-color:$color{'color20'};'>$Lang::tr{'ip address'}</th>
-        <th style='background-color:$color{'color20'};'>$Lang::tr{'status'}</th>
+        <th>$Lang::tr{'network'}</th>
+        <th>$Lang::tr{'ip address'}</th>
+        <th>$Lang::tr{'status'}</th>
   </tr>
   <tr>
         <td style='width:25%; text-align:center; background-color:$Header::colourred;'><a href='/cgi-bin/pppsetup.cgi' style='color:white;'><b>$Lang::tr{'internet'}</b></a><br/></td>
@@ -200,30 +193,45 @@ END
 END
 	}
 
-	my @dns_servers = ();
-	foreach my $f ("${General::swroot}/red/dns1", "${General::swroot}/red/dns2") {
-		open(DNS, "<$f");
-		my $dns_server = <DNS>;
-		close(DNS);
+	if (&General::RedIsWireless()) {
+		my $iface = $netsettings{"RED_DEV"} || "red0";
 
-		chomp($dns_server);
-		if ($dns_server) {
-			push(@dns_servers, $dns_server);
-		}
+		my $essid        = &Network::wifi_get_essid($iface);
+		my $frequency    = &Network::wifi_get_frequency($iface);
+		my $access_point = &Network::wifi_get_access_point($iface);
+		my $bit_rate     = &Network::wifi_get_bit_rate($iface);
+		my $signal_level = &Network::wifi_get_signal_level($iface);
+
+		print <<END;
+			<tr>
+				<td>
+					<strong>$Lang::tr{'wireless network'}:</strong>
+				</td>
+				<td style="text-align: center">
+					$essid
+				</td>
+				<td style="text-align: center">
+					$access_point @ $frequency
+				</td>
+			</tr>
+			<tr>
+				<td>
+					<strong>
+						$Lang::tr{'uplink bit rate'}:
+					</strong>
+				</td>
+				<td style="text-align: center">
+					$bit_rate
+				</td>
+				<td style="text-align: center">
+					$signal_level
+				</td>
+			</tr>
+END
 	}
-	my $dns_servers_str = join(", ", @dns_servers);
 
 	print <<END;
-		<tr>
-			<td>
-				<b>$Lang::tr{'dns servers'}:</b>
-			</td>
-			<td style='text-align:center;'>
-				$dns_servers_str
-			</td>
-			<td></td>
-		</tr>
-	</table>
+		</table>
 END
 
 #Dial profiles
@@ -231,7 +239,7 @@ if ( $netsettings{'RED_TYPE'} ne "STATIC" && $netsettings{'RED_TYPE'} ne "DHCP" 
 	if ( ( $pppsettings{'VALID'} eq 'yes' ) || ( $netsettings{'CONFIG_TYPE'} =~ /^(1|2|3|4)$/ && $netsettings{'RED_TYPE'} =~ /^(DHCP|STATIC)$/ ) ) {
 		print <<END;
 		<br/>
-		<table style='width:80%;'>
+		<table>
 		<tr><td>
 		<form method='post' action='$ENV{'SCRIPT_NAME'}'>$Lang::tr{'profile'}:
 			<select name='PROFILE'>
@@ -276,7 +284,7 @@ END
 
 print <<END;
 <br/>
-<table class='tbl' style='width:80%;'>
+<table class='tbl'>
 <tr>
 	<th>$Lang::tr{'network'}</th>
 	<th>$Lang::tr{'ip address'}</th>
@@ -326,20 +334,19 @@ if (&Header::orange_used()) {
 				<a href='/cgi-bin/firewall.cgi' style='color:white'><b>$Lang::tr{'dmz'}</b></a>
 			</td>
 			<td style='width:30%; text-align:center;'>$netsettings{'ORANGE_ADDRESS'}/$sub</td>
-			<td style='width:45%; text-align:center; color:$Header::colourgreen;'>Online</td>
+			<td style='width:45%; text-align:center; color:$Header::colourgreen;'>$Lang::tr{'online'}</td>
 		</tr>
 END
 	}
 #check if IPSEC is running
 if ( $vpnsettings{'ENABLED'} eq 'on' || $vpnsettings{'ENABLED_BLUE'} eq 'on' ) {
-	my $ipsecip = $vpnsettings{'VPN_IP'};
 print<<END;
 		<tr>
 			<td style='width:25%; text-align:center; background-color:$Header::colourvpn;'>
 				<a href='/cgi-bin/vpnmain.cgi' style='color:white'><b>$Lang::tr{'ipsec'}</b></a>
 			</td>
-			<td style='width:30%; text-align:center;'>$ipsecip</td>
-			<td style='width:45%; text-align:center; color:$Header::colourgreen;'>Online</td>
+			<td style='width:30%; text-align:center;'></td>
+			<td style='width:45%; text-align:center; color:$Header::colourgreen;'>$Lang::tr{'online'}</td>
 		</tr>
 END
 }
@@ -360,12 +367,28 @@ print <<END;
 			<a href='/cgi-bin/ovpnmain.cgi' style='color:white'><b>OpenVPN</b></a>
 		</td>
 		<td style='width:30%; text-align:center;'>$ovpnip</td>
-		<td style='width:45%; text-align:center; color:$Header::colourgreen;'>Online</td>
+		<td style='width:45%; text-align:center; color:$Header::colourgreen;'>$Lang::tr{'online'}</td>
 	</tr>
 END
-	}
+}
+
+# Show WireGuard status
+if (&Wireguard::is_enabled()) {
+	my $network = $Wireguard::settings{'CLIENT_POOL'};
+
+	print<<END;
+		<tr>
+			<td style='width:25%; text-align:center; background-color:$Header::colourwg;'>
+				<a href='/cgi-bin/wireguard.cgi' style='color:white'><b>$Lang::tr{'wireguard'}</b></a>
+			</td>
+			<td style='width:30%; text-align:center;'>$network</td>
+			<td style='width:45%; text-align:center; color:$Header::colourgreen;'>$Lang::tr{'online'}</td>
+		</tr>
+END
+}
+
 print"</table>";
-&Header::closebox();
+&Header::closesection();
 
 #Check if there are any vpns configured (ipsec and openvpn)
 &General::readhasharray("${General::swroot}/vpn/config", \%vpnconfig);
@@ -387,7 +410,7 @@ foreach my $dkey (sort { ncmp($ovpnconfig{$a}[1],$ovpnconfig{$b}[1])} keys %ovpn
 
 if ($showbox){
 # Start of Box wich contains all vpn connections
-	&Header::openbox('100%', 'center', $Lang::tr{'vpn'});
+	&Header::opensection();
 
 	#show ipsec connectiontable
 	if ( $showipsec ) {
@@ -399,7 +422,7 @@ if ($showbox){
 		my $col="";
 		my $count=0;
 		print <<END;
-		<table class='tbl' style='width:80%;'>
+		<table class='tbl'>
 		<tr>
 			<th style='width:40%;'>$Lang::tr{'ipsec network'}</th>
 			<th style='width:30%;'>$Lang::tr{'ip address'}</th>
@@ -409,9 +432,16 @@ END
 		foreach my $key (sort { uc($vpnconfig{$a}[1]) cmp uc($vpnconfig{$b}[1]) } keys %vpnconfig) {
 			if ($vpnconfig{$key}[0] eq 'on' && $vpnconfig{$key}[3] ne 'host') {
 				$count++;
-				my ($vpnip,$vpnsub) = split("/",$vpnconfig{$key}[11]);
-				$vpnsub=&General::iporsubtocidr($vpnsub);
-				$vpnip="$vpnip/$vpnsub";
+
+				my @n = ();
+
+				my @networks = split(/\|/, $vpnconfig{$key}[11]);
+				foreach my $network (@networks) {
+					my ($vpnip, $vpnsub) = split("/", $network);
+					$vpnsub = &Network::convert_netmask2prefix($vpnsub) || $vpnsub;
+					push(@n, "$vpnip/$vpnsub");
+				}
+
 				if ($count % 2){
 					$col = $color{'color22'};
 				}else{
@@ -419,10 +449,14 @@ END
 				}
 				print "<tr>";
 				print "<td style='text-align:left; color:white; background-color:$Header::colourvpn;'>$vpnconfig{$key}[1]</td>";
-				print "<td style='text-align:center; background-color:$col'>$vpnip</td>";
+				print "<td style='text-align:center; background-color:$col'>" . join("<br>", @n) . "</td>";
 
 				my $activecolor = $Header::colourred;
 				my $activestatus = $Lang::tr{'capsclosed'};
+				if ($vpnconfig{$key}[33] eq "add") {
+					$activecolor = ${Header::colourorange};
+					$activestatus = $Lang::tr{'vpn wait'};
+				}
 				if ($vpnconfig{$key}[0] eq 'off') {
 					$activecolor = $Header::colourblue;
 					$activestatus = $Lang::tr{'capsclosed'};
@@ -431,6 +465,13 @@ END
 						if (($line =~ /\"$vpnconfig{$key}[1]\".*IPsec SA established/) || ($line =~/$vpnconfig{$key}[1]\{.*INSTALLED/ )){
 							$activecolor = $Header::colourgreen;
 							$activestatus = $Lang::tr{'capsopen'};
+							last;
+						} elsif ($line =~ /$vpnconfig{$key}[1]\[.*CONNECTING/) {
+							$activecolor = $Header::colourorange;
+							$activestatus = $Lang::tr{'vpn connecting'};
+						} elsif ($line =~ /$vpnconfig{$key}[1]\{.*ROUTED/) {
+							$activecolor = $Header::colourorange;
+							$activestatus = $Lang::tr{'vpn on-demand'};
 						}
 					}
 				}
@@ -445,7 +486,7 @@ END
 	if ( $showovpn ){
 		print <<END;
 		<br/>
-		<table class='tbl' style='width:80%;'>
+		<table class='tbl'>
 		<tr>
 			<th style='width:40%;'>$Lang::tr{'openvpn network'}</th>
 			<th style='width:30%;'>$Lang::tr{'ip address'}</th>
@@ -500,23 +541,15 @@ END
 		}
 		print"</table>";
 	}
-&Header::closebox();
+
+	&Header::closesection();
 }
+
+my @warnings = ();
 
 # Fireinfo
 if ( ! -e "/var/ipfire/main/send_profile") {
-	$warnmessage .= "<li><a style='color: white;' href='fireinfo.cgi'>$Lang::tr{'fireinfo please enable'}</a></li>";
-}
-
-# Memory usage warning
-my @free = `/usr/bin/free`;
-$free[1] =~ m/(\d+)/;
-my $mem = $1;
-$free[2] =~ m/(\d+)/;
-my $used = $1;
-my $pct = int 100 * ($mem - $used) / $mem;
-if ($used / $mem > 90) {
-	$warnmessage .= "<li>$Lang::tr{'high memory usage'}: $pct% !</li>";
+	push(@warnings, "<a href='fireinfo.cgi'>$Lang::tr{'fireinfo please enable'}</a>");
 }
 
 # Diskspace usage warning
@@ -525,22 +558,23 @@ my $temp2=();
 my @df = `/bin/df -B M -P -x rootfs`;
 foreach my $line (@df) {
 	next if $line =~ m/^Filesystem/;
+	next if $line =~ m/^efivarfs/;
 	if ($line =~ m/root/ ) {
 		$line =~ m/^.* (\d+)M.*$/;
 		@temp = split(/ +/,$line);
 		if ($1<5) {
 			# available:plain value in MB, and not %used as 10% is too much to waste on small disk
 			# and root size should not vary during time
-			$warnmessage .= "<li>$Lang::tr{'filesystem full'}: $temp[0] <b>$Lang::tr{'free'}=$1M</b> !</li>";
+			push(@warnings, "$Lang::tr{'filesystem full'}: $temp[0] <b>$Lang::tr{'free'}=$1M</b>");
 		}
-		
+
 	} else {
 		# $line =~ m/^.* (\d+)m.*$/;
 		$line =~ m/^.* (\d+)\%.*$/;
 		if ($1>90) {
 			@temp = split(/ /,$line);
 			$temp2=int(100-$1);
-			$warnmessage .= "<li>$Lang::tr{'filesystem full'}: $temp[0] <b>$Lang::tr{'free'}=$temp2%</b> !</li>";
+			push(@warnings, "$Lang::tr{'filesystem full'}: $temp[0] <b>$Lang::tr{'free'}=$temp2%</b>");
 		}
 	}
 }
@@ -552,32 +586,25 @@ foreach my $file (@files) {
 	my $disk=`echo $file | cut -d"-" -f2`;
 	chomp ($disk);
 	if (`/bin/grep "SAVE ALL DATA" $file`) {
-		$warnmessage .= "<li>$Lang::tr{'smartwarn1'} /dev/$disk $Lang::tr{'smartwarn2'} !</li>";
+		push(@warnings, "$Lang::tr{'smartwarn1'} /dev/$disk $Lang::tr{'smartwarn2'}");
 	}
 }
 
-# Reiser4 warning
-my @files = `mount | grep " reiser4 (" 2>/dev/null`;
-foreach my $disk (@files) {
-	chomp ($disk);
-	$warnmessage .= "<li>$disk - $Lang::tr{'deprecated fs warn'}</li>";
+my %coredb = &Pakfire::coredbinfo();
+if (defined $coredb{'AvailableRelease'}) {
+	push(@warnings, "<a href='pakfire.cgi'>$Lang::tr{'core notice 1'} $coredb{'Release'} $Lang::tr{'core notice 2'} $coredb{'AvailableRelease'} $Lang::tr{'core notice 3'}</a>");
 }
 
-if ($warnmessage) {
-	&Header::openbox('100%','center', );
-	print "<table class='tbl' style='width:80%;'>";
-	print "<tr><th>$Lang::tr{'fwhost hint'}</th></tr>";
-	print "<tr><td style='color:white; background-color:$Header::colourred;'>$warnmessage</td></tr>";
-    print "</table>";
-	&Header::closebox();
-}
-
-&Pakfire::dblist("upgrade", "notice");
 if ( -e "/var/run/need_reboot" ) {
-	print "<div style='text-align:center; color:red;'>";
-	print "<br/><br/>$Lang::tr{'needreboot'}!";
-	print "</div>";
+	push(@warnings, $Lang::tr{'needreboot'});
 }
+
+if ( `/bin/grep -c "reiserfs" /proc/self/mounts`  > 0 ) {
+	push (@warnings, $Lang::tr{'reiserfs warning1'} . " " . $Lang::tr{'reiserfs warning2'});
+}
+
+# Show any warnings
+&Header::warningbox(@warnings);
 
 &Header::closebigbox();
 &Header::closepage();

@@ -1,7 +1,7 @@
 ###############################################################################
 #                                                                             #
 # IPFire.org - A linux based firewall                                         #
-# Copyright (C) 2010  IPFire Team  <info@ipfire.org>                          #
+# Copyright (C) 2007-2025  IPFire Team  <info@ipfire.org>                     #
 #                                                                             #
 # This program is free software: you can redistribute it and/or modify        #
 # it under the terms of the GNU General Public License as published by        #
@@ -24,13 +24,17 @@
 
 include Config
 
-VER        = 7.4
+VER        = 9.1.1854
 
 THISAPP    = vim-$(VER)
-DL_FILE    = $(THISAPP).tar.bz2
+DL_FILE    = $(THISAPP).tar.gz
 DL_FROM    = $(URL_IPFIRE)
-DIR_APP    = $(DIR_SRC)/vim74
+DIR_APP    = $(DIR_SRC)/$(THISAPP)
 TARGET     = $(DIR_INFO)/$(THISAPP)
+
+# vim tries to build itself with FORTIFY_SOURCE=1 and is not very good at
+# filtering out any CFLAGS that might change that. So we do this ourselves.
+CFLAGS    := $(filter-out -Wp$(COMMA)-U_FORTIFY_SOURCE,$(CFLAGS))
 
 ###############################################################################
 # Top-level Rules
@@ -40,7 +44,7 @@ objects = $(DL_FILE)
 
 $(DL_FILE) = $(DL_FROM)/$(DL_FILE)
 
-$(DL_FILE)_MD5 = 607e135c559be642f210094ad023dc65
+$(DL_FILE)_BLAKE2 = a5469910c381392b80c98c60d6c826b88c42bf0d8815f080297fbca44d9159fcfa2af79a3d5f1766c800d19ccb929979847dbe3677af95e448986cd88eefc2f3
 
 install : $(TARGET)
 
@@ -48,10 +52,10 @@ check : $(patsubst %,$(DIR_CHK)/%,$(objects))
 
 download :$(patsubst %,$(DIR_DL)/%,$(objects))
 
-md5 : $(subst %,%_MD5,$(objects))
+b2 : $(subst %,%_BLAKE2,$(objects))
 
 ###############################################################################
-# Downloading, checking, md5sum
+# Downloading, checking, b2sum
 ###############################################################################
 
 $(patsubst %,$(DIR_CHK)/%,$(objects)) :
@@ -60,8 +64,8 @@ $(patsubst %,$(DIR_CHK)/%,$(objects)) :
 $(patsubst %,$(DIR_DL)/%,$(objects)) :
 	@$(LOAD)
 
-$(subst %,%_MD5,$(objects)) :
-	@$(MD5)
+$(subst %,%_BLAKE2,$(objects)) :
+	@$(B2SUM)
 
 ###############################################################################
 # Installation Details
@@ -69,14 +73,15 @@ $(subst %,%_MD5,$(objects)) :
 
 $(TARGET) : $(patsubst %,$(DIR_DL)/%,$(objects))
 	@$(PREBUILD)
-	@rm -rf $(DIR_APP) && cd $(DIR_SRC) && tar jxf $(DIR_DL)/$(DL_FILE)
+	@rm -rf $(DIR_APP) && cd $(DIR_SRC) && tar axf $(DIR_DL)/$(DL_FILE)
+	cd $(DIR_APP) && patch -Np1 < $(DIR_SRC)/src/patches/vim/vim-9.1.0886_fix_hardening_crash.patch
 	cd $(DIR_APP) && echo '#define SYS_VIMRC_FILE "/etc/vimrc"' >> src/feature.h
 	cd $(DIR_APP) && ./configure \
-		--prefix=/usr \
-		--with-features=huge \
-		--enable-multibyte \
-		--enable-gui=no \
-		--disable-nls
+				--prefix=/usr \
+				--with-features=huge \
+				--enable-multibyte \
+				--enable-gui=no \
+				--disable-nls
 	cd $(DIR_APP) && make $(MAKETUNING)
 	cd $(DIR_APP) && make install
 

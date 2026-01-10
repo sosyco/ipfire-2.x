@@ -14,11 +14,6 @@
 
 #include "setup.h"
 
-#define DNS1 0
-#define DNS2 1
-#define DEFAULT_GATEWAY 2
-#define DNSGATEWAY_TOTAL 3
-
 extern FILE *flog;
 extern char *mylog;
 
@@ -56,7 +51,6 @@ int drivermenu(void);
 int changedrivers(void);
 int greenaddressmenu(void);
 int addressesmenu(void);
-int dnsgatewaymenu(void);
 
 int handlenetworking(void)
 {
@@ -88,10 +82,6 @@ int handlenetworking(void)
 				addressesmenu();
 				break;
 			
-			case 4:
-				dnsgatewaymenu();
-				break;
-				
 			case 0:
 				if (oktoleave()) done = 1;
 				break;
@@ -113,6 +103,8 @@ int handlenetworking(void)
 
 			runcommandwithstatus("/etc/rc.d/init.d/network start",
 				_("Networking"), _("Restarting network..."), NULL);
+			runcommandwithstatus("/etc/rc.d/init.d/unbound restart",
+				_("Networking"), _("Restarting unbound..."), NULL);
 		}
 	} else {
 		rename_nics();
@@ -142,9 +134,13 @@ int oktoleave(void)
 		strcpy(temp, ""); findkey(kv, "GREEN_DEV", temp);
 		if (!(strlen(temp)))
 		{
-			errorbox(_("No GREEN interface assigned."));
-			freekeyvalues(kv);
-			return 0;
+			rc = newtWinChoice(_("Error"), _("OK"), _("Ignore"),
+				_("No GREEN interface assigned."));
+			if (rc == 0 || rc == 1)
+			{
+				freekeyvalues(kv);
+				return 0;
+			}
 		}
 		if (!(interfacecheck(kv, "GREEN")))
 		{
@@ -179,9 +175,13 @@ int oktoleave(void)
 		strcpy(temp, ""); findkey(kv, "ORANGE_DEV", temp);
 		if (!(strlen(temp)))
 		{
-			errorbox(_("No ORANGE interface assigned."));
-			freekeyvalues(kv);
-			return 0;
+			rc = newtWinChoice(_("Error"), _("OK"), _("Ignore"),
+				_("No ORANGE interface assigned."));
+			if (rc == 0 || rc == 1)
+			{
+				freekeyvalues(kv);
+				return 0;
+			}
 		}
 		if (!(interfacecheck(kv, "ORANGE")))
 		{
@@ -195,32 +195,17 @@ int oktoleave(void)
 		strcpy(temp, ""); findkey(kv, "BLUE_DEV", temp);
 		if (!(strlen(temp)))
 		{
-			errorbox(_("No BLUE interface assigned."));
-			freekeyvalues(kv);
-			return 0;
+			rc = newtWinChoice(_("Error"), _("OK"), _("Ignore"),
+				_("No BLUE interface assigned."));
+			if (rc == 0 || rc == 1)
+			{
+				freekeyvalues(kv);
+				return 0;
+			}
 		}
 		if (!(interfacecheck(kv, "BLUE")))
 		{
 			errorbox(_("Missing an IP address on BLUE."));
-			freekeyvalues(kv);
-			return 0;
-		}
-	}
-	
-	strcpy(temp, ""); findkey(kv, "RED_TYPE", temp);
-	if ((configtype == 0) || (strcmp(temp, "STATIC") == 0))
-	{
-		strcpy(temp, ""); findkey(kv, "DNS1", temp);
-		if (!(strlen(temp)))
-		{
-                       errorbox(_("Missing DNS."));
-			freekeyvalues(kv);
-			return 0;
-		}
-		strcpy(temp, ""); findkey(kv, "DEFAULT_GATEWAY", temp);
-		if (!(strlen(temp)))
-		{
-			errorbox(_("Missing Default Gateway."));
 			freekeyvalues(kv);
 			return 0;
 		}
@@ -236,7 +221,6 @@ int firstmenu(void)
 		_("Network configuration type"),
 		_("Drivers and card assignments"),
 		_("Address settings"),
-		_("DNS and Gateway settings"),
 		NULL
 	};
 	int rc;
@@ -401,7 +385,7 @@ int drivermenu(void)
 		if (strcmp(knics[i].macaddr, ""))
 			kcount++;
 
-	if (neednics = kcount)
+	if (neednics == kcount)
 	{
 		strcat(message, "\n");
 		strcat(message, _("Do you wish to change these settings?"));
@@ -417,11 +401,6 @@ int drivermenu(void)
 	freekeyvalues(kv);
 
 	return 1;
-}
-
-int set_menu_entry_for(int *nr, int *card)
-{
-
 }
 
 int changedrivers(void)
@@ -441,9 +420,6 @@ int changedrivers(void)
 		errorbox(_("Unable to open settings file"));
 		return 0;
 	}
-	if (automode == 0)
-		runcommandwithstatus("/etc/rc.d/init.d/network stop red blue orange",
-			_("Networking"), _("Restarting non-local network..."), NULL);
 
 	findkey(kv, "CONFIG_TYPE", temp); configtype = atol(temp);
 	if (configtype == 1)
@@ -454,7 +430,7 @@ int changedrivers(void)
 		{ green = 1; red = 1; blue = 1; }
 	else if (configtype == 4)
 		{ green = 1; red=1; orange=1; blue = 1; }
-	else if (configtype == "")
+	else
 	  { green = 1; red = 1; }
 
 	do
@@ -693,112 +669,3 @@ int addressesmenu(void)
 	
 	return 0;
 }
-
-/* DNS and default gateway.... */
-int dnsgatewaymenu(void)
-{
-	struct keyvalue *kv = initkeyvalues();
-	char message[1000];
-	char temp[STRING_SIZE] = "0";
-	struct newtWinEntry entries[DNSGATEWAY_TOTAL+1];
-	char *values[DNSGATEWAY_TOTAL];         /* pointers for the values. */
-	int error;
-	int configtype;
-	int rc;
-
-	if (!(readkeyvalues(kv, CONFIG_ROOT "/ethernet/settings")))
-	{
-		freekeyvalues(kv);
-		errorbox(_("Unable to open settings file"));
-		return 0;
-	}
-
-	entries[DNS1].text = _("Primary DNS:");
-	strcpy(temp, ""); findkey(kv, "DNS1", temp);
-	values[DNS1] = strdup(temp);
-	entries[DNS1].value = &values[DNS1];
-	entries[DNS1].flags = 0;
-	
-	entries[DNS2].text = _("Secondary DNS:");
-	strcpy(temp, ""); findkey(kv, "DNS2", temp);
-	values[DNS2] = strdup(temp);
-	entries[DNS2].value = &values[DNS2];
-	entries[DNS2].flags = 0;
-	
-	entries[DEFAULT_GATEWAY].text = _("Default gateway:");
-	strcpy(temp, ""); findkey(kv, "DEFAULT_GATEWAY", temp);
-	values[DEFAULT_GATEWAY] = strdup(temp);
-	entries[DEFAULT_GATEWAY].value = &values[DEFAULT_GATEWAY];
-	entries[DEFAULT_GATEWAY].flags = 0;
-	
-	entries[DNSGATEWAY_TOTAL].text = NULL;
-	entries[DNSGATEWAY_TOTAL].value = NULL;
-	entries[DNSGATEWAY_TOTAL].flags = 0;
-	
-	do
-	{
-		error = 0;
-		
-		rc = newtWinEntries(_("DNS and Gateway settings"),
-			_("Enter the DNS and gateway information. "
-			"These settings are used only with Static IP (and DHCP if DNS set) on the RED interface."),
-			50, 5, 5, 18, entries, _("OK"), _("Cancel"), NULL);
-		if (rc == 0 || rc == 1)
-		{
-			strcpy(message, _("The following fields are invalid:"));
-			strcpy(message, "\n\n");
-			if (strlen(values[DNS1]))
-			{
-				if (inet_addr(values[DNS1]) == INADDR_NONE)
-				{
-					strcat(message, _("Primary DNS"));
-					strcat(message, "\n");
-					error = 1;
-				}
-			}
-			if (strlen(values[DNS2]))
-			{
-				if (inet_addr(values[DNS2]) == INADDR_NONE)
-				{
-					strcat(message, _("Secondary DNS"));
-					strcat(message, "\n");
-					error = 1;
-				}
-			}
-			if (strlen(values[DEFAULT_GATEWAY]))
-			{
-				if (inet_addr(values[DEFAULT_GATEWAY]) == INADDR_NONE)
-				{
-					strcat(message, _("Default gateway"));
-					strcat(message, "\n");
-					error = 1;
-				}
-			}
-			if (!strlen(values[DNS1]) && strlen(values[DNS2]))
-			{
-				strcpy(message, _("Secondary DNS specified without a Primary DNS"));
-				strcat(message, "\n");
-				error = 1;
-			}
-
-			if (error)
-				errorbox(message);
-			else
-			{
-				replacekeyvalue(kv, "DNS1", values[DNS1]);
-				replacekeyvalue(kv, "DNS2", values[DNS2]);
-				replacekeyvalue(kv, "DEFAULT_GATEWAY", values[DEFAULT_GATEWAY]);
-				netaddresschange = 1;
-				free(values[DNS1]);
-				free(values[DNS2]);
-				free(values[DEFAULT_GATEWAY]);
-				writekeyvalues(kv, CONFIG_ROOT "/ethernet/settings");
-			}
-		}
-	}
-	while (error);
-	
-	freekeyvalues(kv);
-	
-	return 1;
-}			

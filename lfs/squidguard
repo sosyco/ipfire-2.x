@@ -1,7 +1,7 @@
 ###############################################################################
 #                                                                             #
 # IPFire.org - A linux based firewall                                         #
-# Copyright (C) 2007  Michael Tremer & Christian Schmidt                      #
+# Copyright (C) 2007-2021  IPFire Team  <info@ipfire.org>                     #
 #                                                                             #
 # This program is free software: you can redistribute it and/or modify        #
 # it under the terms of the GNU General Public License as published by        #
@@ -24,23 +24,26 @@
 
 include Config
 
-VER        = 1.4.1
+VER        = 1.6.0
 
-THISAPP    = squidGuard-$(VER)
+THISAPP    = squidguard-$(VER)
 DL_FILE    = $(THISAPP).tar.gz
 DL_FROM    = $(URL_IPFIRE)
 DIR_APP    = $(DIR_SRC)/$(THISAPP)
 TARGET     = $(DIR_INFO)/$(THISAPP)
 
+# Fix build with GCC 15
+CFLAGS    += -std=gnu17 -fcommon
+
 ###############################################################################
 # Top-level Rules
 ###############################################################################
 
-objects = $(DL_FILE) 
+objects = $(DL_FILE)
 
 $(DL_FILE) = $(DL_FROM)/$(DL_FILE)
 
-$(DL_FILE)_MD5 = 9ae7b62a63631bb2dd1f474cf2bbe4dc
+$(DL_FILE)_BLAKE2 = 36b422fb2424c79532e0d9dc237b4a60b7817190a45de3646a50031b341c5e94540f55adea7b3e8241b8d87fdec551c5c40d1f60ea90e25347305ef9e473b5d3
 
 install : $(TARGET)
 
@@ -48,10 +51,10 @@ check : $(patsubst %,$(DIR_CHK)/%,$(objects))
 
 download :$(patsubst %,$(DIR_DL)/%,$(objects))
 
-md5 : $(subst %,%_MD5,$(objects))
+b2 : $(subst %,%_BLAKE2,$(objects))
 
 ###############################################################################
-# Downloading, checking, md5sum
+# Downloading, checking, b2sum
 ###############################################################################
 
 $(patsubst %,$(DIR_CHK)/%,$(objects)) :
@@ -60,8 +63,8 @@ $(patsubst %,$(DIR_CHK)/%,$(objects)) :
 $(patsubst %,$(DIR_DL)/%,$(objects)) :
 	@$(LOAD)
 
-$(subst %,%_MD5,$(objects)) :
-	@$(MD5)
+$(subst %,%_BLAKE2,$(objects)) :
+	@$(B2SUM)
 
 ###############################################################################
 # Installation Details
@@ -70,12 +73,24 @@ $(subst %,%_MD5,$(objects)) :
 $(TARGET) : $(patsubst %,$(DIR_DL)/%,$(objects))
 	@$(PREBUILD)
 	@rm -rf $(DIR_APP) && cd $(DIR_SRC) && tar zxf $(DIR_DL)/$(DL_FILE)
-	cd $(DIR_APP) && patch -Np1 -i $(DIR_SRC)/src/patches/squidguard-1.4-squid-helper-protocol.patch
-	cd $(DIR_APP) && ./configure --prefix=/usr --datadir=/usr/share \
-		--sysconfdir=/etc --localstatedir=/var --infodir=/usr/info --mandir=/usr/man  \
+	cd $(DIR_APP) && patch -Np1 < $(DIR_SRC)/src/patches/squidguard-1.6.0-stdlib.patch
+	cd $(DIR_APP) && patch -Np1 < $(DIR_SRC)/src/patches/squidguard-1.6.0-configure.patch
+	cd $(DIR_APP) && ./autogen.sh
+	cd $(DIR_APP) && ./configure \
+		--prefix=/usr \
+		--datadir=/usr/share \
+		--sysconfdir=/etc \
+		--localstatedir=/var \
+		--infodir=/usr/info \
+		--mandir=/usr/man  \
 		--with-sg-config=/var/ipfire/urlfilter/squidGuard.conf \
-		--with-sg-logdir=/var/log/squidGuard --with-sg-dbhome=/var/lib/squidguard \
-		--with-db=/usr --with-db-inc=/usr/include --with-db-lib=/usr/lib
+		--with-sg-logdir=/var/log/squidGuard \
+		--with-syslog=yes \
+		--with-sg-dbhome=/var/lib/squidguard \
+		--with-db=/usr \
+		--with-db-inc=/usr/include \
+		--with-db-lib=/usr/lib
+
 	cd $(DIR_APP) && make
 	cd $(DIR_APP) && make install
 
@@ -91,8 +106,8 @@ $(TARGET) : $(patsubst %,$(DIR_DL)/%,$(objects))
 	chmod 755 /var/ipfire/urlfilter/bin/prebuild.pl
 	cp -f  $(DIR_CONF)/urlfilter/autoupdate.pl /var/ipfire/urlfilter/bin/autoupdate.pl
 	chmod 755 /var/ipfire/urlfilter/bin/autoupdate.pl
-	echo "1.7.1" > /var/ipfire/urlfilter/version
-	
+	echo "1.5-beta" > /var/ipfire/urlfilter/version
+
 	# Wrapper
 	cp -f  $(DIR_CONF)/urlfilter/redirect_wrapper /usr/sbin
 	chmod 755 /usr/sbin/redirect_wrapper
@@ -101,6 +116,7 @@ $(TARGET) : $(patsubst %,$(DIR_DL)/%,$(objects))
 	/usr/bin/perl $(DIR_CONF)/urlfilter/makeconf.pl
 	touch /var/ipfire/urlfilter/settings
 	chown -R nobody:nobody /var/ipfire/urlfilter
+	chown -R root:root /var/ipfire/urlfilter/bin
 	chmod 755 /srv/web/ipfire/html/images/urlfilter
 	chmod 644 /srv/web/ipfire/html/images/urlfilter/*
 	chown -R nobody:nobody /var/urlrepo

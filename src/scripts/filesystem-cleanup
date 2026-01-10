@@ -1,0 +1,106 @@
+#!/bin/bash
+###############################################################################
+#                                                                             #
+# IPFire.org - A linux based firewall                                         #
+# Copyright (C) 2007-2022  IPFire Team  <info@ipfire.org>                     #
+#                                                                             #
+# This program is free software: you can redistribute it and/or modify        #
+# it under the terms of the GNU General Public License as published by        #
+# the Free Software Foundation, either version 3 of the License, or           #
+# (at your option) any later version.                                         #
+#                                                                             #
+# This program is distributed in the hope that it will be useful,             #
+# but WITHOUT ANY WARRANTY; without even the implied warranty of              #
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the               #
+# GNU General Public License for more details.                                #
+#                                                                             #
+# You should have received a copy of the GNU General Public License           #
+# along with this program.  If not, see <http://www.gnu.org/licenses/>.       #
+#                                                                             #
+###############################################################################
+
+PATHS=(
+	/usr/lib
+	/lib
+)
+
+main() {
+	local dry_run="false"
+
+	while [ $# -gt 0 ]; do
+		case "${1}" in
+			--dry-run)
+				dry_run="true"
+				;;
+
+			*)
+				echo "${0}: Invalid argument: ${1}" >&2
+				return 2
+				;;
+		esac
+		shift
+	done
+
+	# Update the runtime linker cache (this may fix any broken symlinks)
+	ldconfig
+
+	local path
+	for path in ${PATHS[@]}; do
+		echo "Searching in ${path}..."
+
+		# Find all files called libsomething.so.N
+		local lib
+		for lib in $(find "${path}" -maxdepth 1 -type l -name "lib*.so.*" | sort); do
+			# Ignore some libraries
+			case "${lib}" in
+				*/libboost*)
+					continue
+					;;
+				# libfuse does not seem to understand how to version their libraries
+				*/libfuse.*)
+					continue
+					;;
+			esac
+
+			# Read the name of the linked library
+			local link="$(readlink -m "${lib}")"
+
+			# We have two versioning schemas that we need to distinguish...
+			local files=()
+			case "${link}" in
+				# Libraries called libsomething-N.so
+				*/lib*-*.so)
+					files+=( ${link%-*}-* )
+					;;
+
+				# Libraries called libsomething.so.N.*
+				*)
+					files+=( ${lib}* )
+					;;
+			esac
+
+			# Remove all files that have the same base name than
+			# the library we are looking at, apart from the symlink
+			# and the linked file itself.
+			local file
+			for file in ${files[@]}; do
+				case "${file}" in
+					# Ignore these files
+					${lib}|${link})
+						;;
+
+					*)
+						echo "Removing ${file}..."
+
+						# Actually remove the file (maybe)
+						if [ "${dry_run}" = "false" ]; then
+							unlink "${file}"
+						fi
+						;;
+				esac
+			done
+		done
+	done
+}
+
+main "$@" || exit $?

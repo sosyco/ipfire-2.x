@@ -2,7 +2,7 @@
 ###############################################################################
 #                                                                             #
 # IPFire.org - A linux based firewall                                         #
-# Copyright (C) 2007-2014  IPFire Team  <info@ipfire.org>                     #
+# Copyright (C) 2007-2020  IPFire Team  <info@ipfire.org>                     #
 #                                                                             #
 # This program is free software: you can redistribute it and/or modify        #
 # it under the terms of the GNU General Public License as published by        #
@@ -25,14 +25,22 @@ use strict;
 #use warnings;
 #use CGI::Carp 'fatalsToBrowser';
 
+use IO::Socket;
+
 require '/var/ipfire/general-functions.pl';
+require "${General::swroot}/location-functions.pl";
 require "${General::swroot}/lang.pl";
 require "${General::swroot}/header.pl";
 
+my %color = ();
+my %mainsettings = ();
 my %remotesettings=();
 my %checked=();
 my $errormessage='';
 my $counter = 0;
+
+&General::readhash("${General::swroot}/main/settings", \%mainsettings);
+&General::readhash("/srv/web/ipfire/html/themes/ipfire/include/colors.txt", \%color);
 
 &Header::showhttpheaders();
 
@@ -57,14 +65,14 @@ if ( (($remotesettings{'ACTION'} eq $Lang::tr{'save'}) || ($remotesettings{'ACTI
 		{
 			$errormessage = $Lang::tr{'ssh no auth'};
 		}
-		system ('/usr/bin/touch', "${General::swroot}/remote/enablessh");
+		&General::system('/usr/bin/touch', "${General::swroot}/remote/enablessh");
 	}
 	else
 	{
 		&General::log($Lang::tr{'ssh is disabled'});
 		unlink "${General::swroot}/remote/enablessh";
 	}
-	
+
 	if ($remotesettings{'SSH_PORT'} eq 'on')
 	{
 		&General::log("SSH Port 22");
@@ -73,16 +81,16 @@ if ( (($remotesettings{'ACTION'} eq $Lang::tr{'save'}) || ($remotesettings{'ACTI
 	{
 		&General::log("SSH Port 222");
 	}
-	
+
 if ( $remotesettings{'ACTION'} eq $Lang::tr{'ssh tempstart15'} || $remotesettings{'ACTION'} eq $Lang::tr{'ssh tempstart30'} ){
 	if ($remotesettings{'ENABLE_SSH'} eq 'off')
 	{
-			system ('/usr/bin/touch', "${General::swroot}/remote/enablessh");
-			system('/usr/local/bin/sshctrl');
+			&General::system('/usr/bin/touch', "${General::swroot}/remote/enablessh");
+			&General::system('/usr/local/bin/sshctrl');
 	}
   if ( $remotesettings{'ACTION'} eq $Lang::tr{'ssh tempstart15'} ) { $counter = 900;}
   elsif ( $remotesettings{'ACTION'} eq $Lang::tr{'ssh tempstart30'} ) { $counter = 1800;}
- 
+
   system("/usr/local/bin/sshctrl tempstart $counter >/dev/null");
  }
 else {
@@ -97,6 +105,7 @@ else {
 # used
 	$remotesettings{'ENABLE_SSH_PASSWORDS'} = 'on' unless exists $remotesettings{'ENABLE_SSH_PASSWORDS'};
 	$remotesettings{'ENABLE_SSH_KEYS'} = 'on' unless exists $remotesettings{'ENABLE_SSH_KEYS'};
+	$remotesettings{'SSH_AGENT_FORWARDING'} = 'off' unless exists $remotesettings{'SSH_AGENT_FORWARDING'};
 
 $checked{'ENABLE_SSH'}{'off'} = '';
 $checked{'ENABLE_SSH'}{'on'} = '';
@@ -113,6 +122,9 @@ $checked{'ENABLE_SSH_KEYS'}{$remotesettings{'ENABLE_SSH_KEYS'}} = "checked='chec
 $checked{'SSH_PORT'}{'off'} = '';
 $checked{'SSH_PORT'}{'on'} = '';
 $checked{'SSH_PORT'}{$remotesettings{'SSH_PORT'}} = "checked='checked'";
+$checked{'SSH_AGENT_FORWARDING'}{'off'} = '';
+$checked{'SSH_AGENT_FORWARDING'}{'on'} = '';
+$checked{'SSH_AGENT_FORWARDING'}{$remotesettings{'SSH_AGENT_FORWARDING'}} = "checked='checked'";
 
 &Header::openpage($Lang::tr{'remote access'}, 1, '');
 
@@ -132,6 +144,11 @@ print <<END
 <tr>
 	<td><input type='checkbox' name='ENABLE_SSH' $checked{'ENABLE_SSH'}{'on'} /></td>
 	<td class='base' colspan='2'>$Lang::tr{'ssh access'}</td>
+</tr>
+<tr>
+	<td>&nbsp;</td>
+	<td><input type='checkbox' name='SSH_AGENT_FORWARDING' $checked{'SSH_AGENT_FORWARDING'}{'on'} /></td>
+	<td width='100%' class='base'>$Lang::tr{'ssh agent forwarding'}</td>
 </tr>
 <tr>
 	<td>&nbsp;</td>
@@ -166,14 +183,20 @@ END
 
 print "</form>\n";
 
-&Header::openbox('100%', 'left', $Lang::tr{'ssh host keys'});
+&Header::openbox('100%', 'center', $Lang::tr{'ssh host keys'});
 
-print "<table>\n";
+print "<table class='tbl' width='100%'>\n";
 
 print <<END
-<tr><td class='boldbase'><b>$Lang::tr{'ssh key'}</b></td>
-    <td class='boldbase'><b>$Lang::tr{'ssh fingerprint'}</b></td>
-    <td class='boldbase'><b>$Lang::tr{'ssh key size'}</b></td></tr>
+<thead>
+	<tr>
+		<th align="center"><strong>$Lang::tr{'ssh key'}</strong></th>
+		<th align="center"><strong>$Lang::tr{'type'}</strong></th>
+		<th align="center"><strong>$Lang::tr{'ssh fingerprint'}</strong></th>
+		<th align="center"><strong>$Lang::tr{'ssh key size'}</strong></th>
+	</tr>
+</thead>
+<tbody>
 END
 ;
 
@@ -183,7 +206,39 @@ END
 &viewkey("/etc/ssh/ssh_host_ecdsa_key.pub","ECDSA");
 &viewkey("/etc/ssh/ssh_host_ed25519_key.pub","ED25519");
 
-print "</table>\n";
+print "</tbody>\n</table>\n";
+
+&Header::closebox();
+
+&Header::openbox('100%', 'center', $Lang::tr{'ssh active sessions'});
+
+print <<END;
+		<table class="tbl" width="100%">
+			<thead>
+				<tr>
+					<th align="center">
+						<strong>$Lang::tr{'ssh username'}</strong>
+					</th>
+					<th align="center">
+						<strong>$Lang::tr{'ssh login time'}</strong>
+					</th>
+					<th align="center">
+						<strong>$Lang::tr{'ip address'}</strong>
+					</th>
+					<th align="center">
+						<strong>$Lang::tr{'country'}</strong>
+					</th>
+					<th align="center">
+						<strong>$Lang::tr{'rdns'}</strong>
+					</th>
+				</tr>
+			</thead>
+			<tbody>
+END
+
+&printactivelogins();
+
+print "</tbody>\n</table>\n";
 
 &Header::closebox();
 
@@ -199,9 +254,61 @@ sub viewkey
 
   if ( -e $key )
   {
-    my @temp = split(/ /,`/usr/bin/ssh-keygen -l -f $key`);
+    # Use safe system_output function to call ssh-keygen and get the output from the tool.
+    my @ssh_keygen = &General::system_output("/usr/bin/ssh-keygen", "-l", "-f", "$key");
+
+    my @temp = split(/ /, $ssh_keygen[0]);
     my $keysize = &Header::cleanhtml($temp[0],"y");
     my $fingerprint = &Header::cleanhtml($temp[1],"y");
-    print "<tr><td>$key ($name)</td><td><code>$fingerprint</code></td><td align='center'>$keysize</td></tr>\n";
+    print "<tr><td><code>$key</code></td><td align='center'>$name</td><td><code>$fingerprint</code></td><td align='center'>$keysize</td></tr>\n";
   }
+}
+
+sub printactivelogins()
+{
+	# print active SSH logins (grep outpout of "who -s")
+	my @output = &General::system_output("who", "-s");
+	chomp(@output);
+
+	my $id = 0;
+
+	if ( scalar(@output) == 0 )
+	{
+		# no logins appeared
+		my $table_colour = ($id++ % 2) ? $color{'color20'} : $color{'color22'};
+		print "<tr bgcolor='$table_colour'><td colspan='5'>$Lang::tr{'ssh no active logins'}</td></tr>\n";
+	} else {
+		# list active logins...
+		foreach my $line (@output)
+		{
+			my @arry = split(/\ +/, $line);
+
+			my $username = @arry[0];
+			my $logintime = join(' ', @arry[2..4]);
+			my $remoteip = @arry[5];
+			$remoteip =~ s/[()]//g;
+
+			# display more information about that IP adress...
+			my $ccode = &Location::Functions::lookup_country_code($remoteip);
+			my $flag_icon = &Location::Functions::get_flag_icon($ccode);
+
+			# get rDNS...
+			my $iaddr = inet_aton($remoteip);
+			my $rdns = gethostbyaddr($iaddr, AF_INET);
+			if (!$rdns) { $rdns = $Lang::tr{'ptr lookup failed'}; };
+
+			my $table_colour = ($id++ % 2) ? $color{'color20'} : $color{'color22'};
+
+			print <<END;
+			<tr bgcolor='$table_colour'>
+				<td>$username</td>
+				<td>$logintime</td>
+				<td align='center'><a href='ipinfo.cgi?ip=$remoteip'>$remoteip</a></td>
+				<td align='center'><a href='country.cgi#$ccode'><img src='$flag_icon' border='0' alt='$ccode' title='$ccode' /></a></td>
+				<td>$rdns</td>
+			</tr>
+END
+;
+		}
+	}
 }

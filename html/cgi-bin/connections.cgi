@@ -2,7 +2,7 @@
 ###############################################################################
 #                                                                             #
 # IPFire.org - A linux based firewall                                         #
-# Copyright (C) 2007-2012  IPFire Team  <info@ipfire.org>                     #
+# Copyright (C) 2007-2025  IPFire Team  <info@ipfire.org>                     #
 #                                                                             #
 # This program is free software: you can redistribute it and/or modify        #
 # it under the terms of the GNU General Public License as published by        #
@@ -20,239 +20,130 @@
 ###############################################################################
 
 use strict;
-
-use Net::IPv4Addr qw( :all );
 use Switch;
 
-# enable only the following on debugging purpose
+# only enable the following for debugging purposes
 #use warnings;
 #use CGI::Carp 'fatalsToBrowser';
 
 require '/var/ipfire/general-functions.pl';
 require "${General::swroot}/lang.pl";
 require "${General::swroot}/header.pl";
+require "${General::swroot}/ids-functions.pl";
+require "${General::swroot}/location-functions.pl";
 
 my $colour_multicast = "#A0A0A0";
 
-# sort arguments for connection tracking table
-# the sort field. eg. 1=src IP, 2=dst IP, 3=src port, 4=dst port
-my $SORT_FIELD = 0;
-# the sort order. (a)scending orr (d)escending
-my $SORT_ORDER = 0;
-# cgi query arguments
-my %cgiin;
-# debug mode
-my $debug = 0;
-
-# retrieve query arguments
-# note: let a-z A-Z and 0-9 pass as value only
-if (length ($ENV{'QUERY_STRING'}) > 0){
-	my $name;
-	my $value;
-	my $buffer = $ENV{'QUERY_STRING'};
-	my @pairs = split(/&/, $buffer);
-	foreach my $pair (@pairs){
-		($name, $value) = split(/=/, $pair);
-		$value =~ s/%([a-fA-F0-9][a-fA-F0-9])/pack("C", hex($1))/eg; # e.g. "%20" => " "
-		$value =~ s/[^a-zA-Z0-9]*//g; # a-Z 0-9 will pass
-		$cgiin{$name} = $value; 
-	}
-}
+my %settings = ();
+&General::readhash("/var/ipfire/ethernet/settings", \%settings);
 
 &Header::showhttpheaders();
 
-my @network=();
-my @masklen=();
-my @colour=();
+# Collect all known networks
+my %networks = (
+	# Localhost
+	"127.0.0.0/8" => ${Header::colourfw},
 
-my %netsettings=();
-&General::readhash("${General::swroot}/ethernet/settings", \%netsettings);
+	# Multicast
+	"224.0.0.0/3" => $colour_multicast,
 
-# output cgi query arrguments to browser on debug
-if ( $debug ){
-	&Header::openbox('100%', 'center', 'DEBUG');
-	my $debugCount = 0;
-	foreach my $line (sort keys %cgiin) {
-		print "$line = '$cgiin{$line}'<br />\n";
-		$debugCount++;
-	}
-	print "&nbsp;Count: $debugCount\n";
-	&Header::closebox();
+	# GREEN
+	"$settings{'GREEN_ADDRESS'}/32" => ${Header::colourfw},
+	"$settings{'GREEN_NETADDRESS'}/$settings{'GREEN_NETMASK'}" => ${Header::colourgreen},
+
+	# BLUE
+	"$settings{'BLUE_ADDRESS'}/32" => ${Header::colourfw},
+	"$settings{'BLUE_NETADDRESS'}/$settings{'BLUE_NETMASK'}" => ${Header::colourblue},
+
+	# ORANGE
+	"$settings{'ORANGE_ADDRESS'}/32" => ${Header::colourfw},
+	"$settings{'ORANGE_NETADDRESS'}/$settings{'ORANGE_NETMASK'}" => ${Header::colourorange},
+);
+
+# RED Address
+my $address = &IDS::get_red_address();
+if ($address) {
+	$networks{"${address}/32"} = ${Header::colourfw};
 }
 
-#workaround to suppress a warning when a variable is used only once
-my @dummy = ( ${Header::table1colour} );
-undef (@dummy);
-
-# check sorting arguments
-if ( $cgiin{'sort_field'} ~~ [ '1','2','3','4','5','6','7','8','9' ] ) {
-	$SORT_FIELD = $cgiin{'sort_field'};
-
-	if ( $cgiin{'sort_order'} ~~ [ 'a','d','A','D' ] ) {
-		$SORT_ORDER = lc($cgiin{'sort_order'});
-	}
+# Add all aliases
+my @aliases = &IDS::get_aliases();
+for my $alias (@aliases) {
+	$networks{"${alias}/32"} = ${Header::colourfw};
 }
 
-# Read and sort the connection tracking table
-# do sorting 
-if ($SORT_FIELD and $SORT_ORDER) { 
-	# field sorting when sorting arguments are sane
-	open(CONNTRACK, "/usr/local/bin/getconntracktable | /usr/local/bin/consort.sh $SORT_FIELD $SORT_ORDER |") or die "Unable to read conntrack table";
-} else {
-	# default sorting with no query arguments
-	open(CONNTRACK, "/usr/local/bin/getconntracktable | sort -k 5,5 --numeric-sort --reverse |") or die "Unable to read conntrack table";
-}
-my @conntrack = <CONNTRACK>;
-close(CONNTRACK);
+my %interfaces = (
+	$settings{'GREEN_DEV'}  => ${Header::colourgreen},
+	$settings{'BLUE_DEV'}   => ${Header::colourblue},
+	$settings{'ORANGE_DEV'} => ${Header::colourorange},
 
-# Collect data for the @network array.
+	# IPsec
+	"gre[0-9]+"             => ${Header::colourvpn},
+	"vti[0-9]+"             => ${Header::colourvpn},
 
-# Add Firewall Localhost 127.0.0.1
-push(@network, '127.0.0.1');
-push(@masklen, '255.255.255.255');
-push(@colour, ${Header::colourfw});
+	# OpenVPN
+	"tun[0-9]+"             => ${Header::colourovpn},
+);
 
-if (open(IP, "${General::swroot}/red/local-ipaddress")) {
-	my $redip = <IP>;
-	close(IP);
+my @routes = &General::system_output("ip", "route", "show");
 
-	chomp $redip;
-	push(@network, $redip);
-	push(@masklen, '255.255.255.255');
-	push(@colour, ${Header::colourfw});
-}
+# Find all routes
+foreach my $intf (keys %interfaces) {
+	# Skip empty interfaces
+	next if ($intf eq "");
 
-# Add STATIC RED aliases
-if ($netsettings{'RED_DEV'}) {
-	my $aliasfile = "${General::swroot}/ethernet/aliases";
-	open(ALIASES, $aliasfile) or die 'Unable to open aliases file.';
-	my @aliases = <ALIASES>;
-	close(ALIASES);
-
-	# We have a RED eth iface
-	if ($netsettings{'RED_TYPE'} eq 'STATIC') {
-		# We have a STATIC RED eth iface
-		foreach my $line (@aliases) {
-			chomp($line);
-			my @temp = split(/\,/,$line);
-			if ($temp[0]) {
-				push(@network, $temp[0]);
-				push(@masklen, $netsettings{'RED_NETMASK'} );
-				push(@colour, ${Header::colourfw} );
-			}
+	foreach my $route (grep(/dev ${intf}/, @routes)) {
+		if ($route =~ m/^(\d+\.\d+\.\d+\.\d+\/\d+)/) {
+			$networks{$1} = $interfaces{$intf};
 		}
 	}
 }
 
-# Add Green Firewall Interface
-push(@network, $netsettings{'GREEN_ADDRESS'});
-push(@masklen, "255.255.255.255" );
-push(@colour, ${Header::colourfw} );
+# Load the WireGuard client pool
+if (-e "/var/ipfire/wireguard/settings") {
+	my %wgsettings = ();
 
-# Add Green Network to Array
-push(@network, $netsettings{'GREEN_NETADDRESS'});
-push(@masklen, $netsettings{'GREEN_NETMASK'} );
-push(@colour, ${Header::colourgreen} );
+	&General::readhash("/var/ipfire/wireguard/settings", \%wgsettings);
 
-# Add Green Routes to Array
-my @routes = `/sbin/route -n | /bin/grep $netsettings{'GREEN_DEV'}`;
-foreach my $route (@routes) {
-	chomp($route);
-	my @temp = split(/[\t ]+/, $route);
-	push(@network, $temp[0]);
-	push(@masklen, $temp[2]);
-	push(@colour, ${Header::colourgreen} );
+	$networks{$wgsettings{'CLIENT_POOL'}} = ${Header::colourwg};
 }
 
-# Add Blue Firewall Interface
-push(@network, $netsettings{'BLUE_ADDRESS'});
-push(@masklen, "255.255.255.255" );
-push(@colour, ${Header::colourfw} );
+# Load routed WireGuard networks
+if (-e "/var/ipfire/wireguard/peers") {
+	my %wgpeers = ();
 
-# Add Blue Network
-if ($netsettings{'BLUE_DEV'}) {
-	push(@network, $netsettings{'BLUE_NETADDRESS'});
-	push(@masklen, $netsettings{'BLUE_NETMASK'} );
-	push(@colour, ${Header::colourblue} );
+	# Load all peers
+	&General::readhasharray("/var/ipfire/wireguard/peers", \%wgpeers);
 
-	# Add Blue Routes to Array
-	@routes = `/sbin/route -n | /bin/grep $netsettings{'BLUE_DEV'}`;
-	foreach my $route (@routes) {
-		chomp($route);
-		my @temp = split(/[\t ]+/, $route);
-		push(@network, $temp[0]);
-		push(@masklen, $temp[2]);
-		push(@colour, ${Header::colourblue} );
+	foreach my $key (keys %wgpeers) {
+		my $networks = $wgpeers{$key}[8];
+
+		# Split the string
+		my @networks = split(/\|/, $networks);
+
+		foreach my $network (@networks) {
+			$networks{$network} = ${Header::colourwg};
+		}
 	}
 }
-
-# Add Orange Firewall Interface
-push(@network, $netsettings{'ORANGE_ADDRESS'});
-push(@masklen, "255.255.255.255" );
-push(@colour, ${Header::colourfw} );
-
-# Add Orange Network
-if ($netsettings{'ORANGE_DEV'}) {
-	push(@network, $netsettings{'ORANGE_NETADDRESS'});
-	push(@masklen, $netsettings{'ORANGE_NETMASK'} );
-	push(@colour, ${Header::colourorange} );
-	# Add Orange Routes to Array
-	@routes = `/sbin/route -n | /bin/grep $netsettings{'ORANGE_DEV'}`;
-	foreach my $route (@routes) {
-		chomp($route);
-		my @temp = split(/[\t ]+/, $route);
-		push(@network, $temp[0]);
-		push(@masklen, $temp[2]);
-		push(@colour, ${Header::colourorange} );
-	}
-}
-
-# Highlight multicast connections.
-push(@network, "224.0.0.0");
-push(@masklen, "239.0.0.0");
-push(@colour, $colour_multicast);
 
 # Add OpenVPN net and RED/BLUE/ORANGE entry (when appropriate)
 if (-e "${General::swroot}/ovpn/settings") {
 	my %ovpnsettings = ();
 	&General::readhash("${General::swroot}/ovpn/settings", \%ovpnsettings);
-	my @tempovpnsubnet = split("\/",$ovpnsettings{'DOVPN_SUBNET'});
 
-	# add OpenVPN net
-	push(@network, $tempovpnsubnet[0]);
-	push(@masklen, $tempovpnsubnet[1]);
-	push(@colour, ${Header::colourovpn} );
-
-	# add BLUE:port / proto
-	if (($ovpnsettings{'ENABLED_BLUE'} eq 'on') && $netsettings{'BLUE_DEV'}) {
-		push(@network, $netsettings{'BLUE_ADDRESS'} );
-		push(@masklen, '255.255.255.255' );
-		push(@colour, ${Header::colourovpn});
-	}
-
-	# add ORANGE:port / proto
-	if (($ovpnsettings{'ENABLED_ORANGE'} eq 'on') && $netsettings{'ORANGE_DEV'}) {
-		push(@network, $netsettings{'ORANGE_ADDRESS'} );
-		push(@masklen, '255.255.255.255' );
-		push(@colour, ${Header::colourovpn} );
-	}
+	$networks{$ovpnsettings{'DOVPN_SUBNET'}} = ${Header::colourovpn};
 }
 
 # Add OpenVPN net for custom OVPNs
 if (-e "${General::swroot}/ovpn/ccd.conf") {
-	open(OVPNSUB, "${General::swroot}/ovpn/ccd.conf");	
-	my @ovpnsub = <OVPNSUB>;
-	close(OVPNSUB);
+	open(OVPNSUB, "${General::swroot}/ovpn/ccd.conf");
+	foreach my $line (<OVPNSUB>) {
+		my @ovpn = split(',', $line);
 
-	foreach (@ovpnsub) {
-		my ($network, $mask) = split '/', (split ',', $_)[2];
-		
-		$mask = ipv4_cidr2msk($mask) unless &General::validip($mask);
-
-		push(@network, $network);
-		push(@masklen, $mask);
-		push(@colour, ${Header::colourovpn});
+		$networks{$ovpn[3]} = ${Header::colourovpn};
 	}
+	close(OVPNSUB);
 }
 
 open(IPSEC, "${General::swroot}/vpn/config");
@@ -264,42 +155,25 @@ foreach my $line (@ipsec) {
 
 	my @subnets = split(/\|/, $vpn[12]);
 	for my $subnet (@subnets) {
-		my ($network, $mask) = split("/", $subnet);
-
-		if (!&General::validip($mask)) {
-			$mask = ipv4_cidr2msk($mask);
-		}
-
-		push(@network, $network);
-		push(@masklen, $mask);
-		push(@colour, ${Header::colourvpn});
+		$networks{$subnet} = ${Header::colourvpn};
 	}
 }
 
 if (-e "${General::swroot}/ovpn/n2nconf") {
 	open(OVPNN2N, "${General::swroot}/ovpn/ovpnconfig");
-	my @ovpnn2n = <OVPNN2N>;
-	close(OVPNN2N);
-
-	foreach my $line (@ovpnn2n) {
+	foreach my $line (<OVPNN2N>) {
 		my @ovpn = split(',', $line);
 		next if ($ovpn[4] ne 'net');
 
-		my ($network, $mask) = split("/", $ovpn[12]);
-		if (!&General::validip($mask)) {
-			$mask = ipv4_cidr2msk($mask);
-		}
-
-		push(@network, $network);
-		push(@masklen, $mask);
-		push(@colour, ${Header::colourovpn});
+		$networks{$ovpn[12]} = ${Header::colourovpn};
 	}
+	close(OVPNN2N);
 }
 
 # Show the page.
 &Header::openpage($Lang::tr{'connections'}, 1, '');
 &Header::openbigbox('100%', 'left');
-&Header::openbox('100%', 'left', $Lang::tr{'connection tracking'});
+&Header::opensection();
 
 # Print legend.
 print <<END;
@@ -326,6 +200,9 @@ print <<END;
 			<td style='text-align:center; color:#FFFFFF; background-color:${Header::colourvpn};'>
 				<b>$Lang::tr{'vpn'}</b>
 			</td>
+			<td style='text-align:center; color:#FFFFFF; background-color:${Header::colourwg};'>
+				<b>$Lang::tr{'wireguard'}</b>
+			</td>
 			<td style='text-align:center; color:#FFFFFF; background-color:${Header::colourovpn};'>
 				<b>$Lang::tr{'OpenVPN'}</b>
 			</td>
@@ -337,95 +214,38 @@ print <<END;
 	<br>
 END
 
-if ($SORT_FIELD and $SORT_ORDER) {
-	my @sort_field_name = (
-		$Lang::tr{'source ip'},
-		$Lang::tr{'destination ip'},
-		$Lang::tr{'source port'},
-		$Lang::tr{'destination port'},
-		$Lang::tr{'protocol'},
-		$Lang::tr{'connection'}.' '.$Lang::tr{'status'},
-		$Lang::tr{'expires'}.' ('.$Lang::tr{'seconds'}.')',
-		$Lang::tr{'download'},
-		$Lang::tr{'upload'}
-	);
-	my $sort_order_name;
-	if (lc($SORT_ORDER) eq "a") {
-		$sort_order_name = $Lang::tr{'sort ascending'};
-	} else {
-		$sort_order_name = $Lang::tr{'sort descending'};
-	}
-
-print <<END
-	<div style="font-weight:bold;margin:10px;font-size: 70%">
-		$sort_order_name: $sort_field_name[$SORT_FIELD-1]
-	</div>
-END
-;
-}
-
-# Print table header.
+# Print table header
 print <<END;
-	<table style='width:100%'>
+	<table class="tbl">
 		<tr>
-			<th style='text-align:center'>
-				<a href="?sort_field=5&amp;sort_order=d"><img style="width:10px" src="/images/up.gif" alt=""></a>
-				<a href="?sort_field=5&amp;sort_order=a"><img style="width:10px" src="/images/down.gif" alt=""></a>
-			</th>
-			<th style='text-align:center' colspan='2'>
-				<a href="?sort_field=1&amp;sort_order=d"><img style="width:10px" src="/images/up.gif" alt=""></a>
-				<a href="?sort_field=1&amp;sort_order=a"><img style="width:10px" src="/images/down.gif" alt=""></a>
-				&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
-				<a href="?sort_field=3&amp;sort_order=d"><img style="width:10px" src="/images/up.gif" alt=""></a>
-				<a href="?sort_field=3&amp;sort_order=a"><img style="width:10px" src="/images/down.gif" alt=""></a>
-			</th>
-			<th style='text-align:center' colspan='2'>
-				<a href="?sort_field=2&amp;sort_order=d"><img style="width:10px" src="/images/up.gif" alt=""></a>
-				<a href="?sort_field=2&amp;sort_order=a"><img style="width:10px" src="/images/down.gif" alt=""></a>
-				&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
-				<a href="?sort_field=4&amp;sort_order=d"><img style="width:10px" src="/images/up.gif" alt=""></a>
-				<a href="?sort_field=4&amp;sort_order=a"><img style="width:10px" src="/images/down.gif" alt=""></a>
-			</th>
-			<th style='text-align:center'>
-				<a href="?sort_field=8&amp;sort_order=d"><img style="width:10px" src="/images/up.gif" alt=""></a>
-				<a href="?sort_field=8&amp;sort_order=a"><img style="width:10px" src="/images/down.gif" alt=""></a>
-				&nbsp;&nbsp;&nbsp;&nbsp;
-				<a href="?sort_field=9&amp;sort_order=d"><img style="width:10px" src="/images/up.gif" alt=""></a>
-				<a href="?sort_field=9&amp;sort_order=a"><img style="width:10px" src="/images/down.gif" alt=""></a>
-			</th>
-			<th style='text-align:center'>
-				<a href="?sort_field=6&amp;sort_order=d"><img style="width:10px" src="/images/up.gif" alt=""></a>
-				<a href="?sort_field=6&amp;sort_order=a"><img style="width:10px" src="/images/down.gif" alt=""></a>
-			</th>
-			<th style='text-align:center'>
-				<a href="?sort_field=7&amp;sort_order=d"><img style="width:10px" src="/images/up.gif" alt=""></a>
-				<a href="?sort_field=7&amp;sort_order=a"><img style="width:10px" src="/images/down.gif" alt=""></a>
-			</th>
-		</tr>
-		<tr>
-			<th style='text-align:center'>
+			<th>
 				$Lang::tr{'protocol'}
 			</th>
-			<th style='text-align:center' colspan='2'>
+			<th colspan='2'>
 				$Lang::tr{'source ip and port'}
 			</th>
-			<th style='text-align:center' colspan='2'>
+			<th></th>
+			<th colspan='2'>
 				$Lang::tr{'dest ip and port'}
 			</th>
-			<th style='text-align:center'>
-				$Lang::tr{'download'} /
-				<br>$Lang::tr{'upload'}
+			<th></th>
+			<th colspan='2'>
+				$Lang::tr{'data transfer'}
 			</th>
-			<th style='text-align:center'>
+			<th>
 				$Lang::tr{'connection'}<br>$Lang::tr{'status'}
 			</th>
-			<th style='text-align:center'>
-				$Lang::tr{'expires'}<br>($Lang::tr{'seconds'})
+			<th>
+				$Lang::tr{'expires'}<br>($Lang::tr{'hours:minutes:seconds'})
 			</th>
 		</tr>
 END
 
-foreach my $line (@conntrack) {
+# Read and sort the connection tracking table
+open(CONNTRACK, "/usr/local/bin/getconntracktable | sort -k 5,5 --numeric-sort --reverse |")
+	or die "Unable to read conntrack table";
+
+foreach my $line (<CONNTRACK>) {
 	my @conn = split(' ', $line);
 
 	# The first bit is the l3 protocol.
@@ -537,11 +357,18 @@ foreach my $line (@conntrack) {
 		$dserv = uc(getservbyport($dport, lc($l4proto)));
 	}
 
-	my $bytes_in = format_bytes($bytes[0]);
-	my $bytes_out = format_bytes($bytes[1]);
+	# Format bytes
+	my $bytes_in  = &General::formatBytes($bytes[0]);
+	my $bytes_out = &General::formatBytes($bytes[1]);
+
+	# enumerate location information
+	my $srcccode = &Location::Functions::lookup_country_code($sip_ret);
+	my $src_flag_icon = &Location::Functions::get_flag_icon($srcccode);
+	my $dstccode = &Location::Functions::lookup_country_code($dip_ret);
+	my $dst_flag_icon = &Location::Functions::get_flag_icon($dstccode);
 
 	# Format TTL
-	$ttl = format_time($ttl);
+	$ttl = &General::format_time($ttl);
 
 	my $sip_extra;
 	if ($sip_ret && $sip ne $sip_ret) {
@@ -559,7 +386,6 @@ foreach my $line (@conntrack) {
 		$dip_extra .= "</a>";
 	}
 
-
 	my $sport_extra;
 	if ($sport ne $sport_ret) {
 		my $sserv_ret = '';
@@ -568,7 +394,7 @@ foreach my $line (@conntrack) {
 		}
 
 		$sport_extra = "<span style='color:#FFFFFF;'>&gt;</span> ";
-		$sport_extra .= "<a href='http://isc.sans.org/port_details.php?port=$sport_ret' target='top' title='$sserv_ret'>";
+		$sport_extra .= "<a href='https://isc.sans.edu/port.html?port=$sport_ret' target='top' title='$sserv_ret'>";
 		$sport_extra .= " <span style='color:#FFFFFF;'>$sport_ret</span>";
 		$sport_extra .= "</a>";
 	}
@@ -581,7 +407,7 @@ foreach my $line (@conntrack) {
 		}
 
 		$dport_extra = "<span style='color:#FFFFFF;'>&gt;</span> ";
-		$dport_extra .= "<a href='http://isc.sans.org/port_details.php?port=$dport_ret' target='top' title='$dserv_ret'>";
+		$dport_extra .= "<a href='https://isc.sans.edu/port.html?port=$dport_ret' target='top' title='$dserv_ret'>";
 		$dport_extra .= " <span style='color:#FFFFFF;'>$dport_ret</span>";
 		$dport_extra .= "</a>";
 	}
@@ -596,10 +422,13 @@ foreach my $line (@conntrack) {
 			$sip_extra
 		</td>
 		<td style='text-align:center; background-color:$sip_colour;'>
-			<a href='http://isc.sans.org/port_details.php?port=$sport' target='top' title='$sserv'>
+			<a href='https://isc.sans.edu/port.html?port=$sport' target='top' title='$sserv'>
 				<span style='color:#FFFFFF;'>$sport</span>
 			</a>
 			$sport_extra
+		</td>
+		<td style='text-align:center; background-color:$sip_colour;'>
+			<a href='country.cgi#$srcccode'><img src='$src_flag_icon' border='0' align='absmiddle' alt='$srcccode' title='$srcccode' /></a>
 		</td>
 		<td style='text-align:center; background-color:$dip_colour;'>
 			<a href='/cgi-bin/ipinfo.cgi?ip=$dip'>
@@ -608,13 +437,19 @@ foreach my $line (@conntrack) {
 			$dip_extra
 		</td>
 		<td style='text-align:center; background-color:$dip_colour;'>
-			<a href='http://isc.sans.org/port_details.php?port=$dport' target='top' title='$dserv'>
+			<a href='https://isc.sans.edu/port.html?port=$dport' target='top' title='$dserv'>
 				<span style='color:#FFFFFF;'>$dport</span>
 			</a>
 			$dport_extra
 		</td>
-		<td style='text-align:center'>
-			$bytes_in / $bytes_out
+		<td style='text-align:center; background-color:$dip_colour;'>
+			<a href='country.cgi#$dstccode'><img src='$dst_flag_icon' border='0' align='absmiddle' alt='$dstccode' title='$dstccode' /></a>
+		</td>
+		<td class="text-right">
+			&gt; $bytes_in
+		</td>
+		<td class="text-right">
+			&lt; $bytes_out
 		</td>
 		<td style='text-align:center'>$state</td>
 		<td style='text-align:center'>$ttl</td>
@@ -622,64 +457,35 @@ foreach my $line (@conntrack) {
 END
 }
 
+close(CONNTRACK);
+
 # Close the main table.
 print "</table>";
 
-&Header::closebox();
+&Header::closesection();
 &Header::closebigbox();
 &Header::closepage();
 
-sub format_bytes($) {
-	my $bytes = shift;
-	my @units = ("B", "k", "M", "G", "T");
-
-	foreach my $unit (@units) {
-		if ($bytes < 1024) {
-			return sprintf("%d%s", $bytes, $unit);
-		}
-
-		$bytes /= 1024;
-	}
-
-	return sprintf("%d%s", $bytes, $units[$#units]);
-}
-
-sub format_time($) {
-	my $time = shift;
-
-	my $seconds = $time % 60;
-	my $minutes = $time / 60;
-
-	my $hours = 0;
-	if ($minutes >= 60) {
-		$hours = $minutes / 60;
-		$minutes %= 60;
-	}
-
-	return sprintf("%3d:%02d:%02d", $hours, $minutes, $seconds);
-}
-
 sub ipcolour($) {
-	my $id = 0;
-	my $colour = ${Header::colourred};
-	my ($ip) = $_[0];
-	my $found = 0;
+	my $address = shift;
 
-	if ($ip) {
-		foreach my $line (@network) {
-			if ($network[$id] eq '') {
-				$id++;
-			} else {
-				if (!$found && ipv4_in_network($network[$id], $masklen[$id], $ip) ) {
-					$found = 1;
-					$colour = $colour[$id];
+	# Sort all networks so we find the best match
+	my @networks = reverse sort {
+		&Network::get_prefix($a) <=> &Network::get_prefix($b)
+	} keys %networks;
+
+	foreach my $network (@networks) {
+		if (defined $network) {
+			if (&Network::check_subnet($network)) {
+				if (&Network::ip_address_in_network($address, $network)) {
+					return $networks{$network};
 				}
-				$id++;
 			}
 		}
 	}
 
-	return $colour;
+	# If we don't know the network, the address must be from the RED network
+	return ${Header::colourred};
 }
 
 1;

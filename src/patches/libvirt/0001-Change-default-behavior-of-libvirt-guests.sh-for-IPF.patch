@@ -1,0 +1,15 @@
+--- libvirt-7.10.0/tools/libvirt-guests.sh.in.orig	2021-12-01 10:51:11.942943000 +0100
++++ libvirt-7.10.0/tools/libvirt-guests.sh.in	2022-01-11 12:32:37.765715377 +0100
+@@ -30,9 +30,9 @@
+ 
+ export TEXTDOMAIN="@PACKAGE@" TEXTDOMAINDIR="@localedir@"
+ 
+-URIS="default"
+-ON_BOOT="start"
+-ON_SHUTDOWN="suspend"
++URIS="qemu:///system"
++ON_BOOT="ignore"
++ON_SHUTDOWN="shutdown"
+ SHUTDOWN_TIMEOUT=300
+ PARALLEL_SHUTDOWN=0
+ START_DELAY=0

@@ -33,40 +33,48 @@ require "${General::swroot}/graphs.pl";
 my %color = ();
 my %mainsettings = ();
 &General::readhash("${General::swroot}/main/settings", \%mainsettings);
-&General::readhash("/srv/web/ipfire/html/themes/".$mainsettings{'THEME'}."/include/colors.txt", \%color);
+&General::readhash("/srv/web/ipfire/html/themes/ipfire/include/colors.txt", \%color);
+
+my %vpnsettings = ();
+&General::readhasharray("${General::swroot}/vpn/config", \%vpnsettings);
 
 my @vpns=();
 
-my @querry = split(/\?/,$ENV{'QUERY_STRING'});
-$querry[0] = '' unless defined $querry[0];
-$querry[1] = 'week' unless defined $querry[1];
+# Make list of all IPsec graphs
+my %ipsecgraphs = ();
+foreach my $key (sort {$vpnsettings{$a}[1] <=> $vpnsettings{$b}[1]} keys %vpnsettings) {
+	my $interface_mode = $vpnsettings{$key}[36];
+	next unless ($interface_mode);
 
-if ( $querry[0] ne ""){
-	print "Content-type: image/png\n\n";
-	binmode(STDOUT);
-	&Graphs::updatevpnn2ngraph($querry[0],$querry[1]);
-}else{
-	&Header::showhttpheaders();
-	&Header::openpage($Lang::tr{'vpn statistic n2n'}, 1, '');
-	&Header::openbigbox('100%', 'left');
-
-	my @vpngraphs = `find /var/log/rrd/collectd/localhost/openvpn-*-n2n/ -not  -path *openvpn-UNDEF* -name *traffic.rrd 2>/dev/null|sort`;
-	foreach (@vpngraphs){
-		if($_ =~ /(.*)\/openvpn-(.*)\/if_octets_derive-traffic.rrd/){
-			push(@vpns,$2);
-		}
-	}
-	if (@vpns){
-		foreach (@vpns) {
-			&Header::openbox('100%', 'center', "$_ $Lang::tr{'graph'}");
-			&Graphs::makegraphbox("netovpnsrv.cgi",$_, "day",320);
-			&Header::closebox();
-		}
-	}else{
-		print "<center>".$Lang::tr{'no data'}."</center>";
-	}
-	my $output = '';
-
-	&Header::closebigbox();
-	&Header::closepage();
+	$ipsecgraphs{$vpnsettings{$key}[1]} = "${interface_mode}${key}";
 }
+
+&Header::showhttpheaders();
+&Header::openpage($Lang::tr{'vpn statistic n2n'}, 1, '');
+&Header::openbigbox('100%', 'left');
+
+my @vpngraphs = `find /var/log/rrd/collectd/localhost/openvpn-*-n2n/ -not  -path *openvpn-UNDEF* -name *traffic.rrd 2>/dev/null|sort`;
+foreach (@vpngraphs){
+	if($_ =~ /(.*)\/openvpn-(.*)\/if_octets-traffic.rrd/){
+		push(@vpns,$2);
+	}
+}
+if (@vpns || %ipsecgraphs) {
+	foreach my $name (sort keys %ipsecgraphs) {
+		&Header::openbox('100%', 'center', "$Lang::tr{'ipsec connection'}: $name");
+		&Graphs::makegraphbox("netovpnsrv.cgi", "ipsec-$ipsecgraphs{$name}", "day");
+		&Header::closebox();
+	}
+
+	foreach (@vpns) {
+		&Header::openbox('100%', 'center', "$_ $Lang::tr{'graph'}");
+		&Graphs::makegraphbox("netovpnsrv.cgi",$_, "day");
+		&Header::closebox();
+	}
+}else{
+	print "<center>".$Lang::tr{'no data'}."</center>";
+}
+my $output = '';
+
+&Header::closebigbox();
+&Header::closepage();

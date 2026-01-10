@@ -13,7 +13,7 @@
 ###############################################################################
 #                                                                             #
 # IPFire.org - A linux based firewall                                         #
-# Copyright (C) 2007  Michael Tremer & Christian Schmidt                      #
+# Copyright (C) 2007-2023  IPFire Team  <info@ipfire.org>                     #
 #                                                                             #
 # This program is free software: you can redistribute it and/or modify        #
 # it under the terms of the GNU General Public License as published by        #
@@ -30,12 +30,62 @@
 #                                                                             #
 ###############################################################################
 
+# Cleanup environment from any variables
+unexport BUILD_ARCH BUILD_PLATFORM BUILDTARGET CROSSTARGET TOOLCHAIN
+unexport NAME SNAME VERSION CORE SLOGAN SYSTEM_RELEASE PAKFIRE_TREE CONFIG_ROOT
+unexport KVER KVER_SUFFIX
+unexport SYSTEM_PROCESSOR SYSTEM_MEMORY
+unexport DEFAULT_PARALLELISM
+unexport LFS_BASEDIR
+unexport BUILD_DIR
+unexport IMAGES_DIR
+unexport LOG_DIR
+unexport PACKAGES_DIR
+unexport TOOLS_DIR
+unexport XZ_OPT
+unexport ZSTD_OPT
+
+# Basic Variables
+EMPTY :=
+COMMA := ,
+SPACE := $(EMPTY) $(EMPTY)
+define NEWLINE
+
+
+endef
+
+# Basic Functions
+join-with	= $(subst $(SPACE),$(1),$(strip $(2)))
+
+PARALLELISM = $(shell echo $$( \
+	if [ -n "$(MAX_PARALLELISM)" ] && [ $(MAX_PARALLELISM) -lt 1 ]; then \
+		echo 1 ; \
+	elif [ -n "$(MAX_PARALLELISM)" ] && [ $(MAX_PARALLELISM) -lt $(DEFAULT_PARALLELISM) ]; then \
+		echo $(MAX_PARALLELISM); \
+	else \
+		echo $(DEFAULT_PARALLELISM); \
+	fi) \
+)
+
+MAKETUNING = -j$(PARALLELISM)
+
+ifeq "$(TOOLCHAIN)" "1"
+	PREFIX = $(TOOLS_DIR)
+else
+	PREFIX = /usr
+endif
+
+TAR_OPTIONS = \
+	--format=pax \
+	--acls \
+	--xattrs \
+	--xattrs-include='*' \
+	--sparse
+
 # URLs that are common sources of downloads.  If you're having trouble with
 # a site you should change its URL to that of a suitable mirror site.
 #
-URL_IPFIRE  = http://source.ipfire.org/source-2.x
-URL_TOOLCHAIN = http://source.ipfire.org/toolchains
-URL_SOURCE = source.ipfire.org:/pub/source/source-2.x
+URL_IPFIRE  = https://source.ipfire.org/source-2.x
 
 # Don't change this; it will be overridden by other makefiles where necessary.
 #
@@ -54,21 +104,147 @@ DIR_SRC = $(ROOT)/usr/src
 DIR_DL      = $(LFS_BASEDIR)/cache
 DIR_CHK     = $(LFS_BASEDIR)/cache/check
 DIR_CONF    = $(LFS_BASEDIR)/config
-DIR_INFO    = $(LFS_BASEDIR)/log
+DIR_INFO    = $(LOG_DIR)
 DIR_TMP     = /tmp
+DIR_TMP_PAK = $(DIR_TMP)/package-$(PROG)
+
+# Add the compiler location and version and specs to the ccache hash
+CCACHE_COMPILERCHECK += $(shell gcc -dumpspecs 2>/dev/null | md5sum | cut -d ' ' -f1)
+
+# We support EFI on x86_64 riscv64 and aarch64
+ifeq "$(BUILD_ARCH)" "x86_64"
+	EFI = 1
+	EFI_ARCH = x64
+	GRUB_ARCH = $(BUILD_ARCH)
+endif
+
+ifeq "$(BUILD_ARCH)" "riscv64"
+	EFI = 1
+	EFI_ARCH = $(BUILD_ARCH)
+	GRUB_ARCH = $(BUILD_ARCH)
+endif
+
+ifeq "$(BUILD_ARCH)" "aarch64"
+	EFI = 1
+	EFI_ARCH = aa64
+	GRUB_ARCH = arm64
+endif
+
+# Go
+export GOARCH
+export GOOS   = linux
+export GOPATH = $(HOME)/gopath
+
+ifeq "$(BUILD_ARCH)" "x86_64"
+	GOARCH = amd64
+endif
+
+ifeq "$(BUILD_ARCH)" "aarch64"
+	GOARCH = arm64
+endif
+
+# Rust
+ifeq "$(BUILD_ARCH)" "riscv64"
+	RUST_ARCH = riscv64gc
+else
+	RUST_ARCH = $(BUILD_ARCH)
+endif
+
+RUST_PLATFORM = $(RUST_ARCH)-unknown-linux-gnu
+
+CARGO_PATH     = $(DIR_APP)/.cargo
+CARGO_REGISTRY = /usr/share/cargo/registry
+
+CRATE_NAME = $(patsubst rust-%,%,$(firstword $(MAKEFILE_LIST)))
+CRATE_VER  = $(VER)
+CRATE_PATH = $(CARGO_REGISTRY)/$(CRATE_NAME)-$(CRATE_VER)
+
+define CARGO_CONFIG
+[build]
+rustflags = [$(call join-with,$(COMMA)$(SPACE),$(foreach flag,$(RUSTFLAGS),"$(flag)"))]
+
+[env]
+CFLAGS = "$(CFLAGS)"
+CXXFLAGS = "$(CXXFLAGS)"
+LDFLAGS = "$(LDFLAGS)"
+
+[term]
+verbose = true
+
+[source]
+
+[source.local-registry]
+directory = "$(CARGO_REGISTRY)"
+
+[source.crates-io]
+registry = "https://crates.io"
+replace-with = "local-registry"
+endef
+export CARGO_CONFIG
+
+# Set to false if you want to skip the binary install step
+CARGO_HAS_BIN = true
+
+CARGO = \
+	CARGOPATH=$(CARGO_PATH) \
+	RUSTC_BOOTSTRAP=1 \
+	cargo \
+	--offline
+
+CARGO_OPTIONS = \
+	-Z avoid-dev-deps
+
+# Cargo dealocks on riscv64 when building on multiple cores at the same time
+ifeq "$(BUILD_ARCH)" "riscv64"
+	CARGO_OPTIONS += -j1
+else
+	CARGO_OPTIONS += $(MAKETUNING)
+endif
+
+define CARGO_PREPARE
+	mkdir -p $(CARGO_PATH) && \
+	echo "$${CARGO_CONFIG}" > $(CARGO_PATH)/config && \
+	rm -f Cargo.lock
+endef
+
+CARGO_BUILD = \
+	$(CARGO) \
+	build \
+	--release \
+	$(CARGO_OPTIONS)
+
+# Checks whether this crate has a right taregt
+CARGO_TARGET_CHECK = $(CARGO) metadata --format-version 1 --no-deps | \
+	jq -e ".packages[].targets[].kind | any(. == \"$(1)\")" | grep -q "true"
+
+define CARGO_INSTALL
+	mkdir -pv "$(CRATE_PATH)" && \
+	if $(call CARGO_TARGET_CHECK,lib) || $(call CARGO_TARGET_CHECK,rlib) || $(call CARGO_TARGET_CHECK,proc-macro); then \
+		awk \
+			'/^\\\[((.+\\\.)?((dev|build)-)?dependencies|features)/{f=1;next} /^\\\[/{f=0}; !f' \
+			< Cargo.toml > Cargo.toml.deps && \
+		$(CARGO) package -l | grep -wEv "Cargo.(lock|toml.orig)" \
+			| xargs -d "\n" cp -v --parents -a -t $(CRATE_PATH) && \
+		install -v -m 644 Cargo.toml.deps $(CRATE_PATH)/Cargo.toml && \
+		echo "{\"files\":{},\"package\":\"\"}" > $(CRATE_PATH)/.cargo-checksum.json; \
+	fi && \
+	if $(CARGO_HAS_BIN) && $(call CARGO_TARGET_CHECK,bin); then \
+		$(CARGO) install $(CARGO_OPTIONS) --no-track --path .; \
+	fi
+endef
 
 ###############################################################################
 # Common Macro Definitions
 ###############################################################################
 
-# For each package we create a list of files that it installed under 
+# For each package we create a list of files that it installed under
 # log/<TARGET> name. Modified files are not identified
 #
 define FIND_FILES
 	cd $(ROOT)/ && find -mount \
-		\( -path './tools' -or -path './tmp' -or -path './usr/src' \
+		\( -path '.$(TOOLS_DIR)' -or -path './tmp' -or -path './usr/src' \
 		-or -path './run' -or -path './dev' -or -path './proc' \
-		-or -path './install' \) -prune -or -print | sort
+		-or -path './install' -or -path '.*/__pycache__' \) -prune -or -print | sort
 endef
 
 # This is common starting logic for builds.
@@ -78,12 +254,6 @@ define PREBUILD
 	echo "====================================== Installing $(THISAPP) ..."
 	@echo "Install started; saving file list to $(DIR_SRC)/lsalr ..."
 	@if [ ! -f $(DIR_SRC)/lsalr ]; then $(FIND_FILES) > $(DIR_SRC)/lsalr; fi
-	# Fix installation on partial rebuild, so modules install where they should
-	# and not everytime on the last compiled kernel
-	if [ -f $(DIR_SRC)/linux-$(KVER) ]; then \
-		cd $(DIR_SRC)/linux-$(KVER) && \
-			sed -i -e 's+^EXTRAVERSION.*$$+EXTRAVERSION\ =\ $(word 4,$(subst ., .,$(KVER)))-ipfire$(KCFG)+' Makefile; \
-	fi
 endef
 else
 define PREBUILD
@@ -98,11 +268,11 @@ define POSTBUILD
 	@echo "Updating linker cache..."
 	@type -p ldconfig >/dev/null && ldconfig || :
 	@echo "Install done; saving file list to $(TARGET) ..."
+	@rm -rf $(GOPATH) /root/.cargo
 	@$(FIND_FILES) > $(DIR_SRC)/lsalrnew
 	@diff $(DIR_SRC)/lsalr $(DIR_SRC)/lsalrnew | grep '^> ' | sed 's/^> //' > $(TARGET)_diff
-	@cp -f $(DIR_SRC)/lsalrnew $(DIR_SRC)/lsalr
-	@rm -f $(DIR_SRC)/lsalrnew
-	sed -i -e 's+.\/++' $(TARGET)_diff
+	@mv -f $(DIR_SRC)/lsalrnew $(DIR_SRC)/lsalr
+	@sed -i -e 's+.\/++' $(TARGET)_diff
 	# compare roofile ( same name as lfs script) with the list of installed files
 	# special cases
 	# - if the corresponding rootfile is not found, touch $(TARGET)_missing_rootfile
@@ -111,24 +281,24 @@ define POSTBUILD
 	# ROOTFILE : reference of include/exclude files
 	# $(TARGET)_rootfile : ROOTFILE with KVER replacement
 	# $(TARGET) : log result with {commented|include|added} files
-	if [ -s "$(TARGET)_diff" ]; then \
-		LFS_SCRIPT=$(firstword $(MAKEFILE_LIST))$(KCFG); \
+	@if [ -s "$(TARGET)_diff" ]; then \
+		LFS_SCRIPT=$(firstword $(MAKEFILE_LIST))${ROOTFILE_APPEND} ; \
 		echo $(LFS_SCRIPT); \
-		ROOTFILE=$$(find $(DIR_SRC)/config/rootfiles/{common,packages}/{$(MACHINE),} -maxdepth 1 -type f -name $$LFS_SCRIPT 2>/dev/null | head -1); \
+		ROOTFILE=$$(find -L $(DIR_SRC)/config/rootfiles/{common,packages}/{$(BUILD_ARCH),} -maxdepth 1 -type f -name $$LFS_SCRIPT 2>/dev/null | head -1); \
 		if [ "$$ROOTFILE" = "" ]; then \
 			touch $(TARGET)_missing_rootfile; \
 			ROOTFILE=$(TARGET)_missing_rootfile ; \
 			echo "error $$LFS_SCRIPT not found in config/rootfiles"; \
 		fi; \
-		sed -e "s/BUILDTARGET/$(BUILDTARGET)/g" -e "s/KVER/$(KVER)/g" -e "s/MACHINE/$(MACHINE)/g" $$ROOTFILE > $(TARGET)_rootfile; \
-		for line in `cat $(TARGET)_diff`; do \
-			if grep -qG "^#$$line$$" $(TARGET)_rootfile; then echo "#$$line" >> $(TARGET); \
-			elif grep -qG "^$$line$$" $(TARGET)_rootfile ; then echo "$$line" >> $(TARGET); \
+		sed -e "s/BUILDTARGET/$(BUILDTARGET)/g" -e "s/KVER/$(KVER)/g" -e "s/xxxMACHINExxx/$(BUILD_ARCH)/g" $$ROOTFILE > $(TARGET)_rootfile; \
+		while read -r line; do \
+			if grep -qFx "#$$line" $(TARGET)_rootfile; then echo "#$$line" >> $(TARGET); \
+			elif grep -qFx "$$line" $(TARGET)_rootfile ; then echo "$$line" >> $(TARGET); \
 			else echo "+$$line" >> $(TARGET); \
 			fi; \
-		done; \
-		for line in `grep -v "^#" $(TARGET)_rootfile`; do \
-			if ! grep -qG "^$$line$$" $(TARGET)_diff ; then echo "-$$line" >> $(TARGET); \
+		done < $(TARGET)_diff; \
+		grep -v "^#" $(TARGET)_rootfile | while read -r line; do \
+			if ! grep -qFx "$$line" $(TARGET)_diff ; then echo "-$$line" >> $(TARGET); \
 			fi; \
 		done; \
 		rm -f $(TARGET)_rootfile; \
@@ -153,53 +323,162 @@ endef
 define LOAD
 	@echo -e "$(MESSAGE)Download: $($(notdir $@))"
 	wget -T 60 -t 1 -nv -U "IPFireSourceGrabber/2.x" $($(notdir $@)) -O $(DIR_TMP)/$(notdir $@)
-	[ "$($(notdir $@)_MD5)" = `md5sum $(DIR_TMP)/$(notdir $@) | awk '{ print $$1 }'` ] # detect page not found answer
+	[ "$($(notdir $@)_BLAKE2)" = "$$(b2sum $(DIR_TMP)/$(notdir $@) | awk '{ print $$1 }')" ] # detect page not found answer
 	mv $(DIR_TMP)/$(notdir $@) $(DIR_DL)
 endef
 
-define MD5
+define B2SUM
 	# error mean file signature don't match the one in lfs script
-	[ "$($@_MD5)" = `md5sum $(DIR_DL)/$@ | awk '{ print $$1 }'` ]
-	echo "$@ checksum OK"
-	echo "$@" >>$(DIR_INFO)/_build.othersrc-list.log
+	[ "$($@_BLAKE2)" = "$$(b2sum $(DIR_DL)/$@ | awk '{ print $$1 }')" ] && echo "$@ checksum OK"
 endef
 
-define PAK
-	# Bringing the files to their right place.
-	@rm -rf /install/packages/package
-	@mkdir -p /install/packages/package/tmp
-	if [ -e "/usr/src/src/paks/$(PROG)" ]; then \
-		cp -f /usr/src/src/paks/$(PROG)/{,un}install.sh /usr/src/src/paks/$(PROG)/update.sh \
-		/install/packages/package; \
-	else \
-		cp -f /usr/src/src/paks/default/{,un}install.sh /usr/src/src/paks/default/update.sh \
-		/install/packages/package; \
-	fi
-	for i in $(DIR_SRC)/config/rootfiles/packages/{$(MACHINE),}/$(PROG); do \
-		if [ -e "$${i}" ]; then \
-			cp -v $${i} /install/packages/package/ROOTFILES; \
-			break; \
-		fi; \
-	done
-	sed -e 's/BUILDTARGET/$(BUILDTARGET)/g' -e 's/KVER/$(KVER)/g' -e 's/MACHINE/$(MACHINE)/g' -i /install/packages/package/ROOTFILES
-	sed -e 's/xxxKVERxxx/$(KVER)/g' -i /install/packages/package/install.sh
-	chmod 755 /install/packages/package/{{,un}install,update}.sh
-	cd / && tar cf /install/packages/package/files.tmp --files-from=/install/packages/package/ROOTFILES --exclude='#*' \
-		-p --numeric-owner
-	# Double tar to remove double files
-	tar xf /install/packages/package/files.tmp -C /install/packages/package/tmp/ \
-		-p --numeric-owner
-	rm -f /install/packages/package/files.tmp
-	cd /install/packages/package/tmp/ && tar -c -p --numeric-owner -J -f /install/packages/package/files.tar.xz * 		
-	rm -r /install/packages/package/tmp
-	-cat /install/packages/package/ROOTFILES | grep -v "#" > /install/packages/package/ROOTFILES.tmp
-	mv /install/packages/package/ROOTFILES.tmp /install/packages/package/ROOTFILES
-	cd /install/packages/package && tar cf ../$(PROG)-$(VER)-$(PAK_VER).ipfire --files-from=/usr/src/src/paks/files
-	rm -rf /install/packages/package
-	sed -e s/NAME/$(PROG)/g \
-			-e s/VER/$(VER)/g \
-			-e s/RELEASE/$(PAK_VER)/g \
-			-e s/DEPS/$(DEPS)/g \
-			-e s/SIZE/`ls -l \/install\/packages\/$(PROG)-$(VER)-$(PAK_VER).ipfire | awk '{ print $$5 }'`/g \
-	  < /usr/src/src/pakfire/meta > /install/packages/meta-$(PROG)
+ARCHIVE_DIR      = /tmp/archive
+ARCHIVE_TMP      = $(ARCHIVE_DIR)/.tmp
+
+# The filename of the package file
+PACKAGE_FILENAME = $(PROG)-$(VER)-$(PAK_VER).ipfire
+
+# The filename of the meta file
+META_FILENAME    = meta-$(PROG)
+
+# Takes one rootfile or a directory and will return a list of all included files
+COLLECT_FILES = \
+	BUILD_ARCH="$(BUILD_ARCH)" \
+	BUILDTARGET="$(BUILDTARGET)" \
+	KVER="$(KVER)" \
+		$(DIR_SRC)/src/scripts/archive.files $(BUILD_ARCH) $(1) $(2) | tee $(3)
+
+# Takes a filelist from standard input and streams a tarball with all files
+__FILES_IN = \
+	tar \
+		--create \
+		$(TAR_OPTIONS) \
+		--directory=/ \
+		--exclude="dev/pts/*" \
+		--exclude="proc/*" \
+		--exclude="tmp/*" \
+		--exclude="__pycache__" \
+		$(if $(1),--exclude-from=$(1)) \
+		--files-from=-
+
+# Takes a tarball and extracts it in the target directory
+__FILES_OUT = \
+	tar \
+		--extract \
+		$(TAR_OPTIONS) \
+		--directory=$(1)
+
+# Copies all files on a rootfile into the given directory
+define COPY_FILES
+	# Copy all files from $(1) to $(2) ($(3))
+	# $4 = rootfile to write out
+	# $5 = exclude
+	$(call COLLECT_FILES,$(1),$(3),$(4)) | \
+		$(call __FILES_IN,$(5)) | \
+		$(call __FILES_OUT,$(2))
+
+	# Strip everything, except a few things
+	$(DIR_SRC)/src/stripper $(2) \
+		--exclude=/lib/firmware \
+		--exclude=/usr/lib/go \
+		--exclude=/usr/lib/vdr \
+		--exclude=/usr/sbin/vdr
 endef
+
+# Called to compress a file that will be distributed
+__COMPRESS = \
+	tar \
+		--create \
+		--verbose --verbose \
+		--use-compress-program="$(3)" \
+		$(TAR_OPTIONS) \
+		--directory=$(1) \
+		--file=$(2) \
+		--show-transform \
+		--transform="s@^\./@@" \
+		.
+
+COMPRESS_XZ   = $(call __COMPRESS,$(1),$(2),xz $(XZ_OPT))
+COMPRESS_ZSTD = $(call __COMPRESS,$(1),$(2),zstd $(ZSTD_OPT))
+
+# Command to create a Pakfire package
+define CREATE_PACKAGE
+	# Compress the package
+	tar \
+		--create \
+		--format=pax \
+		--no-acls \
+		--no-xattrs \
+		--directory=$(1) \
+		--file=$(2) \
+		--transform="s@^\./@@" \
+		.
+endef
+
+# Creates the meta file for a Pakfire package
+define CREATE_META
+	# Clear/create the file
+	: > $(2)
+
+	# Write payload
+	echo "Name: $(PROG)"							>> $(2)
+	echo "Summary: $(SUMMARY)"						>> $(2)
+	echo "ProgVersion: $(VER)"						>> $(2)
+	echo "Release: $(PAK_VER)"						>> $(2)
+	echo "Size: $$(stat --format=%s $(1))"			>> $(2)
+	echo "Dependencies: $(DEPS)"					>> $(2)
+	echo "File: $(PROG)-$(VER)-$(PAK_VER).ipfire"	>> $(2)
+	echo "Services: $(SERVICES)"					>> $(2)
+endef
+
+# Helper function to make sure that we have all sorts of mountpoints in the images
+CREATE_MOUNTPOINTS = mkdir -pv $(1)/dev $(1)/proc $(1)/sys
+
+define PAK
+	# Bringing the files to their right place
+	@rm -rf $(ARCHIVE_DIR) && mkdir -p $(ARCHIVE_DIR) $(ARCHIVE_TMP)
+
+	# Install scripts
+	cd $(DIR_SRC) && if [ -e "src/paks/$(PROG)" ]; then \
+		install -v -m 744 src/paks/$(PROG)/{install,uninstall,update}.sh $(ARCHIVE_DIR); \
+	else \
+		install -v -m 744 src/paks/default/{install,uninstall,update}.sh $(ARCHIVE_DIR); \
+	fi
+
+	# Copy all files
+	$(call COPY_FILES,$(DIR_SRC)/config/rootfiles/packages,$(ARCHIVE_TMP),$(PROG),$(ARCHIVE_DIR)/ROOTFILES)
+
+	# Compress tarball
+	$(call COMPRESS_XZ,$(ARCHIVE_TMP),$(ARCHIVE_DIR)/files.tar.xz)
+
+	# Cleanup temporary files
+	rm -rf $(ARCHIVE_TMP)
+
+	# Create the package
+	$(call CREATE_PACKAGE,$(ARCHIVE_DIR),$(PACKAGES_DIR)/$(PACKAGE_FILENAME))
+
+	# Write the meta file
+	$(call CREATE_META,$(PACKAGES_DIR)/$(PACKAGE_FILENAME),$(PACKAGES_DIR)/$(META_FILENAME))
+
+	# Cleanup
+	rm -rf $(ARCHIVE_DIR)
+endef
+
+define INSTALL_INITSCRIPT
+	install -m 754 -v $(DIR_SRC)/src/initscripts/packages/$(1)  /etc/rc.d/init.d/$(1)
+endef
+
+define INSTALL_INITSCRIPTS
+	for initscript in $(1); do \
+		$(call INSTALL_INITSCRIPT,$$initscript) || exit 1; \
+    done
+endef
+
+ifeq "$(BUILD_ARCH)" "$(filter $(BUILD_ARCH),aarch64 riscv64)"
+define UPDATE_AUTOMAKE
+	for i in $$(find $(DIR_APP) -name config.guess -o -name config.sub); do \
+		cp -vf /usr/share/automake*/$$(basename $${i}) $${i} || \
+			cp -vf $(TOOLS_DIR)/share/automake*/$$(basename $${i}) $${i}; \
+	done
+endef
+endif

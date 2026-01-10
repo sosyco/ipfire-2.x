@@ -1,7 +1,7 @@
 ###############################################################################
 #                                                                             #
 # IPFire.org - A linux based firewall                                         #
-# Copyright (C) 2007-2013  IPFire Team  <info@ipfire.org>                     #
+# Copyright (C) 2007-2024  IPFire Team  <info@ipfire.org>                     #
 #                                                                             #
 # This program is free software: you can redistribute it and/or modify        #
 # it under the terms of the GNU General Public License as published by        #
@@ -24,10 +24,10 @@
 
 include Config
 
-VER        = 1.4.21
+VER        = 1.8.11
 
 THISAPP    = iptables-$(VER)
-DL_FILE    = $(THISAPP).tar.bz2
+DL_FILE    = $(THISAPP).tar.xz
 DL_FROM    = $(URL_IPFIRE)
 DIR_APP    = $(DIR_SRC)/$(THISAPP)
 TARGET     = $(DIR_INFO)/$(THISAPP)
@@ -36,13 +36,13 @@ TARGET     = $(DIR_INFO)/$(THISAPP)
 # Top-level Rules
 ###############################################################################
 objects = $(DL_FILE) \
-	netfilter-layer7-v2.22.tar.gz
+	netfilter-layer7-v2.23.tar.gz
 
 $(DL_FILE) = $(DL_FROM)/$(DL_FILE)
-netfilter-layer7-v2.22.tar.gz = $(URL_IPFIRE)/netfilter-layer7-v2.22.tar.gz
+netfilter-layer7-v2.23.tar.gz = $(URL_IPFIRE)/netfilter-layer7-v2.23.tar.gz
 
-$(DL_FILE)_MD5 = 536d048c8e8eeebcd9757d0863ebb0c0
-netfilter-layer7-v2.22.tar.gz_MD5 = 98dff8a3d5a31885b73341633f69501f
+$(DL_FILE)_BLAKE2 = 82daca3940e253f6fda7cf5b3332488c31391ff66c0112c0cae2645ab61918f81e6028ea2b1e1385f21e4c5ff8cd64cba31072a2417a2ab696fe1c6b5464cea1
+netfilter-layer7-v2.23.tar.gz_BLAKE2 = 5c8ab722f6fbc126f2f65ecf401de5fc40560c20e3be52f783db34410446185dcb6781b3148e4a174e8b2d2c290bec0342dea95e8cefc35c39345617fa7a8fdc
 
 install : $(TARGET)
 
@@ -50,10 +50,10 @@ check : $(patsubst %,$(DIR_CHK)/%,$(objects))
 
 download :$(patsubst %,$(DIR_DL)/%,$(objects))
 
-md5 : $(subst %,%_MD5,$(objects))
+b2 : $(subst %,%_BLAKE2,$(objects))
 
 ###############################################################################
-# Downloading, checking, md5sum
+# Downloading, checking, b2sum
 ###############################################################################
 
 $(patsubst %,$(DIR_CHK)/%,$(objects)) :
@@ -62,8 +62,8 @@ $(patsubst %,$(DIR_CHK)/%,$(objects)) :
 $(patsubst %,$(DIR_DL)/%,$(objects)) :
 	@$(LOAD)
 
-$(subst %,%_MD5,$(objects)) :
-	@$(MD5)
+$(subst %,%_BLAKE2,$(objects)) :
+	@$(B2SUM)
 
 ###############################################################################
 # Installation Details
@@ -72,26 +72,24 @@ $(subst %,%_MD5,$(objects)) :
 $(TARGET) : $(patsubst %,$(DIR_DL)/%,$(objects))
 	@$(PREBUILD)
 	@rm -rf $(DIR_APP) $(DIR_SRC)/netfilter-layer7*
-	@cd $(DIR_SRC) && tar jxf $(DIR_DL)/$(DL_FILE)
+	@cd $(DIR_SRC) && tar axf $(DIR_DL)/$(DL_FILE)
 
 	# Layer7
-	cd $(DIR_SRC) && tar zxf $(DIR_DL)/netfilter-layer7-v2.22.tar.gz
-	cd $(DIR_APP) && cp -vf $(DIR_SRC)/netfilter-layer7-v2.22/iptables-1.4.3forward-for-kernel-2.6.20forward/* \
+	cd $(DIR_SRC) && tar zxf $(DIR_DL)/netfilter-layer7-v2.23.tar.gz
+	cd $(DIR_APP) && cp -vf $(DIR_SRC)/netfilter-layer7-v2.23/iptables-1.4.3forward-for-kernel-2.6.20forward/* \
 	                 ./extensions/
-
-	# imq
-	cd $(DIR_APP) && patch -Np1 < $(DIR_SRC)/src/patches/iptables-1.4.12-IMQ-test4.diff
 
 	cd $(DIR_APP) && ./configure \
 		--prefix=/usr \
-		--with-ksource=/usr/src/linux \
 		--libdir=/lib \
 		--includedir=/usr/include \
 		--enable-libipq \
+		--with-xtlibdir=/lib/xtables \
 		--libexecdir=/lib \
 		--bindir=/sbin \
 		--sbindir=/sbin \
 		--mandir=/usr/share/man \
+		--disable-nftables \
 		--with-pkgconfigdir=/usr/lib/pkgconfig
 
 	cd $(DIR_APP) && make $(MAKETUNING)

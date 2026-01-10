@@ -17,11 +17,29 @@
 # along with IPFire; if not, write to the Free Software                    #
 # Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307 USA #
 #                                                                          #
-# Copyright (C) 2007 IPFire-Team <info@ipfire.org>.                        #
+# Copyright (C) 2007-2019 IPFire-Team <info@ipfire.org>.                   #
 #                                                                          #
 ############################################################################
 #
 . /opt/pakfire/lib/functions.sh
+
+# Run Tor as dedicated user and make sure user and group exist
+if ! getent group tor &>/dev/null; then
+       groupadd -g 119 tor
+fi
+
+if ! getent passwd tor; then
+       useradd -u 119 -g tor -c "Tor daemon user" -d /var/empty -s /bin/false tor
+fi
+
 extract_files
 restore_backup ${NAME}
+
+# Adjust some folder permission for new UID/GID
+chown -R tor:tor /var/lib/tor
+chown -R tor:nobody /var/ipfire/tor
+
+# Tor settings files needs to be writeable by nobody group for WebUI
+chmod 664 /var/ipfire/tor/{settings,torrc}
+
 start_service --background ${NAME}

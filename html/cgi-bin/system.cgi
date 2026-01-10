@@ -26,50 +26,24 @@ use strict;
 #use CGI::Carp 'fatalsToBrowser';
 
 require '/var/ipfire/general-functions.pl';
-require "${General::swroot}/lang.pl";
 require "${General::swroot}/header.pl";
-require "${General::swroot}/graphs.pl";
 
-my %color = ();
 my %mainsettings = ();
 &General::readhash("${General::swroot}/main/settings", \%mainsettings);
-&General::readhash("/srv/web/ipfire/html/themes/".$mainsettings{'THEME'}."/include/colors.txt", \%color);
 
-my @querry = split(/\?/,$ENV{'QUERY_STRING'});
-$querry[0] = '' unless defined $querry[0];
-$querry[1] = 'hour' unless defined $querry[1];
+&Header::showhttpheaders();
 
-if ( $querry[0] =~ "cpufreq"){
-	print "Content-type: image/png\n\n";
-	binmode(STDOUT);
-	&Graphs::updatecpufreqgraph($querry[1]);
-}elsif ( $querry[0] =~ "cpu"){
-	print "Content-type: image/png\n\n";
-	binmode(STDOUT);
-	&Graphs::updatecpugraph($querry[1]);
-}elsif ( $querry[0] =~ "load"){
-	print "Content-type: image/png\n\n";
-	binmode(STDOUT);
-	&Graphs::updateloadgraph($querry[1]);
-}else{
-	&Header::showhttpheaders();
-	&Header::openpage($Lang::tr{'status information'}, 1, '');
-	&Header::openbigbox('100%', 'left');
+&Header::openpage($Lang::tr{'status information'}, 1, '');
 
-	&Header::openbox('100%', 'center', "CPU $Lang::tr{'graph'}");
-	&Graphs::makegraphbox("system.cgi","cpu","day","325");
-	&Header::closebox();
+# Processor Graph
+&Header::graph("$Lang::tr{'processors'}", "system.cgi", "cpu", "day");
 
-	if ( -e "$mainsettings{'RRDLOG'}/collectd/localhost/cpufreq/cpufreq-0.rrd"){
-		&Header::openbox('100%', 'center', "CPU $Lang::tr{'graph'}");
-		&Graphs::makegraphbox("system.cgi","cpufreq","day","325");
-		&Header::closebox();
-	}
-
-	&Header::openbox('100%', 'center', "Load $Lang::tr{'graph'}");
-	&Graphs::makegraphbox("system.cgi","load","day");
-	&Header::closebox();
-
-	&Header::closebigbox();
-	&Header::closepage();
+# CPU Frequency
+if ( -e "$mainsettings{'RRDLOG'}/collectd/localhost/cpufreq-0/cpufreq.rrd"){
+	&Header::graph("$Lang::tr{'cpu frequency'}", "system.cgi", "cpufreq", "day");
 }
+
+# Load Average
+&Header::graph("$Lang::tr{'load average'}", "system.cgi", "load", "day");
+
+&Header::closepage();

@@ -9,7 +9,7 @@ check() {
 
 # called by dracut
 depends() {
-    echo base bash mdraid shutdown
+    echo base bash drm i18n mdraid shutdown
     return 0
 }
 
@@ -23,17 +23,18 @@ install() {
 
     # Kernel drivers
     instmods =drivers/hid
+    instmods efivarfs
 
     # Network drivers
-    instmods =drivers/net/ethernet =drivers/net/usb
+    instmods =drivers/net/ethernet =drivers/net/phy =drivers/net/usb
     instmods virtio_net hv_netvsc vmxnet3
 
     # Filesystem support
-    inst_multiple parted mkswap mke2fs mkreiserfs mkfs.xfs
-    instmods ext4 iso9660 reiserfs vfat xfs
+    inst_multiple parted mkswap mke2fs mkfs.xfs mkfs.vfat mkfs.btrfs
+    instmods ext4 iso9660 vfat xfs ntfs3 btrfs
 
     # Extraction
-    inst_multiple tar gzip lzma xz
+    inst_multiple tar gzip zstd
 
     # Networking
     inst_multiple dhcpcd ethtool hostname ip ping sort wget
@@ -42,12 +43,15 @@ install() {
     inst /var/ipfire/dhcpc/dhcpcd-run-hooks
     inst "$moddir/70-dhcpcd.exe" "/var/ipfire/dhcpc/dhcpcd-hooks/70-dhcpcd.exe"
 
+    # CAs
+    inst /etc/ssl/cert.pem
+
     inst /etc/host.conf /etc/protocols
     inst /etc/nsswitch.conf /etc/resolv.conf
     inst_libdir_file "libnss_dns.so.*"
 
     # Misc. tools
-    inst_multiple chmod cut grep eject id killall md5sum touch
+    inst_multiple chroot chmod cut grep eject id killall md5sum ntpdate touch
     inst_multiple -o fdisk cfdisk df ps top
 
     # Hardware IDs
@@ -55,8 +59,10 @@ install() {
 
     # Locales
     mkdir -p "${initdir}/usr/lib/locale"
-    localedef --quiet --prefix="${initdir}" --add-to-archive /usr/lib/locale/en_US
-    localedef --quiet --prefix="${initdir}" --add-to-archive /usr/lib/locale/en_US.utf8
+    for locale in da_DK de_DE en_US es_ES fa_IR fr_FR hr_HR it_IT nl_NL pl_PL pt_PT ru_RU tr_TR; do
+        localedef --quiet --prefix="${initdir}" --add-to-archive "/usr/lib/locale/${locale}"
+        localedef --quiet --prefix="${initdir}" --add-to-archive "/usr/lib/locale/${locale}.utf8"
+    done
 
     for file in /usr/share/locale/*/LC_MESSAGES/installer.mo; do
         inst "${file}"

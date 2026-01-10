@@ -1,7 +1,7 @@
 ###############################################################################
 #                                                                             #
 # IPFire.org - A linux based firewall                                         #
-# Copyright (C) 2007  Michael Tremer & Christian Schmidt                      #
+# Copyright (C) 2007-2025  IPFire Team  <info@ipfire.org>                     #
 #                                                                             #
 # This program is free software: you can redistribute it and/or modify        #
 # it under the terms of the GNU General Public License as published by        #
@@ -24,7 +24,9 @@
 
 include Config
 
-VER        = 2.10.0
+SUMMARY    = A fast, secure, and flexible mailer
+
+VER        = 3.10.4
 
 THISAPP    = postfix-$(VER)
 DL_FILE    = $(THISAPP).tar.gz
@@ -32,13 +34,18 @@ DL_FROM    = $(URL_IPFIRE)
 DIR_APP    = $(DIR_SRC)/$(THISAPP)
 TARGET     = $(DIR_INFO)/$(THISAPP)
 PROG       = postfix
-PAK_VER    = 9
+PAK_VER    = 49
 
-DEPS       = "amavisd mysql"
+DEPS       =
 
-CCARGS     = `getconf LFS_CFLAGS` \
+SERVICES   = postfix
+
+CCARGS     = \
+	-std=gnu17 \
+	`getconf LFS_CFLAGS` \
 	-DDEF_DAEMON_DIR="'\"/usr/lib/postfix\"'" \
-	-DDEF_MANPAGE_DIR="'\"/usr/share/man\"'"
+	-DDEF_MANPAGE_DIR="'\"/usr/share/man\"'" \
+	-DNO_NIS
 AUXLIBS    =
 
 # LDAP
@@ -49,15 +56,11 @@ AUXLIBS   += -lldap -llber
 CCARGS    += -DHAS_PCRE -I/usr/include/pcre
 AUXLIBS   += -lpcre
 
-# MySQL
-CCARGS    += -DHAS_MYSQL -I/usr/include/mysql
-AUXLIBS   += -L/usr/lib/mysql -lmysqlclient -lm
-
 # SASL
 CCARGS    += -DUSE_SASL_AUTH -DUSE_CYRUS_SASL -I/usr/include/sasl
 AUXLIBS   += -L/usr/lib/sasl2 -lsasl2
 
-# SSL
+# TLS
 CCARGS    += -DUSE_TLS `pkg-config --cflags openssl`
 AUXLIBS   += `pkg-config --libs openssl`
 
@@ -69,7 +72,7 @@ objects = $(DL_FILE)
 
 $(DL_FILE) = $(DL_FROM)/$(DL_FILE)
 
-$(DL_FILE)_MD5 = b2a563b2d5c53462952886e6fc4e4b7b
+$(DL_FILE)_BLAKE2 = e0a9b3dbd858e9b2bacb137b886ef35a89220caf91da5bcb90de5fd3df7285645deaff6e58f571cdc75966098cf13190b0315690c270b9f3ed69a21e63d2d3ab
 
 install : $(TARGET)
 
@@ -77,13 +80,13 @@ check : $(patsubst %,$(DIR_CHK)/%,$(objects))
 
 download :$(patsubst %,$(DIR_DL)/%,$(objects))
 
-md5 : $(subst %,%_MD5,$(objects))
+b2 : $(subst %,%_BLAKE2,$(objects))
 
-dist: 
+dist:
 	@$(PAK)
 
 ###############################################################################
-# Downloading, checking, md5sum
+# Downloading, checking, b2sum
 ###############################################################################
 
 $(patsubst %,$(DIR_CHK)/%,$(objects)) :
@@ -92,8 +95,8 @@ $(patsubst %,$(DIR_CHK)/%,$(objects)) :
 $(patsubst %,$(DIR_DL)/%,$(objects)) :
 	@$(LOAD)
 
-$(subst %,%_MD5,$(objects)) :
-	@$(MD5)
+$(subst %,%_BLAKE2,$(objects)) :
+	@$(B2SUM)
 
 ###############################################################################
 # Installation Details
@@ -102,19 +105,29 @@ $(subst %,%_MD5,$(objects)) :
 $(TARGET) : $(patsubst %,$(DIR_DL)/%,$(objects))
 	@$(PREBUILD)
 	@rm -rf $(DIR_APP) && cd $(DIR_SRC) && tar zxf $(DIR_DL)/$(DL_FILE)
+
 	cd $(DIR_APP) && make -f Makefile.init makefiles \
 		DEBUG="" OPT="$(CFLAGS) -fno-strict-aliasing" CCARGS="$(CCARGS)" AUXLIBS="$(AUXLIBS)"
 	cd $(DIR_APP) && make $(MAKETUNING)
 	cd $(DIR_APP) && sh postfix-install -non-interactive
 	## Install configuration
 	rm -vf /etc/postfix/main.cf.default
-	cp -vf $(DIR_CONF)/postfix/* /etc/postfix
-	mv -vf /etc/postfix/aliases /etc/aliases
+
+	# update main.cf parameters to prevent smtp smuggling attack
+	postconf -e 'smtpd_forbid_bare_newline = yes'
+	postconf -e 'smtpd_forbid_unauth_pipelining = yes'
+	postconf -e 'smtpd_data_restrictions = reject_unauth_pipelining'
+	postconf -e 'smtpd_discard_ehlo_keywords = chunking'
+
 	mkdir -p /var/lib/postfix
 	chown postfix.root /var/lib/postfix
 
 	install -v -m 644 $(DIR_SRC)/config/backup/includes/postfix \
 			 /var/ipfire/backup/addons/includes/postfix
 	mv /usr/sbin/sendmail /usr/sbin/sendmail.postfix
+
+	#install initscripts
+	$(call INSTALL_INITSCRIPTS,$(SERVICES))
+
 	@rm -rf $(DIR_APP)
 	@$(POSTBUILD)

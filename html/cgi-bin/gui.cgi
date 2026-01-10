@@ -70,7 +70,7 @@ if ($cgiparams{'ACTION'} eq "$Lang::tr{'save'}")
         # Set flag if index page is to refresh whilst ppp is up.
         # Default is NO refresh.
         if ($cgiparams{'REFRESHINDEX'} ne 'off') {
-            system ('/usr/bin/touch', "${General::swroot}/main/refreshindex");
+            &General::system('/usr/bin/touch', "${General::swroot}/main/refreshindex");
         } else {
             unlink "${General::swroot}/main/refreshindex";
         }
@@ -78,9 +78,9 @@ if ($cgiparams{'ACTION'} eq "$Lang::tr{'save'}")
         # Beep on ip-up or ip-down. Default is ON.
         if ($cgiparams{'PPPUPDOWNBEEP'} ne 'on') {
             $cgiparams{'PPPUPDOWNBEEP'} = 'off';
-            system ('/usr/bin/touch', "${General::swroot}/ppp/nobeeps");
+            &General::system('/usr/bin/touch', "${General::swroot}/red/nobeeps");
         } else {
-            unlink "${General::swroot}/ppp/nobeeps";
+            unlink "${General::swroot}/red/nobeeps";
         }
 
         # write cgi vars to the file.
@@ -88,7 +88,6 @@ if ($cgiparams{'ACTION'} eq "$Lang::tr{'save'}")
 	$mainsettings{'WINDOWWITHHOSTNAME'} = $cgiparams{'WINDOWWITHHOSTNAME'};
 	$mainsettings{'PPPUPDOWNBEEP'} = $cgiparams{'PPPUPDOWNBEEP'};
 	$mainsettings{'SPEED'} = $cgiparams{'SPEED'};
-	$mainsettings{'THEME'} = $cgiparams{'theme'};
 	$mainsettings{'REFRESHINDEX'} = $cgiparams{'REFRESHINDEX'};
 	&General::writehash("${General::swroot}/main/settings", \%mainsettings);
 	&Lang::reload($cgiparams{'lang'});
@@ -104,12 +103,6 @@ if ($cgiparams{'ACTION'} eq "$Lang::tr{'save'}")
 		$cgiparams{'PPPUPDOWNBEEP'} = $mainsettings{'PPPUPDOWNBEEP'};
 	} else {
 		$cgiparams{'PPPUPDOWNBEEP'} = 'on';
-	}
-
-	if ($mainsettings{'THEME'}) {
-		$cgiparams{'THEME'} = $mainsettings{'THEME'};
-	} else {
-		$cgiparams{'THEME'} = 'ipfire';
 	}
 
 	if($mainsettings{'REFRESHINDEX'}) {
@@ -134,7 +127,6 @@ if ($cgiparams{'ACTION'} eq "$Lang::tr{'restore defaults'}")
 	$cgiparams{'PPPUPDOWNBEEP'} = 'on';
 	$cgiparams{'REFRESHINDEX'} = 'off';
 	$cgiparams{'SPEED'} = 'on';
-	$cgiparams{'THEME'} = 'ipfire';
 }
 
 $checked{'WINDOWWITHHOSTNAME'}{'off'} = '';
@@ -208,43 +200,6 @@ while (<FILE>)
 >$engname ($natname)</option>
 END
 	;
-}
-
-print <<END
-</select></td></tr>
-</table>
-END
-;
-&Header::closebox();
-&Header::openbox('100%','left',$Lang::tr{'theme'});
-print<<END;
-<table>
-<tr>
-    <td>&nbsp;</td>
-    <td><select name='theme'>
-END
-;
-
-my $dir = "/srv/web/ipfire/html/themes";
-local *DH;
-my ($item, $file);
-my @files;
-
-# Foreach directory create am theme entry to be selected by user
-
-opendir (DH, $dir);
-while ($file = readdir (DH)) {
-	next if ( $file =~ /^\./ );
-	push (@files, $file);
-}
-closedir (DH);
-
-foreach $item (sort (@files)) {
-	if ( "$mainsettings{'THEME'}" eq "$item" ) {
-		print "<option value='$item' selected='selected'>$item</option>\n";
-	} else {
-		print "<option value='$item'>$item</option>\n";
-	}
 }
 
 print <<END

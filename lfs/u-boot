@@ -1,7 +1,7 @@
 ###############################################################################
 #                                                                             #
 # IPFire.org - A linux based firewall                                         #
-# Copyright (C) 2007-2013  IPFire Team  <info@ipfire.org>                     #
+# Copyright (C) 2007-2024  IPFire Team  <info@ipfire.org>                     #
 #                                                                             #
 # This program is free software: you can redistribute it and/or modify        #
 # it under the terms of the GNU General Public License as published by        #
@@ -24,24 +24,32 @@
 
 include Config
 
-VER        = 2014.04
+VER        = 2024.10
 
 THISAPP    = u-boot-$(VER)
 DL_FILE    = $(THISAPP).tar.bz2
 DL_FROM    = $(URL_IPFIRE)
 DIR_APP    = $(DIR_SRC)/$(THISAPP)
-TARGET     = $(DIR_INFO)/$(THISAPP)
-SUP_ARCH   = armv5tel
+TARGET     = $(DIR_INFO)/$(THISAPP)-$(MKIMAGE)
+SUP_ARCH   = aarch64
+
+CFLAGS    := $(patsubst -fstack-protector-strong,,$(CFLAGS))
+
+ATF_VER    = 2.12
 
 ###############################################################################
 # Top-level Rules
 ###############################################################################
 
-objects = $(DL_FILE)
+objects = $(DL_FILE) arm-trusted-firmware-$(ATF_VER).tar.gz arm-trusted-firmware-$(ATF_VER)-rk3399-binary.tar.xz
 
 $(DL_FILE) = $(DL_FROM)/$(DL_FILE)
+arm-trusted-firmware-$(ATF_VER).tar.gz = $(DL_FROM)/arm-trusted-firmware-$(ATF_VER).tar.gz
+arm-trusted-firmware-$(ATF_VER)-rk3399-binary.tar.xz = $(DL_FROM)/arm-trusted-firmware-$(ATF_VER)-rk3399-binary.tar.xz
 
-$(DL_FILE)_MD5 = 6d2116d1385a66e9a59742caa9d62a54
+$(DL_FILE)_BLAKE2 = e7673cb86e7911dcbb2432e6eaea803acef814aa42e3ef322a221b9f89a0d52fb1acd6de92d17486f383d01ea7b1b82c570385a53e3c877d13773cf9e7084f8a
+arm-trusted-firmware-$(ATF_VER).tar.gz_BLAKE2 = 87bb5bd76993e32a9cc25e405e57f619f2311937af024979d5c20ef022d570435b6e38a23e70079c267e093a45b5a60af671d3eebac0449a908db8ad32aa6592
+arm-trusted-firmware-$(ATF_VER)-rk3399-binary.tar.xz_BLAKE2 = 1b5e80bd260f9869637666a97adc99a0deb87e9b9b6982ba9811e2413477ad178423699ab83267d5e09971abcd5652686e33645b22a6cefba7be7df9b83a02b3
 
 install : $(TARGET)
 
@@ -49,10 +57,10 @@ check : $(patsubst %,$(DIR_CHK)/%,$(objects))
 
 download :$(patsubst %,$(DIR_DL)/%,$(objects))
 
-md5 : $(subst %,%_MD5,$(objects))
+b2 : $(subst %,%_BLAKE2,$(objects))
 
 ###############################################################################
-# Downloading, checking, md5sum
+# Downloading, checking, b2sum
 ###############################################################################
 
 $(patsubst %,$(DIR_CHK)/%,$(objects)) :
@@ -61,10 +69,10 @@ $(patsubst %,$(DIR_CHK)/%,$(objects)) :
 $(patsubst %,$(DIR_DL)/%,$(objects)) :
 	@$(LOAD)
 
-$(subst %,%_MD5,$(objects)) :
-	@$(MD5)
+$(subst %,%_BLAKE2,$(objects)) :
+	@$(B2SUM)
 
-dist: 
+dist:
 	@$(PAK)
 
 ###############################################################################
@@ -75,57 +83,147 @@ $(TARGET) : $(patsubst %,$(DIR_DL)/%,$(objects))
 	@$(PREBUILD)
 	@rm -rf $(DIR_APP) && cd $(DIR_SRC) && tar axf $(DIR_DL)/$(DL_FILE)
 
-	# Pandaboard
-	-mkdir -pv /usr/share/u-boot/pandaboard
-	cd $(DIR_APP) && make CROSS_COMPILE="" omap4_panda_config
+	# distrobootcmd support was removed for raspberry pi boards. Revert.
+	cd $(DIR_APP) && patch -Np1 < $(DIR_SRC)/src/patches/u-boot/u-boot-2024.10-revert_rpi_distro_bootcmd_removal.patch
+
+	# Raspberry Pi 3
+	-mkdir -pv /usr/share/u-boot/rpi
+	cd $(DIR_APP) && make CROSS_COMPILE="" rpi_3_config
+	cd $(DIR_APP) && sed -i -e 's!^CONFIG_IDENT_STRING=.*!CONFIG_IDENT_STRING=" RPi3 - IPFire.org"!' .config
+	cd $(DIR_APP) && sed -i -e 's!^.*CONFIG_DISTRO_DEFAULTS.*!CONFIG_DISTRO_DEFAULTS=y!' .config
+	cd $(DIR_APP) && sed -i -e 's!^CONFIG_BOOTCOMMAND=.*!CONFIG_BOOTCOMMAND="run distro_bootcmd"!' .config
+
 	cd $(DIR_APP) && make CROSS_COMPILE="" HOSTCC="gcc $(CFLAGS)"
-	cd $(DIR_APP) && install -v -m 644 MLO u-boot.img \
-		/usr/share/u-boot/pandaboard
-	# Install pandaboard uboot as default
-	cd $(DIR_APP) && install MLO /boot/
-	cd $(DIR_APP) && install u-boot.img /boot/
+	cd $(DIR_APP) && install -v -m 644 u-boot.bin \
+		/usr/share/u-boot/rpi/u-boot-rpi3.bin
+	cd $(DIR_APP) && install u-boot.bin /boot/u-boot-rpi3.bin
+	cd $(DIR_APP) && install -v -m 755 tools/mkimage /usr/bin
 	cd $(DIR_APP) && make distclean
 
-	# Wandboard Quad
-	-mkdir -pv /usr/share/u-boot/wandboard_quad
-	cd $(DIR_APP) && make CROSS_COMPILE="" wandboard_quad_config
+	# Raspberry Pi 4
+	-mkdir -pv /usr/share/u-boot/rpi
+	cd $(DIR_APP) && make CROSS_COMPILE="" rpi_4_config
+	cd $(DIR_APP) && sed -i -e 's!^CONFIG_IDENT_STRING=.*!CONFIG_IDENT_STRING=" RPi4 - IPFire.org"!' .config
+	cd $(DIR_APP) && sed -i -e 's!^.*CONFIG_DISTRO_DEFAULTS.*!CONFIG_DISTRO_DEFAULTS=y!' .config
+	cd $(DIR_APP) && sed -i -e 's!^CONFIG_BOOTCOMMAND=.*!CONFIG_BOOTCOMMAND="run distro_bootcmd"!' .config
 	cd $(DIR_APP) && make CROSS_COMPILE="" HOSTCC="gcc $(CFLAGS)"
-	cd $(DIR_APP) && install -v -m 644 u-boot.imx \
-		/usr/share/u-boot/wandboard_quad
+	cd $(DIR_APP) && install -v -m 644 u-boot.bin \
+		/usr/share/u-boot/rpi/u-boot-rpi4.bin
+	cd $(DIR_APP) && install u-boot.bin /boot/u-boot-rpi4.bin
 	cd $(DIR_APP) && make distclean
 
-	# Wandboard Dual
-	-mkdir -pv /usr/share/u-boot/wandboard_dl
-	cd $(DIR_APP) && make CROSS_COMPILE="" wandboard_dl_config
-	cd $(DIR_APP) && make CROSS_COMPILE="" HOSTCC="gcc $(CFLAGS)"
-	cd $(DIR_APP) && install -v -m 644 u-boot.imx \
-		/usr/share/u-boot/wandboard_dl
-	cd $(DIR_APP) && make distclean
-
-	# Wandboard Solo
-	-mkdir -pv /usr/share/u-boot/wandboard_solo
-	cd $(DIR_APP) && make CROSS_COMPILE="" wandboard_solo_config
-	cd $(DIR_APP) && make CROSS_COMPILE="" HOSTCC="gcc $(CFLAGS)"
-	cd $(DIR_APP) && install -v -m 644 u-boot.imx \
-		/usr/share/u-boot/wandboard_solo
-	cd $(DIR_APP) && make distclean
-
-	# LeMaker Banana Pi
-	-mkdir -pv /usr/share/u-boot/banana_pi
-	cd $(DIR_APP) && patch -Np1 < $(DIR_SRC)/src/patches/u-boot/sunxi/001-uboot-sunxi-509d96d4f1f602d62d36db660973249e16f9d088.patch
-	cd $(DIR_APP) && patch -Np1 < $(DIR_SRC)/src/patches/u-boot/sunxi/002-uboot-jwrdegoede-psci-support.patch
-	cd $(DIR_APP) && patch -Np1 < $(DIR_SRC)/src/patches/u-boot/sunxi/003-uboot-fix-gmac-not-working-reliable-on-bananapi.patch
-	cd $(DIR_APP) && make CROSS_COMPILE="" Bananapi_config
+	# OrangePi Zero Plus
+	cd $(DIR_APP) && rm -rf arm-trusted-firmware-$(ATF_VER)
+	cd $(DIR_APP) && tar axf $(DIR_DL)/arm-trusted-firmware-$(ATF_VER).tar.gz
+	cd $(DIR_APP)/arm-trusted-firmware-$(ATF_VER) && make PLAT=sun50i_a64 ARCH=aarch64 CROSS_COMPILE="aarch64-unknown-linux-gnu-" DEBUG=0 bl31
+	cd $(DIR_APP) && cp arm-trusted-firmware-$(ATF_VER)/build/sun50i_a64/release/bl31.bin bl31.bin
+	cd $(DIR_APP) && rm -rf arm-trusted-firmware-$(ATF_VER)
+	-mkdir -pv /usr/share/u-boot/orangepi_zero_plus
+	cd $(DIR_APP) && make CROSS_COMPILE="" orangepi_zero_plus_config
+	cd $(DIR_APP) && sed -i -e 's!^CONFIG_IDENT_STRING=.*!CONFIG_IDENT_STRING="  OrangePi Zero+  - IPFire.org"!' .config
 	cd $(DIR_APP) && make CROSS_COMPILE="" HOSTCC="gcc $(CFLAGS)"
 	cd $(DIR_APP) && install -v -m 644 u-boot-sunxi-with-spl.bin \
-		/usr/share/u-boot/banana_pi
+		/usr/share/u-boot/orangepi_zero_plus
+	cd $(DIR_APP) && make distclean
+	cd $(DIR_APP) && rm -f bl31.bin
 
-	# mkimage
-	cd $(DIR_APP) && make CROSS_COMPILE="" HOSTCC="gcc $(CFLAGS)" tools
-	cd $(DIR_APP) && install -v -m 755 tools/mkimage /usr/bin
+	# OrangePi PC 2
+	cd $(DIR_APP) && rm -rf arm-trusted-firmware-$(ATF_VER)
+	cd $(DIR_APP) && tar axf $(DIR_DL)/arm-trusted-firmware-$(ATF_VER).tar.gz
+	cd $(DIR_APP)/arm-trusted-firmware-$(ATF_VER) && make PLAT=sun50i_a64 ARCH=aarch64 CROSS_COMPILE="aarch64-unknown-linux-gnu-" DEBUG=0 bl31
+	cd $(DIR_APP) && cp arm-trusted-firmware-$(ATF_VER)/build/sun50i_a64/release/bl31.bin bl31.bin
+	cd $(DIR_APP) && rm -rf arm-trusted-firmware-$(ATF_VER)
+	-mkdir -pv /usr/share/u-boot/orangepi_pc2
+	cd $(DIR_APP) && make CROSS_COMPILE="" orangepi_pc2_config
+	cd $(DIR_APP) && sed -i -e 's!^CONFIG_IDENT_STRING=.*!CONFIG_IDENT_STRING="  OrangePi PC2 - IPFire.org"!' .config
+	cd $(DIR_APP) && make CROSS_COMPILE="" HOSTCC="gcc $(CFLAGS)"
+	cd $(DIR_APP) && install -v -m 644 u-boot-sunxi-with-spl.bin \
+		/usr/share/u-boot/orangepi_pc2
+	cd $(DIR_APP) && make distclean
+	cd $(DIR_APP) && rm -f bl31.bin
 
-	# config (uEnv.txt)
+
+	# distrobootcmd support was removed for rockchip boards. Revert.
+	cd $(DIR_APP) && patch -Np1 < $(DIR_SRC)/src/patches/u-boot/u-boot-2024.10-revert_rockchip_distro_bootcmd_removal.patch
+
+	# Nanopi R2S
+	cd $(DIR_APP) && rm -rf arm-trusted-firmware-$(ATF_VER)
+	cd $(DIR_APP) && tar axf $(DIR_DL)/arm-trusted-firmware-$(ATF_VER).tar.gz
+	cd $(DIR_APP)/arm-trusted-firmware-$(ATF_VER) && make PLAT=rk3328 ARCH=aarch64 CROSS_COMPILE="aarch64-unknown-linux-gnu-" DEBUG=0 bl31
+	cd $(DIR_APP) && cp arm-trusted-firmware-$(ATF_VER)/build/rk3328/release/bl31/bl31.elf bl31.elf
+	cd $(DIR_APP) && rm -rf arm-trusted-firmware-$(ATF_VER)
+	-mkdir -pv /usr/share/u-boot/nanopi_r2s
+	cd $(DIR_APP) && make CROSS_COMPILE="" nanopi-r2s-rk3328_config
+	cd $(DIR_APP) && sed -i -e 's!^CONFIG_IDENT_STRING=.*!CONFIG_IDENT_STRING=" Nanopi R2S - IPFire.org"!' .config
+	cd $(DIR_APP) && sed -i -e 's!^.*CONFIG_DISTRO_DEFAULTS.*!CONFIG_DISTRO_DEFAULTS=y!' .config
+	cd $(DIR_APP) && sed -i -e 's!^CONFIG_BOOTCOMMAND=.*!CONFIG_BOOTCOMMAND="console=ttyS2,115200n8;run distro_bootcmd"!' .config
+	cd $(DIR_APP) && sed -i -e 's!^CONFIG_BAUDRATE=.*!CONFIG_BAUDRATE=115200!' .config
+	cd $(DIR_APP) && sed -i -e 's!^.*CONFIG_ENV_OVERWRITE.*!CONFIG_ENV_OVERWRITE=y!' .config
+	cd $(DIR_APP) && make BL31=$(DIR_APP)/bl31.elf CROSS_COMPILE="" HOSTCC="gcc $(CFLAGS)"
+	cd $(DIR_APP) && install -v -m 644 u-boot-rockchip.bin \
+		/usr/share/u-boot/nanopi_r2s/u-boot-rockchip.bin
+	cd $(DIR_APP) && make distclean
+
+	# Nanopi R2C
+	cd $(DIR_APP) && rm -rf arm-trusted-firmware-$(ATF_VER)
+	cd $(DIR_APP) && tar axf $(DIR_DL)/arm-trusted-firmware-$(ATF_VER).tar.gz
+	cd $(DIR_APP)/arm-trusted-firmware-$(ATF_VER) && make PLAT=rk3328 ARCH=aarch64 CROSS_COMPILE="aarch64-unknown-linux-gnu-"  DEBUG=0 bl31
+	cd $(DIR_APP) && cp arm-trusted-firmware-$(ATF_VER)/build/rk3328/release/bl31/bl31.elf bl31.elf
+	cd $(DIR_APP) && rm -rf arm-trusted-firmware-$(ATF_VER)
+	-mkdir -pv /usr/share/u-boot/nanopi_r2c
+	cd $(DIR_APP) && make CROSS_COMPILE="" nanopi-r2c-rk3328_config
+	cd $(DIR_APP) && sed -i -e 's!^CONFIG_IDENT_STRING=.*!CONFIG_IDENT_STRING=" Nanopi R2C - IPFire.org"!' .config
+	cd $(DIR_APP) && sed -i -e 's!^.*CONFIG_DISTRO_DEFAULTS.*!CONFIG_DISTRO_DEFAULTS=y!' .config
+	cd $(DIR_APP) && sed -i -e 's!^CONFIG_BOOTCOMMAND=.*!CONFIG_BOOTCOMMAND="console=ttyS2,115200n8;run distro_bootcmd"!' .config
+	cd $(DIR_APP) && sed -i -e 's!^CONFIG_BAUDRATE=.*!CONFIG_BAUDRATE=115200!' .config
+	cd $(DIR_APP) && sed -i -e 's!^.*CONFIG_ENV_OVERWRITE.*!CONFIG_ENV_OVERWRITE=y!' .config
+	cd $(DIR_APP) && make BL31=$(DIR_APP)/bl31.elf  CROSS_COMPILE="" HOSTCC="gcc $(CFLAGS)"
+	cd $(DIR_APP) && install -v -m 644 u-boot-rockchip.bin \
+		/usr/share/u-boot/nanopi_r2c/u-boot-rockchip.bin
+	cd $(DIR_APP) && make distclean
+
+	# Orangepi R1 plus lts
+	cd $(DIR_APP) && rm -rf arm-trusted-firmware-$(ATF_VER)
+	cd $(DIR_APP) && tar axf $(DIR_DL)/arm-trusted-firmware-$(ATF_VER).tar.gz
+	cd $(DIR_APP)/arm-trusted-firmware-$(ATF_VER) && make PLAT=rk3328 ARCH=aarch64 CROSS_COMPILE="aarch64-unknown-linux-gnu-"  DEBUG=0 bl31
+	cd $(DIR_APP) && cp arm-trusted-firmware-$(ATF_VER)/build/rk3328/release/bl31/bl31.elf bl31.elf
+	cd $(DIR_APP) && rm -rf arm-trusted-firmware-$(ATF_VER)
+	-mkdir -pv /usr/share/u-boot/orangepi_r1_plus_lts
+	cd $(DIR_APP) && make CROSS_COMPILE="" orangepi-r1-plus-lts-rk3328_config
+	cd $(DIR_APP) && sed -i -e 's!^CONFIG_IDENT_STRING=.*!CONFIG_IDENT_STRING=" OrangePi R1 plus lts - IPFire.org"!' .config
+	cd $(DIR_APP) && sed -i -e 's!^.*CONFIG_DISTRO_DEFAULTS.*!CONFIG_DISTRO_DEFAULTS=y!' .config
+	cd $(DIR_APP) && sed -i -e 's!^CONFIG_BOOTCOMMAND=.*!CONFIG_BOOTCOMMAND="console=ttyS2,115200n8;run distro_bootcmd"!' .config
+	cd $(DIR_APP) && sed -i -e 's!^CONFIG_BAUDRATE=.*!CONFIG_BAUDRATE=115200!' .config
+	cd $(DIR_APP) && sed -i -e 's!^.*CONFIG_ENV_OVERWRITE.*!CONFIG_ENV_OVERWRITE=y!' .config
+	cd $(DIR_APP) && make BL31=$(DIR_APP)/bl31.elf CROSS_COMPILE="" HOSTCC="gcc $(CFLAGS)"
+	cd $(DIR_APP) && install -v -m 644 u-boot-rockchip.bin \
+		/usr/share/u-boot/orangepi_r1_plus_lts/u-boot-rockchip.bin
+	cd $(DIR_APP) && make distclean
+
+	# Nanopi R4S
+	# arm trusted firmware for rk3399 cannot build without cortex m0 gcc crosscompiler
+	# it is build on ubuntu with make PLAT=rk3399 ARCH=aarch64 DEBUG=0 bl31
+	cd $(DIR_APP) && tar axf $(DIR_DL)/arm-trusted-firmware-$(ATF_VER)-rk3399-binary.tar.xz
+	-mkdir -pv /usr/share/u-boot/nanopi_r4s
+	cd $(DIR_APP) && make BL31=$(DIR_APP)/bl31.elf  CROSS_COMPILE="" nanopi-r4s-rk3399_config
+	cd $(DIR_APP) && sed -i -e 's!^CONFIG_IDENT_STRING=.*!CONFIG_IDENT_STRING=" Nanopi R4S - IPFire.org"!' .config
+	cd $(DIR_APP) && sed -i -e 's!^.*CONFIG_DISTRO_DEFAULTS.*!CONFIG_DISTRO_DEFAULTS=y!' .config
+	cd $(DIR_APP) && sed -i -e 's!^CONFIG_BOOTCOMMAND=.*!CONFIG_BOOTCOMMAND="console=ttyS2,115200n8;run distro_bootcmd"!' .config
+	cd $(DIR_APP) && sed -i -e 's!^CONFIG_BAUDRATE=.*!CONFIG_BAUDRATE=115200!' .config
+	cd $(DIR_APP) && sed -i -e 's!^.*CONFIG_ENV_OVERWRITE.*!CONFIG_ENV_OVERWRITE=y!' .config
+	cd $(DIR_APP) && make BL31=$(DIR_APP)/bl31.elf CROSS_COMPILE="" HOSTCC="gcc $(CFLAGS)"
+	cd $(DIR_APP) && install -v -m 644 u-boot-rockchip.bin \
+		/usr/share/u-boot/nanopi_r4s/u-boot-rockchip.bin
+	cd $(DIR_APP) && make distclean
+
+	# create an empty 128 KB File for the u-boot env
+	dd if=/dev/zero of=/boot/uboot.env bs=1K count=128
+
+	# config (uEnv.txt and boot.*)
 	cp -vf $(DIR_SRC)/config/u-boot/* /boot/
+	# create signed binary boot script (boot.scr)
+	mkimage -C none -A arm -T script -d /boot/boot.cmd /boot/boot.scr
+
 	# patch real Kernel version to uEnv.txt
 	sed -e "s/xxxKVERxxx/$(KVER)/g" -i /boot/uEnv.txt
 

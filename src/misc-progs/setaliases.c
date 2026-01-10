@@ -39,13 +39,13 @@ int main(void)
 	char s[STRING_SIZE];
 	char command[STRING_SIZE];
 	char red_netmask[STRING_SIZE];
-	char red_broadcast[STRING_SIZE];
 	char red_dev[STRING_SIZE];
 	char default_gateway[STRING_SIZE];
 	char *aliasip;
 	char *enabled;
 	char *sptr;
 	char *comment;
+	char* intf = NULL;
 	int alias;
 	int count;
 
@@ -88,19 +88,19 @@ int main(void)
 		fprintf(stderr, "Cannot read RED_TYPE\n");
 		exit(1);
 	}
-	
+
 	/* Make sure it's the right type */
-	if (!(strcmp(s, "STATIC")==0)) 
+	if (!(strcmp(s, "STATIC")==0))
 		exit(0);
 
 	/* Get the RED interface details */
-	if((!findkey(kv, "RED_NETMASK", red_netmask)) || (!findkey(kv, "RED_BROADCAST", red_broadcast)) || 
+	if((!findkey(kv, "RED_NETMASK", red_netmask)) ||
 		(!findkey(kv, "RED_DEV", red_dev)) || (!findkey(kv, "DEFAULT_GATEWAY", default_gateway)))
 	{
 		fprintf(stderr, "Cannot read RED settings\n");
 		exit(1);
 	}
-		
+
 	if (!VALID_DEVICE(red_dev))
 	{
 		fprintf(stderr, "Bad red_dev: %s\n", red_dev);
@@ -113,25 +113,18 @@ int main(void)
 		exit(1);
 	}
 
-	if (!VALID_IP(red_broadcast))
-	{
-		fprintf(stderr, "Bad red_broadcast : %s\n", red_broadcast);
-		exit(1);
-	}
-
 	if (!VALID_IP(default_gateway))
 	{
 		fprintf(stderr, "Bad default_gateway : %s\n", default_gateway);
 		exit(1);
 	}
 
-	/* down the aliases in turn until ifconfig complains */
-	alias=0;
-	do
-	{
-		memset(command, 0, STRING_SIZE);
-		snprintf(command, STRING_SIZE-1, "/sbin/ifconfig %s:%d down 2>/dev/null", red_dev, alias++);
-	} while (safe_system(command)==0);
+	// Flush all previous aliases
+	alias = 0;
+	do {
+		snprintf(command, STRING_SIZE - 1,
+			"ip addr flush secondary dev red%d 2>/dev/null", alias++);
+	} while (safe_system(command) == 0);
 
 	/* Now set up the new aliases from the config file */
         if (!(file = fopen(CONFIG_ROOT "/ethernet/aliases", "r")))
@@ -151,15 +144,18 @@ int main(void)
                 aliasip = NULL;
                 enabled = NULL;
                 comment = NULL;
+                intf = NULL;
                 sptr = strtok(s, ",");
                 while (sptr)
                 {
                         if (count == 0)
                                 aliasip = sptr;
-                        if (count == 1)
+                        else if (count == 1)
                                 enabled = sptr;
-                        else
+                        else if (count == 2)
                                 comment = sptr;
+                        else if (count == 3)
+                                intf = sptr;
                         count++;
 			sptr = strtok(NULL, ",");
 		}
@@ -182,16 +178,14 @@ int main(void)
                         exit(1);
                 }
 
-		memset(command, 0, STRING_SIZE);
-		snprintf(command, STRING_SIZE-1,
-				"/sbin/ifconfig %s:%d %s netmask %s broadcast %s up",
-			     red_dev, alias, aliasip, red_netmask, red_broadcast);
+		// Default to RED_DEV if intf isn't set
+		if (!intf)
+			intf = red_dev;
+
+		snprintf(command, STRING_SIZE - 1, "ip addr add %s/%s secondary dev %s 2>/dev/null",
+			aliasip, red_netmask, intf);
 		safe_system(command);
-		memset(command, 0, STRING_SIZE);
-		snprintf(command, STRING_SIZE-1,
-				"/usr/sbin/arping -q -c 1 -w 1 -i %s -S %s %s",
-				red_dev, aliasip, default_gateway);
-		safe_system(command);
+
 		alias++;
 	}
 	return 0;

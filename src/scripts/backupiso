@@ -1,9 +1,68 @@
 #!/bin/sh
+###############################################################################
+#                                                                             #
+# IPFire.org - A linux based firewall                                         #
+# Copyright (C) 2007-2022  IPFire Team  <info@ipfire.org>                     #
+#                                                                             #
+# This program is free software: you can redistribute it and/or modify        #
+# it under the terms of the GNU General Public License as published by        #
+# the Free Software Foundation, either version 3 of the License, or           #
+# (at your option) any later version.                                         #
+#                                                                             #
+# This program is distributed in the hope that it will be useful,             #
+# but WITHOUT ANY WARRANTY; without even the implied warranty of              #
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the               #
+# GNU General Public License for more details.                                #
+#                                                                             #
+# You should have received a copy of the GNU General Public License           #
+# along with this program.  If not, see <http://www.gnu.org/licenses/>.       #
+#                                                                             #
+###############################################################################
 
-COREVER=$(cat /opt/pakfire/db/core/mine)
 # FIXME: edit this lines before release
-URL="http://download.ipfire.org/releases/ipfire-2.x/2.17-core$COREVER/"
-ISO="ipfire-2.17.i586-full-core$COREVER.iso"
+IPFVER=2.29
+COREVER=$(cat /opt/pakfire/db/core/mine)
+
+arch=$(uname -m)
+
+case "${arch}" in
+	aarch64|x86_64)
+		;;
+	*)
+		echo "Arch is not supported" >&2
+		exit 1
+		;;
+esac
+
+URL="https://downloads.ipfire.org/releases/ipfire-2.x/$IPFVER-core$COREVER/"
+ISO="ipfire-$IPFVER-core$COREVER-$arch.iso"
+
+makeiso() {
+	local dir="${1}"
+	local output="${2}"
+
+	local args=
+
+	# Add EFI options when EFI image is present
+	if [ -e "${dir}/boot/isolinux/efiboot.img" ]; then
+		args="${args} -eltorito-alt-boot -e boot/isolinux/efiboot.img -no-emul-boot"
+	fi
+
+	# Compose ISO
+	mkisofs -J -r -V "IPFire ${IPFVER} ${arch}" \
+		-b boot/isolinux/isolinux.bin -no-emul-boot -boot-load-size 4 -boot-info-table \
+		-c boot/isolinux/boot.catalog \
+		${args} ${dir} > ${output}
+
+	# Add DOS paritition table
+	if [ -e "${dir}/boot/isolinux/efiboot.img" ]; then
+		isohybrid --uefi ${output}
+	else
+		isohybrid ${output}
+	fi
+
+	return 0
+}
 
 if [ -z $1 ]; then
 	echo usage: $0 backup-file
@@ -15,36 +74,36 @@ TS=$1
 mkdir -p /var/tmp/backupiso
 cd /var/tmp/backupiso
 
-if [ ! -e ${ISO} ]
+if [ ! -f ${ISO} ]
 then
 	echo "Fetching ${URL}${ISO}"
 	wget --quiet -c ${URL}${ISO}
 fi
 
-echo "Fetching ${URL}${ISO}.md5"
-wget --quiet -O ${ISO}.md5 ${URL}${ISO}.md5
+echo "Fetching ${URL}${ISO}.b2"
+wget --quiet -O ${ISO}.b2 ${URL}${ISO}.b2
 
-echo "Checking md5 of ${ISO}"
-md5sum --status -c ${ISO}.md5
-if [ $? -eq 0 -o $? -eq 24 ]
+echo "Checking BLAKE2 checksum of ${ISO}"
+b2sum --status -c ${ISO}.b2
+if [ $? -eq 0 ] || [ $? -eq 24 ]
 then
-	echo "md5 is OK"
+	echo "BLAKE2 checksum is OK"
 else
-	echo "md5 mismatch"
+	echo "BLAKE2 checksum mismatch"
 	echo "Fetching again ${URL}${ISO}"
 	wget --quiet -O ${ISO} ${URL}${ISO}
-	echo "Checking again md5 of ${ISO}"
-	md5sum --status -c ${ISO}.md5
-	if [ $? -eq 0 -o $? -eq 24 ]
+	echo "Checking BLAKE2 checksum of ${ISO} again"
+	b2sum --status -c ${ISO}.b2
+	if [ $? -eq 0 ] || [ $? -eq 24 ]
 	then
-		echo "md5 is OK"
+		echo "BLAKE2 checksum is OK"
 	else
-		echo "md5 mismatch"
-		echo "aborting backup because md5 mismatch"
+		echo "BLAKE2 checksum mismatch"
+		echo "aborting backup because BLAKE2 checksum mismatch"
 		exit 1
 	fi
 fi
-rm ${ISO}.md5
+rm ${ISO}.b2
 
 echo "Remastering iso"
 mkdir -p backupiso.tmp.${TS}
@@ -56,11 +115,11 @@ rm -r backupiso.tmp.${TS}
 # Copy backup file to disk
 cp "/var/ipfire/backup/${TS}.ipf" "backupiso.${TS}/backup.ipf"
 
+# Add a version tag
+touch "backupiso.${TS}/backup-${TS}.media"
+
 echo "Running mkisofs"
-mkisofs -J -r -V "ipfire backup ${TS}" \
-            -b boot/isolinux/isolinux.bin -no-emul-boot -boot-load-size 4 -boot-info-table \
-            -c boot/isolinux/boot.catalog backupiso.${TS} > $(basename ${ISO} .iso)-${TS}.iso
-isohybrid $(basename ${ISO} .iso)-${TS}.iso
+makeiso backupiso.${TS} $(basename ${ISO} .iso)-${TS}.iso
 
 echo "Cleaning up"
 rm -rf backupiso.${TS}

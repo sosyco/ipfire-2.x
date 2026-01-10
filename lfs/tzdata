@@ -1,7 +1,7 @@
 ###############################################################################
 #                                                                             #
 # IPFire.org - A linux based firewall                                         #
-# Copyright (C) 2007-2011  IPFire Team  <info@ipfire.org>                     #
+# Copyright (C) 2007-2025  IPFire Team  <info@ipfire.org>                     #
 #                                                                             #
 # This program is free software: you can redistribute it and/or modify        #
 # it under the terms of the GNU General Public License as published by        #
@@ -24,7 +24,7 @@
 
 include Config
 
-VER        = 2015d
+VER        = 2025b
 TZDATA_VER = $(VER)
 TZCODE_VER = $(VER)
 
@@ -33,8 +33,8 @@ DL_FROM    = $(URL_IPFIRE)
 DIR_APP    = $(DIR_SRC)/$(THISAPP)
 TARGET     = $(DIR_INFO)/$(THISAPP)
 
-FILES      = africa antarctica asia australasia europe \
-	northamerica southamerica pacificnew etcetera backward
+FILES      = africa antarctica asia australasia backward etcetera europe \
+	factory northamerica southamerica
 
 ###############################################################################
 # Top-level Rules
@@ -45,8 +45,8 @@ objects = tzdata$(TZDATA_VER).tar.gz tzcode$(TZCODE_VER).tar.gz
 tzdata$(TZDATA_VER).tar.gz = $(DL_FROM)/tzdata$(TZDATA_VER).tar.gz
 tzcode$(TZCODE_VER).tar.gz = $(DL_FROM)/tzcode$(TZCODE_VER).tar.gz
 
-tzdata$(TZDATA_VER).tar.gz_MD5 = b595bdc4474b8fc1a15cffc67c66025b
-tzcode$(TZCODE_VER).tar.gz_MD5 = 4008a3abc025a398697b2587c48258b9
+tzdata$(TZDATA_VER).tar.gz_BLAKE2 = 07421e756cd33f003f1173c320a2e454f767a2ba299b76b54e34dc5cf1c126b00ab3186bc61d4989201a83cb8b3e4c005c0bc080fb39a1e48ff9555d50c84f1d
+tzcode$(TZCODE_VER).tar.gz_BLAKE2 = 1c9fa834ccdf0a73dd4ca5956e913506b01dc10cd0e278dc2ee0099b08fa726af56cc2d7276e41ab1d3d57faacab97a0b0eab7e1623ef2de46dd576aaded0001
 
 install : $(TARGET)
 
@@ -54,10 +54,10 @@ check : $(patsubst %,$(DIR_CHK)/%,$(objects))
 
 download :$(patsubst %,$(DIR_DL)/%,$(objects))
 
-md5 : $(subst %,%_MD5,$(objects))
+b2 : $(subst %,%_BLAKE2,$(objects))
 
 ###############################################################################
-# Downloading, checking, md5sum
+# Downloading, checking, b2sum
 ###############################################################################
 
 $(patsubst %,$(DIR_CHK)/%,$(objects)) :
@@ -66,8 +66,8 @@ $(patsubst %,$(DIR_CHK)/%,$(objects)) :
 $(patsubst %,$(DIR_DL)/%,$(objects)) :
 	@$(LOAD)
 
-$(subst %,%_MD5,$(objects)) :
-	@$(MD5)
+$(subst %,%_BLAKE2,$(objects)) :
+	@$(B2SUM)
 
 ###############################################################################
 # Installation Details

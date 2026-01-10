@@ -2,7 +2,7 @@
 ###############################################################################
 #                                                                             #
 # IPFire.org - A linux based firewall                                         #
-# Copyright (C) 2013 Alexander Marx <amarx@ipfire.org>                        #
+# Copyright (C) 2007-2024  IPFire Team  <info@ipfire.org>                     #
 #                                                                             #
 # This program is free software: you can redistribute it and/or modify        #
 # it under the terms of the GNU General Public License as published by        #
@@ -20,15 +20,19 @@
 ###############################################################################
 
 use strict;
+use experimental 'smartmatch';
 
 require '/var/ipfire/general-functions.pl';
 require "${General::swroot}/lang.pl";
 require "/usr/lib/firewall/firewall-lib.pl";
+require "${General::swroot}/location-functions.pl";
+require "${General::swroot}/ipblocklist-functions.pl";
 
 # Set to one to enable debugging mode.
 my $DEBUG = 0;
 
 my $IPTABLES = "iptables --wait";
+my $IPSET = "ipset";
 
 # iptables chains
 my $CHAIN_INPUT           = "INPUTFW";
@@ -46,6 +50,20 @@ my @PROTOCOLS_WITH_PORTS = ("tcp", "udp");
 
 my @VALID_TARGETS = ("ACCEPT", "DROP", "REJECT");
 
+my @PRIVATE_NETWORKS = (
+	"10.0.0.0/8",
+	"172.16.0.0/12",
+	"192.168.0.0/16",
+	"100.64.0.0/10",
+	"224.0.0.0/4",
+);
+
+# MARK masks
+my $NAT_MASK = 0x0f000000;
+
+# Country code, which is used to mark hostile networks.
+my $HOSTILE_CCODE = "XD";
+
 my %fwdfwsettings=();
 my %fwoptions = ();
 my %defaultNetworks=();
@@ -54,15 +72,23 @@ my %customgrp=();
 my %configinputfw=();
 my %configoutgoingfw=();
 my %confignatfw=();
-my @p2ps=();
+my %locationsettings = (
+	"LOCATIONBLOCK_ENABLED" => "off"
+);
+my %blocklistsettings= (
+	"ENABLE" => "off",
+);
+
+my %ipset_loaded_sets = ();
+my @ipset_used_sets = ();
 
 my $configfwdfw		= "${General::swroot}/firewall/config";
 my $configinput	    = "${General::swroot}/firewall/input";
 my $configoutgoing  = "${General::swroot}/firewall/outgoing";
-my $p2pfile			= "${General::swroot}/firewall/p2protocols";
-my $geoipfile		= "${General::swroot}/firewall/geoipblock";
+my $locationfile		= "${General::swroot}/firewall/locationblock";
 my $configgrp		= "${General::swroot}/fwhosts/customgroups";
 my $netsettings		= "${General::swroot}/ethernet/settings";
+my $blocklistfile   = "${General::swroot}/ipblocklist/settings";
 
 &General::readhash("${General::swroot}/firewall/settings", \%fwdfwsettings);
 &General::readhash("${General::swroot}/optionsfw/settings", \%fwoptions);
@@ -71,6 +97,27 @@ my $netsettings		= "${General::swroot}/ethernet/settings";
 &General::readhasharray($configinput, \%configinputfw);
 &General::readhasharray($configoutgoing, \%configoutgoingfw);
 &General::readhasharray($configgrp, \%customgrp);
+
+# Check if the location settings file exists
+if (-e "$locationfile") {
+	# Read settings file
+	&General::readhash("$locationfile", \%locationsettings);
+}
+
+# Check if the ipblocklist settings file exits.
+if (-e "$blocklistfile") {
+	# Read-in settings file.
+	&General::readhash("$blocklistfile", \%blocklistsettings);
+}
+
+# Get all available locations.
+my @locations = &Location::Functions::get_locations();
+
+# Get all supported blocklists.
+my @blocklists = &IPblocklist::get_blocklists();
+
+# Name or the RED interface.
+my $RED_DEV = &General::get_red_interface();
 
 my @log_limit_options = &make_log_limit_options();
 
@@ -82,10 +129,17 @@ my $POLICY_INPUT_ACTION    = $fwoptions{"FWPOLICY2"};
 my $POLICY_FORWARD_ACTION  = $fwoptions{"FWPOLICY"};
 my $POLICY_OUTPUT_ACTION   = $fwoptions{"FWPOLICY1"};
 
+#workaround to suppress a warning when a variable is used only once
+my @dummy = ( $Location::Functions::ipset_db_directory );
+undef (@dummy);
+
 # MAIN
 &main();
 
 sub main {
+	# Get currently used ipset sets.
+	@ipset_used_sets = &ipset_get_sets();
+
 	# Flush all chains.
 	&flush();
 
@@ -100,14 +154,20 @@ sub main {
 		&buildrules(\%configfwdfw);
 	}
 
-	# Load P2P block rules.
-	&p2pblock();
+	# Load Location block rules.
+	&locationblock();
 
-	# Load GeoIP block rules.
-	&geoipblock();
+	# Load rules to block hostile networks.
+	&drop_hostile_networks();
+
+	# Handle ipblocklist.
+	&ipblocklist();
 
 	# Reload firewall policy.
 	run("/usr/sbin/firewall-policy");
+
+	# Cleanup not longer needed ipset sets.
+	&ipset_cleanup();
 
 	#Reload firewall.local if present
 	if ( -f '/etc/sysconfig/firewall.local'){
@@ -161,6 +221,7 @@ sub flush {
 	run("$IPTABLES -t nat -F $CHAIN_NAT_SOURCE");
 	run("$IPTABLES -t nat -F $CHAIN_NAT_DESTINATION");
 	run("$IPTABLES -t mangle -F $CHAIN_MANGLE_NAT_DESTINATION_FIX");
+	run("$IPTABLES -t raw -F SYN_FLOOD_PROTECT");
 }
 
 sub buildrules {
@@ -175,9 +236,9 @@ sub buildrules {
 	}
 
 	if ($POLICY_INPUT_ACTION eq "DROP") {
-		push(@special_input_targets, "REJECT");
+		push(@special_input_targets, ("ACCEPT", "REJECT"));
 	} elsif ($POLICY_INPUT_ACTION eq "REJECT") {
-		push(@special_input_targets, "DROP");
+		push(@special_input_targets, ("ACCEPT", "DROP"));
 	}
 
 	my @special_output_targets = ();
@@ -187,9 +248,9 @@ sub buildrules {
 		push(@special_output_targets, "ACCEPT");
 
 		if ($POLICY_OUTPUT_ACTION eq "DROP") {
-			push(@special_output_targets, "REJECT");
+			push(@special_output_targets, ("ACCEPT", "REJECT"));
 		} elsif ($POLICY_OUTPUT_ACTION eq "REJECT") {
-			push(@special_output_targets, "DROP");
+			push(@special_output_targets, ("ACCEPT", "DROP"));
 		}
 	}
 
@@ -236,6 +297,9 @@ sub buildrules {
 		if ($NAT) {
 			$NAT_MODE = uc($$hash{$key}[31]);
 		}
+
+		# Enable SYN flood protection?
+		my $SYN_FLOOD_PROTECTION = 0;
 
 		# Set up time constraints.
 		my @time_options = ();
@@ -310,6 +374,11 @@ sub buildrules {
 			}
 		}
 
+		# DoS Protection
+		if (($elements ge 38) && ($$hash{$key}[37] eq "ON")) {
+			$SYN_FLOOD_PROTECTION = 1;
+		}
+
 		# Check which protocols are used in this rule and so that we can
 		# later group rules by protocols.
 		my @protocols = &get_protocols($hash, $key);
@@ -342,6 +411,9 @@ sub buildrules {
 					$source = "";
 				}
 
+				# Make sure that $source is properly defined
+				next unless (defined $source);
+
 				my $source_intf = @$src[1];
 
 				foreach my $dst (@destinations) {
@@ -369,7 +441,14 @@ sub buildrules {
 					my @source_options = ();
 					if ($source =~ /mac/) {
 						push(@source_options, $source);
-					} elsif ($source =~ /-m geoip/) {
+					} elsif ($source =~ /-m set/) {
+						# Split given arguments into single chunks to
+						# obtain the set name.
+						my ($a, $b, $c, $loc_src, $e) = split(/ /, $source);
+
+						# Call function to load the networks list for this country.
+						&ipset_restore($loc_src);
+
 						push(@source_options, $source);
 					} elsif($source) {
 						push(@source_options, ("-s", $source));
@@ -377,10 +456,30 @@ sub buildrules {
 
 					# Prepare destination options.
 					my @destination_options = ();
-					if ($destination =~ /-m geoip/) {
+					if ($destination =~ /-m set/) {
+						# Split given arguments into single chunks to
+						# obtain the set name.
+						my ($a, $b, $c, $loc_dst, $e) = split(/ /, $destination);
+
+						# Call function to load the networks list for this country.
+						&ipset_restore($loc_dst);
+
 						push(@destination_options,  $destination);
 					} elsif ($destination) {
 						push(@destination_options, ("-d", $destination));
+					}
+
+					# Add source and destination interface to the filter rules.
+					# These are supposed to help filtering forged packets that originate
+					# from BLUE with an IP address from GREEN for instance.
+					my @source_intf_options = ();
+					if ($source_intf) {
+						push(@source_intf_options, ("-i", $source_intf));
+					}
+
+					my @destination_intf_options = ();
+					if ($destination_intf) {
+						push(@destination_intf_options, ("-o", $destination_intf));
 					}
 
 					# Add time constraint options.
@@ -414,16 +513,28 @@ sub buildrules {
 								my @nat_protocol_options = &get_protocol_options($hash, $key, $protocol, 1);
 								push(@nat_options, @nat_protocol_options);
 							}
+
+							# Add time options.
 							push(@nat_options, @time_options);
 
+							# Determine if a REDIRECT rule should be created.
+							my $use_redirect = ($destination_is_firewall && !$destination && $protocol_has_ports);
+
 							# Make port-forwardings useable from the internal networks.
-							my @internal_addresses = &fwlib::get_internal_firewall_ip_addresses(1);
-							unless ($nat_address ~~ @internal_addresses) {
-								&add_dnat_mangle_rules($nat_address, $source_intf, @nat_options);
+							if (!$use_redirect) {
+								my @internal_addresses = &fwlib::get_internal_firewall_ip_addresses(1);
+								unless ($nat_address ~~ @internal_addresses) {
+									&add_dnat_mangle_rules($nat_address, $source_intf, @nat_options);
+								}
 							}
 
+							# Add source options.
 							push(@nat_options, @source_options);
-							push(@nat_options, ("-d", $nat_address));
+
+							# Add NAT address.
+							if (!$use_redirect) {
+								push(@nat_options, ("-d", $nat_address));
+							}
 
 							my $dnat_port;
 							if ($protocol_has_ports) {
@@ -433,9 +544,13 @@ sub buildrules {
 							my @nat_action_options = ();
 
 							# Use iptables REDIRECT
-							my $use_redirect = ($destination_is_firewall && !$destination && $protocol_has_ports && $dnat_port);
 							if ($use_redirect) {
-								push(@nat_action_options, ("-j", "REDIRECT", "--to-ports", $dnat_port));
+								push(@nat_action_options, ("-j", "REDIRECT"));
+
+								# Redirect to specified port if one has given.
+								if ($dnat_port) {
+									push(@nat_action_options, ("--to-ports", $dnat_port));
+								}
 
 							# Use iptables DNAT
 							} else {
@@ -465,41 +580,46 @@ sub buildrules {
 
 						# Source NAT
 						} elsif ($NAT_MODE eq "SNAT") {
+							my @snat_options = ( "-m", "policy", "--dir", "out", "--pol", "none" );
 							my @nat_options = @options;
 
-							if ($destination_intf) {
-								push(@nat_options, ("-o", $destination_intf));
+							# Get addresses for the configured firewall interfaces.
+							my @local_addresses = &fwlib::get_internal_firewall_ip_addresses(1);
+
+							# Check if the nat_address is one of the local addresses.
+							foreach my $local_address (@local_addresses) {
+								if ($nat_address eq $local_address) {
+									# Clear SNAT options.
+									@snat_options = ();
+
+									# Finish loop.
+									last;
+								}
 							}
 
+							push(@nat_options, @destination_intf_options);
 							push(@nat_options, @source_options);
 							push(@nat_options, @destination_options);
 
 							if ($LOG) {
-								run("$IPTABLES -t nat -A $CHAIN_NAT_SOURCE @nat_options @log_limit_options -j LOG --log-prefix 'SNAT '");
+								run("$IPTABLES -t nat -A $CHAIN_NAT_SOURCE @nat_options @snat_options @log_limit_options -j LOG --log-prefix 'SNAT '");
 							}
-							run("$IPTABLES -t nat -A $CHAIN_NAT_SOURCE @nat_options -j SNAT --to-source $nat_address");
+							run("$IPTABLES -t nat -A $CHAIN_NAT_SOURCE @nat_options @snat_options -j SNAT --to-source $nat_address");
 						}
-					}
-
-					# Add source and destination interface to the filter rules.
-					# These are supposed to help filtering forged packets that originate
-					# from BLUE with an IP address from GREEN for instance.
-					if ($source_intf) {
-						push(@source_options, ("-i", $source_intf));
-					}
-
-					if ($destination_intf) {
-						push(@destination_options, ("-o", $destination_intf));
 					}
 
 					push(@options, @source_options);
 					push(@options, @destination_options);
 
 					# Insert firewall rule.
-					if ($LOG && !$NAT) {
-						run("$IPTABLES -A $chain @options @log_limit_options -j LOG --log-prefix '$chain '");
+					if ($LOG) {
+						run("$IPTABLES -A $chain @options @source_intf_options @destination_intf_options @log_limit_options -j LOG --log-prefix '$chain '");
 					}
-					run("$IPTABLES -A $chain @options -j $target");
+					run("$IPTABLES -A $chain @options @source_intf_options @destination_intf_options -j $target");
+
+					if ($SYN_FLOOD_PROTECTION && ($protocol eq "tcp")) {
+						run("$IPTABLES -t raw -A SYN_FLOOD_PROTECT @options -j CT --notrack");
+					}
 
 					# Handle forwarding rules and add corresponding rules for firewall access.
 					if ($chain eq $CHAIN_FORWARD) {
@@ -507,18 +627,18 @@ sub buildrules {
 						# is granted/forbidden for any network that the firewall itself is part of, we grant/forbid access
 						# for the firewall, too.
 						if ($firewall_is_in_destination_subnet && ($target ~~ @special_input_targets)) {
-							if ($LOG && !$NAT) {
-								run("$IPTABLES -A $CHAIN_INPUT @options @log_limit_options -j LOG --log-prefix '$CHAIN_INPUT '");
+							if ($LOG) {
+								run("$IPTABLES -A $CHAIN_INPUT @options @source_intf_options @log_limit_options -j LOG --log-prefix '$CHAIN_INPUT '");
 							}
-							run("$IPTABLES -A $CHAIN_INPUT @options -j $target");
+							run("$IPTABLES -A $CHAIN_INPUT @options @source_intf_options -j $target");
 						}
 
 						# Likewise.
 						if ($firewall_is_in_source_subnet && ($target ~~ @special_output_targets)) {
-							if ($LOG && !$NAT) {
-								run("$IPTABLES -A $CHAIN_OUTPUT @options @log_limit_options -j LOG --log-prefix '$CHAIN_OUTPUT '");
+							if ($LOG) {
+								run("$IPTABLES -A $CHAIN_OUTPUT @options @destination_intf_options @log_limit_options -j LOG --log-prefix '$CHAIN_OUTPUT '");
 							}
-							run("$IPTABLES -A $CHAIN_OUTPUT @options -j $target");
+							run("$IPTABLES -A $CHAIN_OUTPUT @options @destination_intf_options -j $target");
 						}
 					}
 				}
@@ -565,51 +685,118 @@ sub time_convert_to_minutes {
 	return ($hrs * 60) + $min;
 }
 
-sub p2pblock {
-	open(FILE, "<$p2pfile") or die "Unable to read $p2pfile";
-	my @protocols = ();
-	foreach my $p2pentry (<FILE>) {
-		my @p2pline = split(/\;/, $p2pentry);
-		next unless ($p2pline[2] eq "off");
+sub locationblock {
+	# Flush LOCATIONBLOCK chain.
+	run("$IPTABLES -F LOCATIONBLOCK");
 
-		push(@protocols, "--$p2pline[1]");
-	}
-	close(FILE);
-
-	run("$IPTABLES -F P2PBLOCK");
-	if (@protocols) {
-		run("$IPTABLES -A P2PBLOCK -m ipp2p @protocols -j DROP");
-	}
-}
-
-sub geoipblock {
-	my %geoipsettings = ();
-	$geoipsettings{'GEOIPBLOCK_ENABLED'} = "off";
-
-	# Flush iptables chain.
-	run("$IPTABLES -F GEOIPBLOCK");
-
-	# Check if the geoip settings file exists
-	if (-e "$geoipfile") {
-		# Read settings file
-		&General::readhash("$geoipfile", \%geoipsettings);
-	}
-
-	# If geoip blocking is not enabled, we are finished here.
-	if ($geoipsettings{'GEOIPBLOCK_ENABLED'} ne "on") {
+	# If location blocking is not enabled, we are finished here.
+	if ($locationsettings{'LOCATIONBLOCK_ENABLED'} ne "on") {
 		# Exit submodule. Process remaining script.
 		return;
 	}
 
-	# Get supported locations.
-	my @locations = &fwlib::get_geoip_locations();
+	# Only check the RED interface, which is ppp0 in case of RED_TYPE being
+	# set to "PPPOE", and red0 in case of RED_TYPE not being empty otherwise.
+	if ($defaultNetworks{'RED_TYPE'} eq "PPPOE") {
+		run("$IPTABLES -A LOCATIONBLOCK ! -i ppp0 -j RETURN");
+	} elsif ($defaultNetworks{'RED_DEV'} ne "") {
+		run("$IPTABLES -A LOCATIONBLOCK ! -i $defaultNetworks{'RED_DEV'} -j RETURN");
+	}
 
-	# Loop through all supported geoip locations and
-	# create iptables rules, if blocking this country
+	# Do not check any private address space
+	foreach my $network (@PRIVATE_NETWORKS) {
+		run("$IPTABLES -A LOCATIONBLOCK -s $network -j RETURN");
+	}
+
+	# Loop through all supported locations and
+	# create iptables rules, if blocking for this country
 	# is enabled.
 	foreach my $location (@locations) {
-		if($geoipsettings{$location} eq "on") {
-			run("$IPTABLES -A GEOIPBLOCK -m geoip --src-cc $location -j DROP");
+		if(exists $locationsettings{$location} && $locationsettings{$location} eq "on") {
+			# Call function to load the networks list for this country.
+			&ipset_restore($location);
+
+			# Call iptables and create rule to use the loaded ipset list.
+			run("$IPTABLES -A LOCATIONBLOCK -m set --match-set $location src -j DROP");
+		}
+	}
+}
+
+sub drop_hostile_networks () {
+	# Flush the HOSTILE firewall chain.
+	run("$IPTABLES -F HOSTILE");
+
+	# If dropping hostile networks is not enabled, we are finished here.
+	if ($fwoptions{'DROPHOSTILE'} ne "on") {
+		# Exit function.
+		return;
+	}
+
+	# Exit if there is no red interface.
+	return unless($RED_DEV);
+
+	# Call function to load the network list of hostile networks.
+	&ipset_restore($HOSTILE_CCODE);
+
+	# Check traffic in incoming/outgoing direction and drop if it matches
+	run("$IPTABLES -A HOSTILE -i $RED_DEV -m set --match-set $HOSTILE_CCODE src -j HOSTILE_DROP_IN");
+	run("$IPTABLES -A HOSTILE -o $RED_DEV -m set --match-set $HOSTILE_CCODE dst -j HOSTILE_DROP_OUT");
+}
+
+sub ipblocklist () {
+	# Flush the ipblocklist chains.
+	run("$IPTABLES -F BLOCKLISTIN");
+	run("$IPTABLES -F BLOCKLISTOUT");
+
+	# Check if the blocklist feature is enabled.
+	if($blocklistsettings{'ENABLE'} eq "on") {
+		# Loop through the array of private networks.
+		foreach my $private_network (@PRIVATE_NETWORKS) {
+			# Create firewall rules to never block private networks.
+			run("$IPTABLES -A BLOCKLISTIN -p ALL -i $RED_DEV -s $private_network -j RETURN");
+			run("$IPTABLES -A BLOCKLISTOUT -p ALL -o $RED_DEV -d $private_network -j RETURN");
+		}
+	}
+
+	# Loop through the array of blocklists.
+	foreach my $blocklist (@blocklists) {
+		# Check if the blocklist feature and the current processed blocklist is enabled.
+		if(($blocklistsettings{'ENABLE'} eq "on") && ($blocklistsettings{$blocklist}) && ($blocklistsettings{$blocklist} eq "on")) {
+			# Call function to load the blocklist.
+			&ipset_restore($blocklist);
+
+			# Call function to check if the corresponding iptables drop chain already has been created.
+			if(&firewall_chain_exists("${blocklist}_DROP")) {
+				# Create iptables chain.
+				run("$IPTABLES -N ${blocklist}_DROP");
+			} else {
+				# Flush the chain.
+				run("$IPTABLES -F ${blocklist}_DROP");
+			}
+
+			# Check if logging is enabled.
+			if(($blocklistsettings{'LOGGING'}) && ($blocklistsettings{'LOGGING'} eq "on")) {
+				# Create logging rule.
+				run("$IPTABLES -A ${blocklist}_DROP -j LOG -m limit --limit 10/second --log-prefix \"BLKLST_$blocklist \"");
+			}
+
+			# Create Drop rule.
+			run("$IPTABLES -A ${blocklist}_DROP -j DROP");
+
+			# Add the rules to check against the set
+			run("$IPTABLES -A BLOCKLISTIN -p ALL -i $RED_DEV -m set --match-set $blocklist src -j ${blocklist}_DROP");
+			run("$IPTABLES -A BLOCKLISTOUT -p ALL -o $RED_DEV -m set --match-set $blocklist dst -j ${blocklist}_DROP");
+
+		# IP blocklist or the blocklist is disabled.
+		} else {
+			# Check if the blocklist related iptables drop chain exits.
+			unless(&firewall_chain_exists("${blocklist}_DROP")) {
+				# Flush the chain.
+				run("$IPTABLES -F ${blocklist}_DROP");
+
+				# Drop the chain.
+				run("$IPTABLES -X ${blocklist}_DROP");
+			}
 		}
 	}
 }
@@ -776,10 +963,8 @@ sub add_dnat_mangle_rules {
 	my $interface = shift;
 	my @options = @_;
 
-	my $mark = 0;
+	my $mark = 0x01000000;
 	foreach my $zone ("GREEN", "BLUE", "ORANGE") {
-		$mark++;
-
 		# Skip rule if not all required information exists.
 		next unless (exists $defaultNetworks{$zone . "_NETADDRESS"});
 		next unless (exists $defaultNetworks{$zone . "_NETMASK"});
@@ -792,9 +977,11 @@ sub add_dnat_mangle_rules {
 		$netaddress .= "/" . $defaultNetworks{$zone . "_NETMASK"};
 
 		push(@mangle_options, ("-s", $netaddress, "-d", $nat_address));
-		push(@mangle_options, ("-j", "MARK", "--set-mark", $mark));
+		push(@mangle_options, ("-j", "MARK", "--set-xmark", "$mark/$NAT_MASK"));
 
 		run("$IPTABLES -t mangle -A $CHAIN_MANGLE_NAT_DESTINATION_FIX @mangle_options");
+
+		$mark <<= 1;
 	}
 }
 
@@ -804,8 +991,8 @@ sub make_log_limit_options {
 	# Maybe we should get this from the configuration.
 	my $limit = 10;
 
-	# We limit log messages to $limit messages per minute.
-	push(@options, ("--limit", "$limit/min"));
+	# We limit log messages to $limit messages per second.
+	push(@options, ("--limit", "$limit/second"));
 
 	# And we allow bursts of 2x $limit.
 	push(@options, ("--limit-burst", $limit * 2));
@@ -825,4 +1012,130 @@ sub firewall_is_in_subnet {
 	}
 
 	return 0;
+}
+
+sub firewall_chain_exists ($) {
+	my ($chain) = @_;
+
+	my $ret = &General::system("iptables", "--wait", "-n", "-L", "$chain");
+
+	return $ret;
+}
+
+sub ipset_get_sets () {
+	my @sets;
+
+	# Get all currently used ipset lists and store them in an array.
+	my @output = `$IPSET -n list`;
+
+	# Loop through the temporary array.
+	foreach my $set (@output) {
+		# Remove any newlines.
+		chomp($set);
+
+		# Add the set the array of used sets.
+		push(@sets, $set);
+	}
+
+	# Display used sets in debug mode.
+	if($DEBUG) {
+		print "Used ipset sets:\n";
+		print "@sets\n\n";
+	}
+
+	# Return the array of sets.
+	return @sets;
+}
+
+sub ipset_restore ($) {
+	my ($set) = @_;
+
+	# Empty variable to store the db file, which should be
+	# restored by ipset.
+	my $db_file;
+
+	# Check if the set already has been loaded.
+	if($ipset_loaded_sets{$set}) {
+		# It already has been loaded - so there is nothing to do.
+		return;
+	}
+
+	# Check if the given set name is a country code.
+	if($set ~~ @locations) {
+		# Libloc adds the IP type (v4 or v6) as part of the set and file name.
+		my $loc_set = "$set" . "v4";
+
+		# The bare filename equals the set name.
+		my $filename = $loc_set;
+
+		# Libloc uses "ipset" as file extension.
+		my $file_extension = "ipset";
+
+		# Generate full path and filename for the ipset db file.
+		my $db_file = "$Location::Functions::ipset_db_directory/$filename.$file_extension";
+
+		# Call function to restore/load the set.
+		&ipset_call_restore($db_file);
+
+		# Check if the set is already loaded (has been used before).
+		if ($set ~~ @ipset_used_sets) {
+			# The sets contains the IP type (v4 or v6) as part of the name.
+			# The firewall rules matches against sets without that extension. So we safely
+			# can swap or rename the sets to use the new ones.
+			run("$IPSET swap $loc_set $set");
+		} else {
+			# If the set is not loaded, we have to rename it to proper use it.
+			run("$IPSET rename $loc_set $set");
+		}
+
+	# Check if the given set name is a blocklist.
+	} elsif ($set ~~ @blocklists) {
+		# IPblocklist sets contains v4 as setname extension.
+		my $set_name = "$set" . "v4";
+
+		# Get the database file for the given blocklist.
+		my $db_file = &IPblocklist::get_ipset_db_file($set);
+
+		# Call function to restore/load the set.
+		&ipset_call_restore($db_file);
+
+		# Check if the set is already loaded (has been used before).
+		if ($set ~~ @ipset_used_sets) {
+			# Swap the sets.
+			run("$IPSET swap $set_name $set");
+		} else {
+			# Rename the set to proper use it.
+			run("$IPSET rename $set_name $set");
+		}
+	}
+
+	# Store the restored set to the hash to prevent from loading it again.
+	$ipset_loaded_sets{$set} = "1";
+}
+
+sub ipset_call_restore ($) {
+	my ($file) = @_;
+
+	# Check if the requested file exists.
+	if (-f $file) {
+		# Run ipset and restore the given set.
+		run("$IPSET restore -f $file");
+	}
+}
+
+sub ipset_cleanup () {
+	# Reload the array of used sets.
+	@ipset_used_sets = &ipset_get_sets();
+
+	# Loop through the array of used sets.
+	foreach my $set (@ipset_used_sets) {
+		# Check if this set is still in use.
+		#
+		# In this case an entry in the loaded sets hash exists.
+		unless($ipset_loaded_sets{$set}) {
+			# Entry does not exist, so this set is not longer
+			# used and can be destroyed.
+			run("$IPSET destroy $set");
+		}
+	}
 }

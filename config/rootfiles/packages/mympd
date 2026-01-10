@@ -1,0 +1,14 @@
+etc/rc.d/init.d/mympd
+usr/bin/mympd
+usr/bin/mympd-config
+usr/bin/mympd-script
+var/ipfire/backup/addons/includes/mympd
+var/lib/mympd
+#var/lib/mympd/config
+#var/lib/mympd/config/http
+#var/lib/mympd/config/loglevel
+#var/lib/mympd/config/ssl_port
+#var/lib/mympd/state
+#var/lib/mympd/state/music_directory
+srv/web/ipfire/cgi-bin/mympd.cgi
+var/ipfire/menu.d/EX-mympd.menu

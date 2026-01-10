@@ -2,7 +2,7 @@
 ###############################################################################
 #                                                                             #
 # IPFire.org - A linux based firewall                                         #
-# Copyright (C) 2007-2013  IPFire Team  info@ipfire.org                       #
+# Copyright (C) 2007-2025  IPFire Team  <info@ipfire.org>                     #
 #                                                                             #
 # This program is free software: you can redistribute it and/or modify        #
 # it under the terms of the GNU General Public License as published by        #
@@ -19,11 +19,14 @@
 #                                                                             #
 ###############################################################################
 
+use Data::UUID;
+use MIME::Base64;
 use Net::DNS;
 use File::Copy;
 use File::Temp qw/ tempfile tempdir /;
 use strict;
 use Sort::Naturally;
+use Sys::Hostname;
 # enable only the following on debugging purpose
 #use warnings;
 #use CGI::Carp 'fatalsToBrowser';
@@ -54,19 +57,24 @@ my $errormessage = '';
 my %color = ();
 my %mainsettings = ();
 &General::readhash("${General::swroot}/main/settings", \%mainsettings);
-&General::readhash("/srv/web/ipfire/html/themes/".$mainsettings{'THEME'}."/include/colors.txt", \%color);
+&General::readhash("/srv/web/ipfire/html/themes/ipfire/include/colors.txt", \%color);
 
 &General::readhash("${General::swroot}/ethernet/settings", \%netsettings);
 
-my $green_cidr = &General::ipcidr("$netsettings{'GREEN_NETADDRESS'}/$netsettings{'GREEN_NETMASK'}");
-my $blue_cidr = "# Blue not defined";
-if (&Header::blue_used() && $netsettings{'BLUE_DEV'}) {
-	$blue_cidr = &General::ipcidr("$netsettings{'BLUE_NETADDRESS'}/$netsettings{'BLUE_NETMASK'}");
-}
-my $orange_cidr = "# Orange not defined";
-if (&Header::orange_used() && $netsettings{'ORANGE_DEV'}) {
-	$orange_cidr = &General::ipcidr("$netsettings{'ORANGE_NETADDRESS'}/$netsettings{'ORANGE_NETMASK'}");
-}
+my %INACTIVITY_TIMEOUTS = (
+	300		=> $Lang::tr{'five minutes'},
+	600		=> $Lang::tr{'ten minutes'},
+	900		=> $Lang::tr{'fifteen minutes'},
+	1800		=> $Lang::tr{'thirty minutes'},
+	3600		=> $Lang::tr{'one hour'},
+	43200		=> $Lang::tr{'twelve hours'},
+	86400		=> $Lang::tr{'24 hours'},
+	0		=> "- $Lang::tr{'unlimited'} -",
+);
+
+# Load aliases
+my %aliases;
+&General::get_aliases(\%aliases);
 
 my $col="";
 
@@ -80,11 +88,13 @@ $cgiparams{'ADVANCED'} = '';
 $cgiparams{'NAME'} = '';
 $cgiparams{'LOCAL_SUBNET'} = '';
 $cgiparams{'REMOTE_SUBNET'} = '';
+$cgiparams{'LOCAL'} = '';
 $cgiparams{'REMOTE'} = '';
 $cgiparams{'LOCAL_ID'} = '';
 $cgiparams{'REMOTE_ID'} = '';
 $cgiparams{'REMARK'} = '';
 $cgiparams{'PSK'} = '';
+$cgiparams{'BASE_64'} = '';
 $cgiparams{'CERT_NAME'} = '';
 $cgiparams{'CERT_EMAIL'} = '';
 $cgiparams{'CERT_OU'} = '';
@@ -104,11 +114,48 @@ $cgiparams{'ROOTCERT_EMAIL'} = '';
 $cgiparams{'ROOTCERT_OU'} = '';
 $cgiparams{'ROOTCERT_CITY'} = '';
 $cgiparams{'ROOTCERT_STATE'} = '';
+$cgiparams{'RW_ENDPOINT'} = '';
 $cgiparams{'RW_NET'} = '';
 $cgiparams{'DPD_DELAY'} = '30';
 $cgiparams{'DPD_TIMEOUT'} = '120';
 $cgiparams{'FORCE_MOBIKE'} = 'off';
+$cgiparams{'START_ACTION'} = 'route';
+$cgiparams{'INACTIVITY_TIMEOUT'} = 1800;
+$cgiparams{'MODE'} = "tunnel";
+$cgiparams{'INTERFACE_MODE'} = "";
+$cgiparams{'INTERFACE_ADDRESS'} = "";
+$cgiparams{'INTERFACE_MTU'} = 1500;
+$cgiparams{'DNS_SERVERS'} = "";
 &Header::getcgihash(\%cgiparams, {'wantfile' => 1, 'filevar' => 'FH'});
+
+my %APPLE_CIPHERS = (
+	"aes256gcm128" => "AES-256-GCM",
+	"aes128gcm128" => "AES-128-GCM",
+	"aes256"       => "AES-256",
+	"aes128"       => "AES-128",
+	"3des"         => "3DES",
+);
+
+my %APPLE_INTEGRITIES = (
+	"sha2_512" => "SHA2-512",
+	"sha2_384" => "SHA2-384",
+	"sha2_256" => "SHA2-256",
+	"sha1"     => "SHA1-160",
+);
+
+my %APPLE_DH_GROUPS = (
+	"768" => 1,
+	"1024" => 2,
+	"1536" => 5,
+	"2048" => 14,
+	"3072" => 15,
+	"4096" => 16,
+	"6144" => 17,
+	"8192" => 18,
+	"e256" => 19,
+	"e384" => 20,
+	"e521" => 21,
+);
 
 ###
 ### Useful functions
@@ -146,22 +193,13 @@ sub cleanssldatabase {
 		print FILE "";
 		close FILE;
 	}
-	unlink ("${General::swroot}/certs/index.txt.old");
-	unlink ("${General::swroot}/certs/serial.old");
-	unlink ("${General::swroot}/certs/01.pem");
-}
-sub newcleanssldatabase {
-	if (! -s "${General::swroot}/certs/serial" ) {
-		open(FILE, ">${General::swroot}/certs/serial");
-		print FILE "01";
+	if (open(FILE, ">${General::swroot}/certs/index.txt.attr")) {
+		print FILE "unique_subject = yes";
 		close FILE;
 	}
-	if (! -s ">${General::swroot}/certs/index.txt") {
-		system ("touch ${General::swroot}/certs/index.txt");
-	}
 	unlink ("${General::swroot}/certs/index.txt.old");
+	unlink ("${General::swroot}/certs/index.txt.attr.old");
 	unlink ("${General::swroot}/certs/serial.old");
-#	unlink ("${General::swroot}/certs/01.pem");		numbering evolves. Wrong place to delete
 }
 
 ###
@@ -171,39 +209,46 @@ sub callssl ($) {
 	my $opt = shift;
 	my $retssl = `/usr/bin/openssl $opt 2>&1`; #redirect stderr
 	my $ret = '';
-	foreach my $line (split (/\n/, $retssl)) {
-		&General::log("ipsec", "$line") if (0); # 1 for verbose logging
-		$ret .= '<br>'.$line if ( $line =~ /error|unknown/ );
+
+	if ($?) {
+		foreach my $line (split (/\n/, $retssl)) {
+			&General::log("charon", "$line") if (0); # 1 for verbose logging
+			$ret .= '<br>' . &Header::escape($line);
+		}
 	}
-	if ($ret) {
-		$ret= &Header::cleanhtml($ret);
-	}
+
 	return $ret ? "$Lang::tr{'openssl produced an error'}: $ret" : '' ;
 }
 ###
 ### Obtain a CN from given cert
 ###
 sub getCNfromcert ($) {
-	#&General::log("ipsec", "Extracting name from $_[0]...");
-	my $temp = `/usr/bin/openssl x509 -text -in $_[0]`;
-	$temp =~ /Subject:.*CN=(.*)[\n]/;
-	$temp = $1;
-	$temp =~ s+/Email+, E+;
-	$temp =~ s/ ST=/ S=/;
-	$temp =~ s/,//g;
-	$temp =~ s/\'//g;
+	#&General::log("charon", "Extracting name from $_[0]...");
+	my @output = &General::system_output("/usr/bin/openssl", "x509", "-text", "-in", "$_[0]");
+	my $temp;
+	foreach my $line (@output) {
+		$line =~ /Subject:.*CN\s*=\s*(.*)[\n]/;
+		$temp = $1;
+		$temp =~ s+/Email+, E+;
+		$temp =~ s/ ST = / S = /;
+		$temp =~ s/,//g;
+		$temp =~ s/\'//g;
+	}
 	return $temp;
 }
 ###
 ### Obtain Subject from given cert
 ###
 sub getsubjectfromcert ($) {
-	#&General::log("ipsec", "Extracting subject from $_[0]...");
-	my $temp = `/usr/bin/openssl x509 -text -in $_[0]`;
-	$temp =~ /Subject: (.*)[\n]/;
-	$temp = $1;
-	$temp =~ s+/Email+, E+;
-	$temp =~ s/ ST=/ S=/;
+	#&General::log("charon", "Extracting subject from $_[0]...");
+	my @output = &General::system_output("/usr/bin/openssl", "x509", "-text", "-in", "$_[0]");
+	my $temp;
+	foreach my $line (@output) {
+		$line =~ /Subject: (.*)[\n]/;
+		$temp = $1;
+		$temp =~ s+/Email+, E+;
+		$temp =~ s/ ST = / S = /;
+	}
 	return $temp;
 }
 ###
@@ -268,26 +313,49 @@ sub writeipsecfiles {
 		#remote peer is not set? => use '%any'
 		$lconfighash{$key}[10] = '%any' if ($lconfighash{$key}[10] eq '');
 
-		my $localside;
-		if ($lconfighash{$key}[26] eq 'BLUE') {
-			$localside = $netsettings{'BLUE_ADDRESS'};
-		} elsif ($lconfighash{$key}[26] eq 'GREEN') {
-			$localside = $netsettings{'GREEN_ADDRESS'};
-		} elsif ($lconfighash{$key}[26] eq 'ORANGE') {
-			$localside = $netsettings{'ORANGE_ADDRESS'};
-		} else { # it is RED
-			$localside = $lvpnsettings{'VPN_IP'};
+		# Field 6 might be "off" on old installations
+		if ($lconfighash{$key}[6] eq "off") {
+			$lconfighash{$key}[6] = $lvpnsettings{"VPN_IP"};
 		}
+
+		my $localside;
+		if ($lconfighash{$key}[6]) {
+			$localside = $lconfighash{$key}[6];
+		} else {
+			$localside = "%defaultroute";
+		}
+
+		my $interface_mode = $lconfighash{$key}[36];
 
 		print CONF "conn $lconfighash{$key}[1]\n";
 		print CONF "\tleft=$localside\n";
-		print CONF "\tleftsubnet=" . &make_subnets($lconfighash{$key}[8]) . "\n";
+
+		if ($interface_mode eq "gre") {
+			print CONF "\tleftprotoport=gre\n";
+		} elsif ($interface_mode eq "vti") {
+			print CONF "\tleftsubnet=0.0.0.0/0\n";
+		} else {
+			print CONF "\tleftsubnet=" . &make_subnets("left", $lconfighash{$key}[8]) . "\n";
+		}
+
 		print CONF "\tleftfirewall=yes\n";
 		print CONF "\tlefthostaccess=yes\n";
+
+		# Always send the host certificate
+		if ($lconfighash{$key}[3] eq 'host') {
+			print CONF "\tleftsendcert=always\n";
+		}
+
 		print CONF "\tright=$lconfighash{$key}[10]\n";
 
 		if ($lconfighash{$key}[3] eq 'net') {
-			print CONF "\trightsubnet=" . &make_subnets($lconfighash{$key}[11]) . "\n";
+			if ($interface_mode eq "gre") {
+				print CONF "\trightprotoport=gre\n";
+			} elsif ($interface_mode eq "vti") {
+				print CONF "\trightsubnet=0.0.0.0/0\n";
+			} else {
+				print CONF "\trightsubnet=" . &make_subnets("right", $lconfighash{$key}[11]) . "\n";
+			}
 		}
 
 		# Local Cert and Remote Cert (unless auth is DN dn-auth)
@@ -299,6 +367,18 @@ sub writeipsecfiles {
 		# Local and Remote IDs
 		print CONF "\tleftid=\"$lconfighash{$key}[7]\"\n" if ($lconfighash{$key}[7]);
 		print CONF "\trightid=\"$lconfighash{$key}[9]\"\n" if ($lconfighash{$key}[9]);
+
+		# Set mode
+		if ($lconfighash{$key}[35] eq "transport") {
+			print CONF "\ttype=transport\n";
+		} else {
+			print CONF "\ttype=tunnel\n";
+		}
+
+		# Add mark for VTI
+		if ($interface_mode eq "vti") {
+			print CONF "\tmark=$key\n";
+		}
 
 		# Is PFS enabled?
 		my $pfs = $lconfighash{$key}[28] eq 'on' ? 'on' : 'off';
@@ -387,7 +467,12 @@ sub writeipsecfiles {
 		if ($lconfighash{$key}[4] eq 'psk') {
 			$psk_line = ($lconfighash{$key}[7] ? $lconfighash{$key}[7] : $localside) . " " ;
 			$psk_line .= $lconfighash{$key}[9] ? $lconfighash{$key}[9] : $lconfighash{$key}[10]; #remoteid or remote address?
-			$psk_line .= " : PSK '$lconfighash{$key}[5]'\n";
+			if ($lconfighash{$key}[40] eq 'YES') {
+				my $decoded_psk = &MIME::Base64::decode_base64($lconfighash{$key}[5]);
+				$psk_line .= " : PSK '$decoded_psk'\n";
+			} else {
+				$psk_line .= " : PSK '$lconfighash{$key}[5]'\n";
+			}
 			# if the line contains %any, it is less specific than two IP or ID, so move it at end of file.
 			if ($psk_line =~ /%any/) {
 				$last_secrets .= $psk_line;
@@ -401,16 +486,39 @@ sub writeipsecfiles {
 			print CONF "\trightrsasigkey=%cert\n";
 		}
 
+		my $start_action = $lconfighash{$key}[33];
+		if (!$start_action) {
+			$start_action = "start";
+		}
+
+		my $inactivity_timeout = $lconfighash{$key}[34];
+		if ($inactivity_timeout eq "") {
+			$inactivity_timeout = 900;
+		}
+
 		# Automatically start only if a net-to-net connection
 		if ($lconfighash{$key}[3] eq 'host') {
 			print CONF "\tauto=add\n";
 			print CONF "\trightsourceip=$lvpnsettings{'RW_NET'}\n";
 		} else {
-			print CONF "\tauto=start\n";
+			print CONF "\tauto=$start_action\n";
+
+			# If in on-demand mode, we terminate the tunnel
+			# after 15 min of no traffic
+			if ($start_action eq 'route' && $inactivity_timeout > 0) {
+				print CONF "\tinactivity=$inactivity_timeout\n";
+			}
 		}
 
 		# Fragmentation
 		print CONF "\tfragmentation=yes\n";
+
+		# DNS Servers for RW
+		if ($lconfighash{$key}[3] eq 'host') {
+			my @servers = split(/\|/, $lconfighash{$key}[39]);
+
+			print CONF "\trightdns=" . join(",", @servers) . "\n";
+		}
 
 		print CONF "\n";
 	} #foreach key
@@ -439,14 +547,8 @@ if ($ENV{"REMOTE_ADDR"} eq "") {
 if ($cgiparams{'ACTION'} eq $Lang::tr{'save'} && $cgiparams{'TYPE'} eq '' && $cgiparams{'KEY'} eq '') {
 	&General::readhash("${General::swroot}/vpn/settings", \%vpnsettings);
 
-	unless (&General::validfqdn($cgiparams{'VPN_IP'}) || &General::validip($cgiparams{'VPN_IP'})
-	|| $cgiparams{'VPN_IP'} eq '%defaultroute' ) {
-		$errormessage = $Lang::tr{'invalid input for hostname'};
-		goto SAVE_ERROR;
-	}
-
-	unless ($cgiparams{'VPN_DELAYED_START'} =~ /^[0-9]{1,3}$/ ) { #allow 0-999 seconds !
-		$errormessage = $Lang::tr{'invalid time period'};
+	if ($cgiparams{'RW_ENDPOINT'} ne '' && !&General::validip($cgiparams{'RW_ENDPOINT'}) && !&General::validfqdn($cgiparams{'RW_ENDPOINT'})) {
+		$errormessage = $Lang::tr{'ipsec invalid ip address or fqdn for rw endpoint'};
 		goto SAVE_ERROR;
 	}
 
@@ -456,15 +558,14 @@ if ($cgiparams{'ACTION'} eq $Lang::tr{'save'} && $cgiparams{'TYPE'} eq '' && $cg
 	}
 
 	$vpnsettings{'ENABLED'} = $cgiparams{'ENABLED'};
-	$vpnsettings{'VPN_IP'} = $cgiparams{'VPN_IP'};
-	$vpnsettings{'VPN_DELAYED_START'} = $cgiparams{'VPN_DELAYED_START'};
+	$vpnsettings{'RW_ENDPOINT'} = $cgiparams{'RW_ENDPOINT'};
 	$vpnsettings{'RW_NET'} = $cgiparams{'RW_NET'};
 	&General::writehash("${General::swroot}/vpn/settings", \%vpnsettings);
 	&writeipsecfiles();
 	if (&vpnenabled) {
-		system('/usr/local/bin/ipsecctrl', 'S');
+		&General::system('/usr/local/bin/ipsecctrl', 'S');
 	} else {
-		system('/usr/local/bin/ipsecctrl', 'D');
+		&General::system('/usr/local/bin/ipsecctrl', 'D');
 	}
 	sleep $sleepDelay;
 	SAVE_ERROR:
@@ -489,7 +590,7 @@ if ($cgiparams{'ACTION'} eq $Lang::tr{'save'} && $cgiparams{'TYPE'} eq '' && $cg
 	}
 	&General::writehasharray("${General::swroot}/vpn/config", \%confighash);
 	&writeipsecfiles();
-	system('/usr/local/bin/ipsecctrl', 'R');
+	&General::system('/usr/local/bin/ipsecctrl', 'R');
 	sleep $sleepDelay;
 
 ###
@@ -528,8 +629,8 @@ END
 } elsif ($cgiparams{'ACTION'} eq $Lang::tr{'upload ca certificate'}) {
 	&General::readhasharray("${General::swroot}/vpn/caconfig", \%cahash);
 
-	if ($cgiparams{'CA_NAME'} !~ /^[a-zA-Z0-9]+$/) {
-		$errormessage = $Lang::tr{'name must only contain characters'};
+	if ($cgiparams{'CA_NAME'} !~ /^[a-zA-Z0-9 ]*$/) {
+		$errormessage = $Lang::tr{'ca name must only contain characters and spaces'};
 		goto UPLOADCA_ERROR;
 	}
 
@@ -551,7 +652,7 @@ END
 		}
 	}
 
-	if (ref ($cgiparams{'FH'}) ne 'Fh') {
+	unless (ref ($cgiparams{'FH'})) {
 		$errormessage = $Lang::tr{'there was no file upload'};
 		goto UPLOADCA_ERROR;
 	}
@@ -567,8 +668,7 @@ END
 		unlink ($filename);
 		goto UPLOADCA_ERROR;
 	} else {
-		move($filename, "${General::swroot}/ca/$cgiparams{'CA_NAME'}cert.pem");
-		if ($? ne 0) {
+		unless(move($filename, "${General::swroot}/ca/$cgiparams{'CA_NAME'}cert.pem")) {
 			$errormessage = "$Lang::tr{'certificate file move failed'}: $!";
 			unlink ($filename);
 			goto UPLOADCA_ERROR;
@@ -580,7 +680,7 @@ END
 	$cahash{$key}[1] = &Header::cleanhtml(getsubjectfromcert ("${General::swroot}/ca/$cgiparams{'CA_NAME'}cert.pem"));
 	&General::writehasharray("${General::swroot}/vpn/caconfig", \%cahash);
 
-	system('/usr/local/bin/ipsecctrl', 'R');
+	&General::system('/usr/local/bin/ipsecctrl', 'R');
 	sleep $sleepDelay;
 
 	UPLOADCA_ERROR:
@@ -596,8 +696,8 @@ END
 		&Header::openpage($Lang::tr{'ipsec'}, 1, '');
 		&Header::openbigbox('100%', 'left', '', '');
 		&Header::openbox('100%', 'left', "$Lang::tr{'ca certificate'}:");
-		my $output = `/usr/bin/openssl x509 -text -in ${General::swroot}/ca/$cahash{$cgiparams{'KEY'}}[0]cert.pem`;
-		$output = &Header::cleanhtml($output,"y");
+		my @output = &General::system_output("/usr/bin/openssl", "x509", "-text", "-in", "${General::swroot}/ca/$cahash{$cgiparams{'KEY'}}[0]cert.pem");
+		my $output = &Header::cleanhtml(join("", @output) ,"y");
 		print "<pre>$output</pre>\n";
 		&Header::closebox();
 		print "<div align='center'><a href='/cgi-bin/vpnmain.cgi'>$Lang::tr{'back'}</a></div>";
@@ -618,7 +718,9 @@ END
 		print "Content-Type: application/force-download\n";
 		print "Content-Type: application/octet-stream\r\n";
 		print "Content-Disposition: attachment; filename=$cahash{$cgiparams{'KEY'}}[0]cert.pem\r\n\r\n";
-		print `/usr/bin/openssl x509 -in ${General::swroot}/ca/$cahash{$cgiparams{'KEY'}}[0]cert.pem`;
+
+		my @cert = &General::system_output("/usr/bin/openssl", "x509", "-in", "${General::swroot}/ca/$cahash{$cgiparams{'KEY'}}[0]cert.pem");
+		print "@cert";
 		exit(0);
 	} else {
 		$errormessage = $Lang::tr{'invalid key'};
@@ -633,21 +735,21 @@ END
 
 	if ( -f "${General::swroot}/ca/$cahash{$cgiparams{'KEY'}}[0]cert.pem" ) {
 		foreach my $key (keys %confighash) {
-			my $test = `/usr/bin/openssl verify -CAfile ${General::swroot}/ca/$cahash{$cgiparams{'KEY'}}[0]cert.pem ${General::swroot}/certs/$confighash{$key}[1]cert.pem`;
-			if ($test =~ /: OK/) {
+			my @test = &General::system_output("/usr/bin/openssl", "verify", "-CAfile", "${General::swroot}/ca/$cahash{$cgiparams{'KEY'}}[0]cert.pem", "${General::swroot}/certs/$confighash{$key}[1]cert.pem");
+			if (grep(/: OK/, @test)) {
 				# Delete connection
-				system('/usr/local/bin/ipsecctrl', 'D', $key) if (&vpnenabled);
 				unlink ("${General::swroot}/certs/$confighash{$key}[1]cert.pem");
 				unlink ("${General::swroot}/certs/$confighash{$key}[1].p12");
 				delete $confighash{$key};
 				&General::writehasharray("${General::swroot}/vpn/config", \%confighash);
 				&writeipsecfiles();
+				&General::system('/usr/local/bin/ipsecctrl', 'D', $key) if (&vpnenabled);
 			}
 		}
 		unlink ("${General::swroot}/ca/$cahash{$cgiparams{'KEY'}}[0]cert.pem");
 		delete $cahash{$cgiparams{'KEY'}};
 		&General::writehasharray("${General::swroot}/vpn/caconfig", \%cahash);
-		system('/usr/local/bin/ipsecctrl', 'R');
+		&General::system('/usr/local/bin/ipsecctrl', 'R');
 		sleep $sleepDelay;
 	} else {
 		$errormessage = $Lang::tr{'invalid key'};
@@ -662,8 +764,8 @@ END
 	my $assignedcerts = 0;
 	if ( -f "${General::swroot}/ca/$cahash{$cgiparams{'KEY'}}[0]cert.pem" ) {
 		foreach my $key (keys %confighash) {
-			my $test = `/usr/bin/openssl verify -CAfile ${General::swroot}/ca/$cahash{$cgiparams{'KEY'}}[0]cert.pem ${General::swroot}/certs/$confighash{$key}[1]cert.pem`;
-			if ($test =~ /: OK/) {
+			my @test = &General::system_output("/usr/bin/openssl", "verify", "-CAfile", "${General::swroot}/ca/$cahash{$cgiparams{'KEY'}}[0]cert.pem", "${General::swroot}/certs/$confighash{$key}[1]cert.pem");
+			if (grep(/: OK/, @test)) {
 				$assignedcerts++;
 			}
 		}
@@ -699,7 +801,7 @@ END
 			unlink ("${General::swroot}/ca/$cahash{$cgiparams{'KEY'}}[0]cert.pem");
 			delete $cahash{$cgiparams{'KEY'}};
 			&General::writehasharray("${General::swroot}/vpn/caconfig", \%cahash);
-			system('/usr/local/bin/ipsecctrl', 'R');
+			&General::system('/usr/local/bin/ipsecctrl', 'R');
 			sleep $sleepDelay;
 		}
 	} else {
@@ -711,18 +813,18 @@ END
 ###
 } elsif ($cgiparams{'ACTION'} eq $Lang::tr{'show root certificate'} ||
 	$cgiparams{'ACTION'} eq $Lang::tr{'show host certificate'}) {
-	my $output;
+	my @output;
 	&Header::showhttpheaders();
 	&Header::openpage($Lang::tr{'ipsec'}, 1, '');
 	&Header::openbigbox('100%', 'left', '', '');
 	if ($cgiparams{'ACTION'} eq $Lang::tr{'show root certificate'}) {
 		&Header::openbox('100%', 'left', "$Lang::tr{'root certificate'}:");
-		$output = `/usr/bin/openssl x509 -text -in ${General::swroot}/ca/cacert.pem`;
+		@output = &General::system_output("/usr/bin/openssl", "x509", "-text", "-in", "${General::swroot}/ca/cacert.pem");
 	} else {
 		&Header::openbox('100%', 'left', "$Lang::tr{'host certificate'}:");
-		$output = `/usr/bin/openssl x509 -text -in ${General::swroot}/certs/hostcert.pem`;
+		@output = &General::system_output("/usr/bin/openssl", "x509", "-text", "-in", "${General::swroot}/certs/hostcert.pem");
 	}
-	$output = &Header::cleanhtml($output,"y");
+	my $output = &Header::cleanhtml(join("", @output) ,"y");
 	print "<pre>$output</pre>\n";
 	&Header::closebox();
 	print "<div align='center'><a href='/cgi-bin/vpnmain.cgi'>$Lang::tr{'back'}</a></div>";
@@ -737,7 +839,9 @@ END
 	if ( -f "${General::swroot}/ca/cacert.pem" ) {
 		print "Content-Type: application/force-download\n";
 		print "Content-Disposition: attachment; filename=cacert.pem\r\n\r\n";
-		print `/usr/bin/openssl x509 -in ${General::swroot}/ca/cacert.pem`;
+
+		my @cert = &General::system_output("/usr/bin/openssl", "x509", "-in", "${General::swroot}/ca/cacert.pem");
+		print join("", @cert);
 		exit(0);
 	}
 ###
@@ -747,9 +851,17 @@ END
 	if ( -f "${General::swroot}/certs/hostcert.pem" ) {
 		print "Content-Type: application/force-download\n";
 		print "Content-Disposition: attachment; filename=hostcert.pem\r\n\r\n";
-		print `/usr/bin/openssl x509 -in ${General::swroot}/certs/hostcert.pem`;
+
+		my @cert = &General::system_output("/usr/bin/openssl", "x509", "-in", "${General::swroot}/certs/hostcert.pem");
+		print join("", @cert);
 		exit(0);
 	}
+###
+### Regenerate the host certificate
+###
+} elsif ($cgiparams{'ACTION'} eq $Lang::tr{'regenerate host certificate'}) {
+	$errormessage = &regenerate_host_certificate();
+
 ###
 ### Form for generating/importing the caroot+host certificate
 ###
@@ -769,15 +881,17 @@ END
 			close IPADDR;
 			chomp ($ipaddr);
 			$cgiparams{'ROOTCERT_HOSTNAME'} = (gethostbyaddr(pack("C4", split(/\./, $ipaddr)), 2))[0];
+			$cgiparams{'SUBJECTALTNAME'} = "DNS:" . $cgiparams{'ROOTCERT_HOSTNAME'};
 			if ($cgiparams{'ROOTCERT_HOSTNAME'} eq '') {
 				$cgiparams{'ROOTCERT_HOSTNAME'} = $ipaddr;
+				$cgiparams{'SUBJECTALTNAME'} = "IP:" . $cgiparams{'ROOTCERT_HOSTNAME'};
 			}
 		}
 		$cgiparams{'ROOTCERT_COUNTRY'} = $vpnsettings{'ROOTCERT_COUNTRY'} if (!$cgiparams{'ROOTCERT_COUNTRY'});
 	} elsif ($cgiparams{'ACTION'} eq $Lang::tr{'upload p12 file'}) {
-		&General::log("ipsec", "Importing from p12...");
+		&General::log("charon", "Importing from p12...");
 
-		if (ref ($cgiparams{'FH'}) ne 'Fh') {
+		unless (ref ($cgiparams{'FH'})) {
 			$errormessage = $Lang::tr{'there was no file upload'};
 			goto ROOTCERT_ERROR;
 		}
@@ -790,9 +904,9 @@ END
 		}
 
 		# Extract the CA certificate from the file
-		&General::log("ipsec", "Extracting caroot from p12...");
+		&General::log("charon", "Extracting caroot from p12...");
 		if (open(STDIN, "-|")) {
-			my $opt = " pkcs12 -cacerts -nokeys";
+			my $opt = " pkcs12 -legacy -cacerts -nokeys";
 			$opt .= " -in $filename";
 			$opt .= " -out /tmp/newcacert";
 			$errormessage = &callssl ($opt);
@@ -803,9 +917,9 @@ END
 
 		# Extract the Host certificate from the file
 		if (!$errormessage) {
-			&General::log("ipsec", "Extracting host cert from p12...");
+			&General::log("charon", "Extracting host cert from p12...");
 			if (open(STDIN, "-|")) {
-				my $opt = " pkcs12 -clcerts -nokeys";
+				my $opt = " pkcs12 -legacy -clcerts -nokeys";
 				$opt .= " -in $filename";
 				$opt .= " -out /tmp/newhostcert";
 				$errormessage = &callssl ($opt);
@@ -817,9 +931,9 @@ END
 
 		# Extract the Host key from the file
 		if (!$errormessage) {
-			&General::log("ipsec", "Extracting private key from p12...");
+			&General::log("charon", "Extracting private key from p12...");
 			if (open(STDIN, "-|")) {
-				my $opt = " pkcs12 -nocerts -nodes";
+				my $opt = " pkcs12 -legacy -nocerts -nodes";
 				$opt .= " -in $filename";
 				$opt .= " -out /tmp/newhostkey";
 				$errormessage = &callssl ($opt);
@@ -830,21 +944,24 @@ END
 		}
 
 		if (!$errormessage) {
-			&General::log("ipsec", "Moving cacert...");
-			move("/tmp/newcacert", "${General::swroot}/ca/cacert.pem");
-			$errormessage = "$Lang::tr{'certificate file move failed'}: $!" if ($? ne 0);
+			&General::log("charon", "Moving cacert...");
+			unless(move("/tmp/newcacert", "${General::swroot}/ca/cacert.pem")) {
+				$errormessage = "$Lang::tr{'certificate file move failed'}: $!";
+			}
 		}
 
 		if (!$errormessage) {
-			&General::log("ipsec", "Moving host cert...");
-			move("/tmp/newhostcert", "${General::swroot}/certs/hostcert.pem");
-			$errormessage = "$Lang::tr{'certificate file move failed'}: $!" if ($? ne 0);
+			&General::log("charon", "Moving host cert...");
+			unless(move("/tmp/newhostcert", "${General::swroot}/certs/hostcert.pem")) {
+				$errormessage = "$Lang::tr{'certificate file move failed'}: $!";
+			}
 		}
 
 		if (!$errormessage) {
-			&General::log("ipsec", "Moving private key...");
-			move("/tmp/newhostkey", "${General::swroot}/certs/hostkey.pem");
-			$errormessage = "$Lang::tr{'certificate file move failed'}: $!" if ($? ne 0);
+			&General::log("charon", "Moving private key...");
+			unless(move("/tmp/newhostkey", "${General::swroot}/certs/hostkey.pem")) {
+				$errormessage = "$Lang::tr{'certificate file move failed'}: $!";
+			}
 		}
 
 		#cleanup temp files
@@ -863,8 +980,7 @@ END
 		# the private key for this CAROOT
 		# IPFire can only import certificates
 
-		&General::log("ipsec", "p12 import completed!");
-		&cleanssldatabase();
+		&General::log("charon", "p12 import completed!");
 		goto ROOTCERT_SUCCESS;
 
 	} elsif ($cgiparams{'ROOTCERT_COUNTRY'} ne '') {
@@ -922,6 +1038,11 @@ END
 		#	IP: an IP address
 		# example: email:franck@foo.com,IP:10.0.0.10,DNS:franck.foo.com
 
+		if ($cgiparams{'SUBJECTALTNAME'} eq '') {
+			$errormessage = $Lang::tr{'vpn subjectaltname missing'};
+			goto ROOTCERT_ERROR;
+		}
+
 		if ($cgiparams{'SUBJECTALTNAME'} ne '' && $cgiparams{'SUBJECTALTNAME'} !~ /^(email|URI|DNS|RID|IP):[a-zA-Z0-9 :\/,\.\-_@]*$/) {
 			$errormessage = $Lang::tr{'vpn altname syntax'};
 			goto VPNCONF_ERROR;
@@ -944,10 +1065,10 @@ END
 
 		# Create the CA certificate
 		if (!$errormessage) {
-			&General::log("ipsec", "Creating cacert...");
+			&General::log("charon", "Creating cacert...");
 			if (open(STDIN, "-|")) {
 				my $opt = " req -x509 -sha256 -nodes";
-				$opt .= " -days 999999";
+				$opt .= " -days 3650";
 				$opt .= " -newkey rsa:4096";
 				$opt .= " -keyout ${General::swroot}/private/cakey.pem";
 				$opt .= " -out ${General::swroot}/ca/cacert.pem";
@@ -967,10 +1088,10 @@ END
 
 		# Create the Host certificate request
 		if (!$errormessage) {
-			&General::log("ipsec", "Creating host cert...");
+			&General::log("charon", "Creating host cert...");
 			if (open(STDIN, "-|")) {
 				my $opt = " req -sha256 -nodes";
-				$opt .= " -newkey rsa:2048";
+				$opt .= " -newkey rsa:4096";
 				$opt .= " -keyout ${General::swroot}/certs/hostkey.pem";
 				$opt .= " -out ${General::swroot}/certs/hostreq.pem";
 				$errormessage = &callssl ($opt);
@@ -990,7 +1111,7 @@ END
 
 		# Sign the host certificate request
 		if (!$errormessage) {
-			&General::log("ipsec", "Self signing host cert...");
+			&General::log("charon", "Self signing host cert...");
 
 			#No easy way for specifying the contain of subjectAltName without writing a config file...
 			my ($fh, $v3extname) = tempfile ('/tmp/XXXXXXXX');
@@ -1005,7 +1126,7 @@ END
 			print $fh "subjectAltName=$cgiparams{'SUBJECTALTNAME'}" if ($cgiparams{'SUBJECTALTNAME'});
 			close ($fh);
 
-			my $opt = " ca -md sha256 -days 999999";
+			my $opt = " ca -md sha256 -days 825";
 			$opt .= " -batch -notext";
 			$opt .= " -in ${General::swroot}/certs/hostreq.pem";
 			$opt .= " -out ${General::swroot}/certs/hostcert.pem";
@@ -1017,7 +1138,7 @@ END
 
 		# Create an empty CRL
 		if (!$errormessage) {
-			&General::log("ipsec", "Creating emptycrl...");
+			&General::log("charon", "Creating emptycrl...");
 			my $opt = " ca -gencrl";
 			$opt .= " -out ${General::swroot}/crls/cacrl.pem";
 			$errormessage = &callssl ($opt);
@@ -1025,7 +1146,6 @@ END
 
 		# Successfully build CA / CERT!
 		if (!$errormessage) {
-			&cleanssldatabase();
 			goto ROOTCERT_SUCCESS;
 		}
 
@@ -1076,7 +1196,7 @@ END
 	}
 	print <<END
 		</select></td></tr>
-	<tr><td class='base'>$Lang::tr{'vpn subjectaltname'} (subjectAltName=email:*,URI:*,DNS:*,RID:*)</td>
+	<tr><td class='base'>$Lang::tr{'vpn subjectaltname'} (subjectAltName=email:*,URI:*,DNS:*,RID:*)&nbsp;<img src='/blob.gif' alt='*' /></td>
 	<td class='base' nowrap='nowrap'><input type='text' name='SUBJECTALTNAME' value='$cgiparams{'SUBJECTALTNAME'}' size='32' /></td></tr>
 	<tr><td>&nbsp;</td>
 		<td><br /><input type='submit' name='ACTION' value='$Lang::tr{'generate root/host certificates'}' /><br /><br /></td></tr>
@@ -1103,7 +1223,7 @@ END
 
 	ROOTCERT_SUCCESS:
 	if (&vpnenabled) {
-		system('/usr/local/bin/ipsecctrl', 'S');
+		&General::system('/usr/local/bin/ipsecctrl', 'S');
 		sleep $sleepDelay;
 	}
 	ROOTCERT_SKIP:
@@ -1115,9 +1235,279 @@ END
 	print "Content-Type: application/force-download\n";
 	print "Content-Disposition: attachment; filename=" . $confighash{$cgiparams{'KEY'}}[1] . ".p12\r\n";
 	print "Content-Type: application/octet-stream\r\n\r\n";
-	print `/bin/cat ${General::swroot}/certs/$confighash{$cgiparams{'KEY'}}[1].p12`;
+
+	open(FILE, "${General::swroot}/certs/$confighash{$cgiparams{'KEY'}}[1].p12");
+	my @p12 = <FILE>;
+	close(FILE);
+	print join("", @p12);
+
 	exit (0);
 
+# Export Apple profile to browser
+} elsif ($cgiparams{'ACTION'} eq $Lang::tr{'download apple profile'}) {
+	# Read global configuration
+	&General::readhash("${General::swroot}/vpn/settings", \%vpnsettings);
+
+	# Read connections
+	&General::readhasharray("${General::swroot}/vpn/config", \%confighash);
+	my $key = $cgiparams{'KEY'};
+
+	# Create a UUID generator
+	my $uuid = Data::UUID->new();
+
+	my $uuid1 = $uuid->create_str();
+	my $uuid2 = $uuid->create_str();
+
+	my $ca = "";
+	my $ca_uuid = $uuid->create_str();
+
+	my $cert = "";
+	my $cert_uuid = $uuid->create_str();
+
+	# Read and encode the CA & certificate
+	if ($confighash{$key}[4] eq "cert") {
+		my $ca_path = "${General::swroot}/ca/cacert.pem";
+		my $cert_path = "${General::swroot}/certs/$confighash{$key}[1].p12";
+
+		# Read the CA and encode it into Base64
+		open(CA, "<${ca_path}");
+		local($/) = undef; # slurp
+		$ca = MIME::Base64::encode_base64(<CA>);
+		close(CA);
+
+		# Read certificate and encode it into Base64
+		open(CERT, "<${cert_path}");
+		local($/) = undef; # slurp
+		$cert = MIME::Base64::encode_base64(<CERT>);
+		close(CERT);
+	}
+
+	print "Content-Type: application/octet-stream\n";
+	print "Content-Disposition: attachment; filename=" . $confighash{$key}[1] . ".mobileconfig\n";
+	print "\n"; # end headers
+
+	# Use our own FQDN if nothing else is configured
+	my $endpoint = ($vpnsettings{'RW_ENDPOINT'} ne "") ? $vpnsettings{'RW_ENDPOINT'} : &hostname();
+
+	print "<!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\" \"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">\n";
+	print "<plist version=\"1.0\">\n";
+	print "	<dict>\n";
+        print "		<key>PayloadDisplayName</key>\n";
+	print "		<string>$confighash{$key}[1]</string>\n";
+	print "		<key>PayloadIdentifier</key>\n";
+	print "		<string>$confighash{$key}[1]</string>\n";
+	print "		<key>PayloadUUID</key>\n";
+	print "		<string>${uuid1}</string>\n";
+	print "		<key>PayloadType</key>\n";
+	print "		<string>Configuration</string>\n";
+	print "		<key>PayloadVersion</key>\n";
+	print "		<integer>1</integer>\n";
+	print "		<key>PayloadContent</key>\n";
+	print "		<array>\n";
+	print "			<dict>\n";
+	print "				<key>PayloadIdentifier</key>\n";
+	print "				<string>org.example.vpn1.conf1</string>\n";
+	print "				<key>PayloadUUID</key>\n";
+	print "				<string>${uuid2}</string>\n";
+	print "				<key>PayloadType</key>\n";
+	print "				<string>com.apple.vpn.managed</string>\n";
+	print "				<key>PayloadVersion</key>\n";
+	print "				<integer>1</integer>\n";
+	print "				<key>UserDefinedName</key>\n";
+	print "				<string>$confighash{$key}[1]</string>\n";
+	print "				<key>VPNType</key>\n";
+	print "				<string>IKEv2</string>\n";
+	print "				<key>IKEv2</key>\n";
+	print "				<dict>\n";
+	print "					<key>RemoteAddress</key>\n";
+	print "					<string>$endpoint</string>\n";
+
+	# PFS
+	my $pfs = $confighash{$key}[28];
+	if ($pfs eq "on") {
+		print "					<key>EnablePFS</key>\n";
+		print "					<true/>\n";
+	}
+
+	# IKE Cipher Suite
+	print "					<key>IKESecurityAssociationParameters</key>\n";
+	print "					<dict>\n";
+
+	# Encryption
+	foreach my $cipher (split(/\|/,$confighash{$key}[18])) {
+		# Skip all unsupported ciphers
+		next unless (exists $APPLE_CIPHERS{$cipher});
+
+		print "						<key>EncryptionAlgorithm</key>\n";
+		print "						<string>$APPLE_CIPHERS{$cipher}</string>\n";
+		last;
+	}
+
+	# Integrity
+	foreach my $integrity (split(/\|/,$confighash{$key}[19])) {
+		# Skip all unsupported algorithms
+		next unless (exists $APPLE_INTEGRITIES{$integrity});
+
+		print "						<key>IntegrityAlgorithm</key>\n";
+		print "						<string>$APPLE_INTEGRITIES{$integrity}</string>\n";
+		last;
+	}
+
+	# Diffie Hellman Groups
+	foreach my $group (split(/\|/,$confighash{$key}[20])) {
+		# Skip all unsupported algorithms
+		next unless (exists $APPLE_DH_GROUPS{$group});
+
+		print "						<key>DiffieHellmanGroup</key>\n";
+		print "						<string>$APPLE_DH_GROUPS{$group}</string>\n";
+		last;
+	}
+
+	# Lifetime
+	my $lifetime = $confighash{$key}[16] * 60;
+	print "						<key>LifeTimeInMinutes</key>\n";
+	print "						<integer>$lifetime</integer>\n";
+	print "					</dict>\n";
+
+	# ESP Cipher Suite
+	print "					<key>ChildSecurityAssociationParameters</key>\n";
+	print "					<dict>\n";
+
+	# Encryption
+	foreach my $cipher (split(/\|/,$confighash{$key}[21])) {
+		# Skip all unsupported ciphers
+		next unless (exists $APPLE_CIPHERS{$cipher});
+
+		print "						<key>EncryptionAlgorithm</key>\n";
+		print "						<string>$APPLE_CIPHERS{$cipher}</string>\n";
+		last;
+	}
+
+	# Integrity
+	foreach my $integrity (split(/\|/,$confighash{$key}[22])) {
+		# Skip all unsupported algorithms
+		next unless (exists $APPLE_INTEGRITIES{$integrity});
+
+		print "						<key>IntegrityAlgorithm</key>\n";
+		print "						<string>$APPLE_INTEGRITIES{$integrity}</string>\n";
+		last;
+	}
+
+	# Diffie Hellman Groups
+	foreach my $group (split(/\|/,$confighash{$key}[23])) {
+		# Skip all unsupported algorithms
+		next unless (exists $APPLE_DH_GROUPS{$group});
+
+		print "						<key>DiffieHellmanGroup</key>\n";
+		print "						<string>$APPLE_DH_GROUPS{$group}</string>\n";
+		last;
+	}
+
+	# Lifetime
+	my $lifetime = $confighash{$key}[17] * 60;
+	print "						<key>LifeTimeInMinutes</key>\n";
+	print "						<integer>$lifetime</integer>\n";
+	print "					</dict>\n";
+
+
+	# Left ID
+	if ($confighash{$key}[9]) {
+		my $leftid = $confighash{$key}[9];
+
+		# Strip leading @ from FQDNs
+		if ($leftid =~ m/^@(.*)$/) {
+			$leftid = $1;
+		}
+
+		print "					<key>LocalIdentifier</key>\n";
+		print "					<string>$leftid</string>\n";
+	}
+
+	# Right ID
+	if ($confighash{$key}[7]) {
+		my $rightid = $confighash{$key}[7];
+
+		# Strip leading @ from FQDNs
+		if ($rightid =~ m/^@(.*)$/) {
+			$rightid = $1;
+		}
+
+		print "					<key>RemoteIdentifier</key>\n";
+		print "					<string>$rightid</string>\n";
+	}
+
+	if ($confighash{$key}[4] eq "cert") {
+		print "					<key>AuthenticationMethod</key>\n";
+		print "					<string>Certificate</string>\n";
+
+		print "					<key>PayloadCertificateUUID</key>\n";
+		print "					<string>${cert_uuid}</string>\n";
+	} else {
+		print "					<key>AuthenticationMethod</key>\n";
+		print "					<string>SharedSecret</string>\n";
+		print "					<key>SharedSecret</key>\n";
+		print "					<string>$confighash{$key}[5]</string>\n";
+	}
+
+	print "					<key>ExtendedAuthEnabled</key>\n";
+	print "					<integer>0</integer>\n";
+
+	# These are not needed, but we provide some default to stop iPhone asking for credentials
+	print "					<key>AuthName</key>\n";
+	print "					<string>$confighash{$key}[1]</string>\n";
+	print "					<key>AuthPassword</key>\n";
+	print "					<string></string>\n";
+	print "				</dict>\n";
+	print "			</dict>\n";
+
+	if ($confighash{$key}[4] eq "cert") {
+		print "			<dict>\n";
+		print "				<key>PayloadIdentifier</key>\n";
+		print "				<string>org.example.vpn1.client</string>\n";
+		print "				<key>PayloadDisplayName</key>\n";
+		print "				<string>$confighash{$key}[1]</string>\n";
+		print "				<key>PayloadUUID</key>\n";
+		print "				<string>${cert_uuid}</string>\n";
+		print "				<key>PayloadType</key>\n";
+		print "				<string>com.apple.security.pkcs12</string>\n";
+		print "				<key>PayloadVersion</key>\n";
+		print "				<integer>1</integer>\n";
+		print "				<key>PayloadContent</key>\n";
+		print "				<data>\n";
+
+		foreach (split /\n/,${cert}) {
+			print "					$_\n";
+		}
+
+		print "				</data>\n";
+		print "			</dict>\n";
+
+		print "			<dict>\n";
+		print "				<key>PayloadIdentifier</key>\n";
+		print "				<string>org.example.ca</string>\n";
+		print "				<key>PayloadUUID</key>\n";
+		print "				<string>${ca_uuid}</string>\n";
+		print "				<key>PayloadType</key>\n";
+		print "				<string>com.apple.security.root</string>\n";
+		print "				<key>PayloadVersion</key>\n";
+		print "				<integer>1</integer>\n";
+		print "				<key>PayloadContent</key>\n";
+		print "				<data>\n";
+
+		foreach (split /\n/,${ca}) {
+			print "					$_\n";
+		}
+
+		print "				</data>\n";
+		print "			</dict>\n";
+	}
+
+	print "		</array>\n";
+	print "	</dict>\n";
+	print "</plist>\n";
+
+	# Done
+	exit(0);
 ###
 ### Display certificate
 ###
@@ -1129,8 +1519,8 @@ END
 		&Header::openpage($Lang::tr{'ipsec'}, 1, '');
 		&Header::openbigbox('100%', 'left', '', '');
 		&Header::openbox('100%', 'left', "$Lang::tr{'cert'}:");
-		my $output = `/usr/bin/openssl x509 -text -in ${General::swroot}/certs/$confighash{$cgiparams{'KEY'}}[1]cert.pem`;
-		$output = &Header::cleanhtml($output,"y");
+		my @output = &General::system_output("/usr/bin/openssl", "x509", "-text", "-in", "${General::swroot}/certs/$confighash{$cgiparams{'KEY'}}[1]cert.pem");
+		my $output = &Header::cleanhtml(join("", @output) ,"y");
 		print "<pre>$output</pre>\n";
 		&Header::closebox();
 		print "<div align='center'><a href='/cgi-bin/vpnmain.cgi'>$Lang::tr{'back'}</a></div>";
@@ -1148,7 +1538,12 @@ END
 	if ( -f "${General::swroot}/certs/$confighash{$cgiparams{'KEY'}}[1]cert.pem") {
 		print "Content-Type: application/force-download\n";
 		print "Content-Disposition: attachment; filename=" . $confighash{$cgiparams{'KEY'}}[1] . "cert.pem\n\n";
-		print `/bin/cat ${General::swroot}/certs/$confighash{$cgiparams{'KEY'}}[1]cert.pem`;
+
+		open(FILE, "${General::swroot}/certs/$confighash{$cgiparams{'KEY'}}[1]cert.pem");
+		my @pem = <FILE>;
+		close(FILE);
+		print "@pem";
+
 		exit (0);
 	}
 
@@ -1165,12 +1560,12 @@ END
 			$confighash{$cgiparams{'KEY'}}[0] = 'on';
 			&General::writehasharray("${General::swroot}/vpn/config", \%confighash);
 			&writeipsecfiles();
-			system('/usr/local/bin/ipsecctrl', 'S', $cgiparams{'KEY'}) if (&vpnenabled);
+			&General::system('/usr/local/bin/ipsecctrl', 'S', $cgiparams{'KEY'}) if (&vpnenabled);
 		} else {
-			system('/usr/local/bin/ipsecctrl', 'D', $cgiparams{'KEY'}) if (&vpnenabled);
 			$confighash{$cgiparams{'KEY'}}[0] = 'off';
 			&General::writehasharray("${General::swroot}/vpn/config", \%confighash);
 			&writeipsecfiles();
+			&General::system('/usr/local/bin/ipsecctrl', 'D', $cgiparams{'KEY'}) if (&vpnenabled);
 		}
 		sleep $sleepDelay;
 	} else {
@@ -1186,7 +1581,7 @@ END
 
 	if ($confighash{$cgiparams{'KEY'}}) {
 		if (&vpnenabled) {
-			system('/usr/local/bin/ipsecctrl', 'S', $cgiparams{'KEY'});
+			&General::system('/usr/local/bin/ipsecctrl', 'S', $cgiparams{'KEY'});
 			sleep $sleepDelay;
 		}
 	} else {
@@ -1200,17 +1595,25 @@ END
 	&General::readhash("${General::swroot}/vpn/settings", \%vpnsettings);
 	&General::readhasharray("${General::swroot}/vpn/config", \%confighash);
 
-	if ($confighash{$cgiparams{'KEY'}}) {
-		system('/usr/local/bin/ipsecctrl', 'D', $cgiparams{'KEY'}) if (&vpnenabled);
-		unlink ("${General::swroot}/certs/$confighash{$cgiparams{'KEY'}}[1]cert.pem");
-		unlink ("${General::swroot}/certs/$confighash{$cgiparams{'KEY'}}[1].p12");
-		delete $confighash{$cgiparams{'KEY'}};
-		&General::writehasharray("${General::swroot}/vpn/config", \%confighash);
-		&writeipsecfiles();
-	} else {
-		$errormessage = $Lang::tr{'invalid key'};
-	}
-	&General::firewall_reload();
+        if ($confighash{$cgiparams{'KEY'}}) {
+                # Revoke the removed certificate
+                if (!$errormessage) {
+                        &General::log("charon", "Revoking the removed client cert...");
+                        my $opt = " ca -revoke ${General::swroot}/certs/$confighash{$cgiparams{'KEY'}}[1]cert.pem";
+                        $errormessage = &callssl($opt);
+                        unlink ("${General::swroot}/certs/$confighash{$cgiparams{'KEY'}}[1]cert.pem");
+                        unlink ("${General::swroot}/certs/$confighash{$cgiparams{'KEY'}}[1].p12");
+                        delete $confighash{$cgiparams{'KEY'}};
+                        &General::writehasharray("${General::swroot}/vpn/config", \%confighash);
+                        &writeipsecfiles();
+                        &General::system('/usr/local/bin/ipsecctrl', 'D', $cgiparams{'KEY'}) if (&vpnenabled);
+                } else {
+                        goto VPNCONF_ERROR;
+                }
+        } else {
+                $errormessage = $Lang::tr{'invalid key'};
+        }
+        &General::firewall_reload();
 ###
 ### Choose between adding a host-net or net-net connection
 ###
@@ -1259,7 +1662,11 @@ END
 		$cgiparams{'TYPE'}				= $confighash{$cgiparams{'KEY'}}[3];
 		$cgiparams{'AUTH'}				= $confighash{$cgiparams{'KEY'}}[4];
 		$cgiparams{'PSK'}				= $confighash{$cgiparams{'KEY'}}[5];
-		#$cgiparams{'free'}				= $confighash{$cgiparams{'KEY'}}[6];
+		# Decode the PSK if it is base64-encoded
+		if ($cgiparams{'PSK'} && $confighash{$cgiparams{'KEY'}}[40] eq 'YES') {
+			$cgiparams{'PSK'} = &MIME::Base64::decode_base64($cgiparams{'PSK'});
+		}
+		$cgiparams{'LOCAL'}				= $confighash{$cgiparams{'KEY'}}[6];
 		$cgiparams{'LOCAL_ID'}			= $confighash{$cgiparams{'KEY'}}[7];
 		my @local_subnets = split(",", $confighash{$cgiparams{'KEY'}}[8]);
 		$cgiparams{'LOCAL_SUBNET'} 		= join(/\|/, @local_subnets);
@@ -1287,6 +1694,14 @@ END
 		$cgiparams{'DPD_TIMEOUT'}		= $confighash{$cgiparams{'KEY'}}[30];
 		$cgiparams{'DPD_DELAY'}			= $confighash{$cgiparams{'KEY'}}[31];
 		$cgiparams{'FORCE_MOBIKE'}		= $confighash{$cgiparams{'KEY'}}[32];
+		$cgiparams{'START_ACTION'}		= $confighash{$cgiparams{'KEY'}}[33];
+		$cgiparams{'INACTIVITY_TIMEOUT'}	= $confighash{$cgiparams{'KEY'}}[34];
+		$cgiparams{'MODE'}			= $confighash{$cgiparams{'KEY'}}[35];
+		$cgiparams{'INTERFACE_MODE'}		= $confighash{$cgiparams{'KEY'}}[36];
+		$cgiparams{'INTERFACE_ADDRESS'}		= $confighash{$cgiparams{'KEY'}}[37];
+		$cgiparams{'INTERFACE_MTU'}		= $confighash{$cgiparams{'KEY'}}[38];
+		$cgiparams{'DNS_SERVERS'}		= $confighash{$cgiparams{'KEY'}}[39];
+		$cgiparams{'BASE_64'}			= $confighash{$cgiparams{'KEY'}}[40];
 
 		if (!$cgiparams{'DPD_DELAY'}) {
 			$cgiparams{'DPD_DELAY'} = 30;
@@ -1294,6 +1709,18 @@ END
 
 		if (!$cgiparams{'DPD_TIMEOUT'}) {
 			$cgiparams{'DPD_TIMEOUT'} = 120;
+		}
+
+		if ($cgiparams{'INACTIVITY_TIMEOUT'} eq "") {
+			$cgiparams{'INACTIVITY_TIMEOUT'} = 900;
+		}
+
+		if ($cgiparams{'MODE'} eq "") {
+			$cgiparams{'MODE'} = "tunnel";
+		}
+
+		if ($cgiparams{'INTERFACE_MTU'} eq "") {
+			$cgiparams{'INTERFACE_MTU'} = 1500;
 		}
 
 	} elsif ($cgiparams{'ACTION'} eq $Lang::tr{'save'}) {
@@ -1331,6 +1758,13 @@ END
 		if (($cgiparams{'TYPE'} eq 'net') && (! $cgiparams{'REMOTE'})) {
 			$errormessage = $Lang::tr{'invalid input for remote host/ip'};
 			goto VPNCONF_ERROR;
+		}
+
+		if ($cgiparams{'LOCAL'}) {
+			if (($cgiparams{'LOCAL'} ne "") && (!&General::validip($cgiparams{'LOCAL'}))) {
+				$errormessage = $Lang::tr{'invalid input for local ip address'};
+				goto VPNCONF_ERROR;
+			}
 		}
 
 		if ($cgiparams{'REMOTE'}) {
@@ -1374,6 +1808,41 @@ END
 					goto VPNCONF_ERROR;
 				}
 			}
+
+			if ($cgiparams{'MODE'} !~ /^(tunnel|transport)$/) {
+				$errormessage = $Lang::tr{'invalid input for mode'};
+				goto VPNCONF_ERROR;
+			}
+
+			if ($cgiparams{'INTERFACE_MODE'} !~ /^(|gre|vti)$/) {
+				$errormessage = $Lang::tr{'invalid input for interface mode'};
+				goto VPNCONF_ERROR;
+			}
+
+			if (($cgiparams{'INTERFACE_MODE'} eq "vti") && ($cgiparams{'MODE'} eq "transport")) {
+				$errormessage = $Lang::tr{'transport mode does not support vti'};
+				goto VPNCONF_ERROR;
+			}
+
+			if (($cgiparams{'INTERFACE_MODE'} ne "") && !&Network::check_subnet($cgiparams{'INTERFACE_ADDRESS'})) {
+				$errormessage = $Lang::tr{'invalid input for interface address'};
+				goto VPNCONF_ERROR;
+			}
+
+			if ($cgiparams{'INTERFACE_MTU'} !~ /^\d+$/) {
+				$errormessage = $Lang::tr{'invalid input for interface mtu'};
+				goto VPNCONF_ERROR;
+			}
+		}
+
+		if ($cgiparams{'TYPE'} eq 'host') {
+			my @servers = split(",", $cgiparams{'DNS_SERVERS'});
+			foreach my $server (@servers) {
+				unless (&Network::check_ip_address($server)) {
+					$errormessage = $Lang::tr{'ipsec dns server address is invalid'};
+					goto VPNCONF_ERROR;
+				}
+			}
 		}
 
 		if ($cgiparams{'ENABLED'} !~ /^(on|off)$/) {
@@ -1387,8 +1856,8 @@ END
 
 		# Allow nothing or a string (DN,FDQN,) beginning with @
 		# with no comma but slashes between RID eg @O=FR/C=Paris/OU=myhome/CN=franck
-		if ( ($cgiparams{'LOCAL_ID'} !~ /^(|[\w.-]*@[\w. =*\/-]+|\d+\.\d+\.\d+\.\d+)$/) ||
-			($cgiparams{'REMOTE_ID'} !~ /^(|[\w.-]*@[\w. =*\/-]+|\d+\.\d+\.\d+\.\d+)$/) ||
+		if ( ($cgiparams{'LOCAL_ID'} !~ /^(|[\w.-]*@[@#]?[\w. =*\/-]+|\d+\.\d+\.\d+\.\d+)$/) ||
+			($cgiparams{'REMOTE_ID'} !~ /^(|[\w.-]*@[@#]?[\w. =*\/-]+|\d+\.\d+\.\d+\.\d+)$/) ||
 			(($cgiparams{'REMOTE_ID'} eq $cgiparams{'LOCAL_ID'}) && ($cgiparams{'LOCAL_ID'} ne ''))
 		) {
 			$errormessage = $Lang::tr{'invalid local-remote id'} . '<br />' .
@@ -1428,7 +1897,7 @@ END
 			$errormessage = $Lang::tr{'cant change certificates'};
 			goto VPNCONF_ERROR;
 		}
-		if (ref ($cgiparams{'FH'}) ne 'Fh') {
+		unless (ref ($cgiparams{'FH'})) {
 			$errormessage = $Lang::tr{'there was no file upload'};
 			goto VPNCONF_ERROR;
 		}
@@ -1441,8 +1910,8 @@ END
 		}
 
 		# Sign the certificate request
-		&General::log("ipsec", "Signing your cert $cgiparams{'NAME'}...");
-		my $opt = " ca -md sha256 -days 999999";
+		&General::log("charon", "Signing your cert $cgiparams{'NAME'}...");
+		my $opt = " ca -md sha256 -days 825";
 		$opt .= " -batch -notext";
 		$opt .= " -in $filename";
 		$opt .= " -out ${General::swroot}/certs/$cgiparams{'NAME'}cert.pem";
@@ -1450,11 +1919,9 @@ END
 		if ( $errormessage = &callssl ($opt) ) {
 			unlink ($filename);
 			unlink ("${General::swroot}/certs/$cgiparams{'NAME'}cert.pem");
-			&cleanssldatabase();
 			goto VPNCONF_ERROR;
 		} else {
 			unlink ($filename);
-			&cleanssldatabase();
 		}
 
 		$cgiparams{'CERT_NAME'} = getCNfromcert ("${General::swroot}/certs/$cgiparams{'NAME'}cert.pem");
@@ -1463,9 +1930,9 @@ END
 			goto VPNCONF_ERROR;
 		}
 	} elsif ($cgiparams{'AUTH'} eq 'pkcs12') {
-		&General::log("ipsec", "Importing from p12...");
+		&General::log("charon", "Importing from p12...");
 
-		if (ref ($cgiparams{'FH'}) ne 'Fh') {
+		unless (ref ($cgiparams{'FH'})) {
 			$errormessage = $Lang::tr{'there was no file upload'};
 			goto ROOTCERT_ERROR;
 		}
@@ -1478,9 +1945,9 @@ END
 		}
 
 		# Extract the CA certificate from the file
-		&General::log("ipsec", "Extracting caroot from p12...");
+		&General::log("charon", "Extracting caroot from p12...");
 		if (open(STDIN, "-|")) {
-			my $opt = " pkcs12 -cacerts -nokeys";
+			my $opt = " pkcs12 -legacy -cacerts -nokeys";
 			$opt .= " -in $filename";
 			$opt .= " -out /tmp/newcacert";
 			$errormessage = &callssl ($opt);
@@ -1491,9 +1958,9 @@ END
 
 		# Extract the Host certificate from the file
 		if (!$errormessage) {
-			&General::log("ipsec", "Extracting host cert from p12...");
+			&General::log("charon", "Extracting host cert from p12...");
 			if (open(STDIN, "-|")) {
-				my $opt = " pkcs12 -clcerts -nokeys";
+				my $opt = " pkcs12 -legacy -clcerts -nokeys";
 				$opt .= " -in $filename";
 				$opt .= " -out /tmp/newhostcert";
 				$errormessage = &callssl ($opt);
@@ -1504,7 +1971,7 @@ END
 		}
 
 		if (!$errormessage) {
-			&General::log("ipsec", "Moving cacert...");
+			&General::log("charon", "Moving cacert...");
 			#If CA have new subject, add it to our list of CA
 			my $casubject = &Header::cleanhtml(getsubjectfromcert ('/tmp/newcacert'));
 			my @names;
@@ -1513,8 +1980,8 @@ END
 				unshift (@names,$cahash{$x}[0]);
 			}
 			if ($casubject) { # a new one!
-				my $temp = `/usr/bin/openssl x509 -text -in /tmp/newcacert`;
-				if ($temp !~ /CA:TRUE/i) {
+				my @temp = &General::system_output("/usr/bin/openssl", "x509", "-text", "-in", "/tmp/newcacert");
+				if (! grep(/CA:TRUE/, @temp)) {
 					$errormessage = $Lang::tr{'not a valid ca certificate'};
 				} else {
 					#compute a name for it
@@ -1522,22 +1989,26 @@ END
 					while (grep(/Imported-$idx/, @names) ) {$idx++};
 					$cgiparams{'CA_NAME'}="Imported-$idx";
 					$cgiparams{'CERT_NAME'}=&Header::cleanhtml(getCNfromcert ('/tmp/newhostcert'));
-					move("/tmp/newcacert", "${General::swroot}/ca/$cgiparams{'CA_NAME'}cert.pem");
-					$errormessage = "$Lang::tr{'certificate file move failed'}: $!" if ($? ne 0);
+
+					unless(move("/tmp/newcacert", "${General::swroot}/ca/$cgiparams{'CA_NAME'}cert.pem")) {
+						$errormessage = "$Lang::tr{'certificate file move failed'}: $!";
+					}
+
 					if (!$errormessage) {
 						my $key = &General::findhasharraykey (\%cahash);
 						$cahash{$key}[0] = $cgiparams{'CA_NAME'};
 						$cahash{$key}[1] = $casubject;
 						&General::writehasharray("${General::swroot}/vpn/caconfig", \%cahash);
-						system('/usr/local/bin/ipsecctrl', 'R');
+						&General::system('/usr/local/bin/ipsecctrl', 'R');
 					}
 				}
 			}
 		}
 		if (!$errormessage) {
-			&General::log("ipsec", "Moving host cert...");
-			move("/tmp/newhostcert", "${General::swroot}/certs/$cgiparams{'NAME'}cert.pem");
-			$errormessage = "$Lang::tr{'certificate file move failed'}: $!" if ($? ne 0);
+			&General::log("charon", "Moving host cert...");
+			unless(move("/tmp/newhostcert", "${General::swroot}/certs/$cgiparams{'NAME'}cert.pem")) {
+				$errormessage = "$Lang::tr{'certificate file move failed'}: $!";
+			}
 		}
 
 		#cleanup temp files
@@ -1549,13 +2020,13 @@ END
 			unlink ("${General::swroot}/certs/$cgiparams{'NAME'}cert.pem");
 			goto VPNCONF_ERROR;
 		}
-		&General::log("ipsec", "p12 import completed!");
+		&General::log("charon", "p12 import completed!");
 	} elsif ($cgiparams{'AUTH'} eq 'certfile') {
 		if ($cgiparams{'KEY'}) {
 			$errormessage = $Lang::tr{'cant change certificates'};
 			goto VPNCONF_ERROR;
 		}
-		if (ref ($cgiparams{'FH'}) ne 'Fh') {
+		unless (ref ($cgiparams{'FH'})) {
 			$errormessage = $Lang::tr{'there was no file upload'};
 			goto VPNCONF_ERROR;
 		}
@@ -1567,14 +2038,14 @@ END
 		}
 
 		# Verify the certificate has a valid CA and move it
-		&General::log("ipsec", "Validating imported cert against our known CA...");
+		&General::log("charon", "Validating imported cert against our known CA...");
 		my $validca = 1; #assume ok
-		my $test = `/usr/bin/openssl verify -CAfile ${General::swroot}/ca/cacert.pem $filename`;
-		if ($test !~ /: OK/) {
+		my @test = &General::system_output("/usr/bin/openssl", "verify", "-CAfile", "${General::swroot}/ca/cacert.pem", "$filename");
+		if (! grep(/: OK/, @test)) {
 			my $validca = 0;
 			foreach my $key (keys %cahash) {
-				$test = `/usr/bin/openssl verify -CAfile ${General::swroot}/ca/$cahash{$key}[0]cert.pem $filename`;
-				if ($test =~ /: OK/) {
+				@test = &General::system_output("/usr/bin/openssl", "verify", "-CAfile", "${General::swroot}/ca/$cahash{$key}[0]cert.pem", "$filename");
+				if (grep(/: OK/, @test)) {
 					$validca = 1;
 					last;
 				}
@@ -1585,9 +2056,8 @@ END
 			unlink ($filename);
 			goto VPNCONF_ERROR;
 		} else {
-			move($filename, "${General::swroot}/certs/$cgiparams{'NAME'}cert.pem");
-			if ($? ne 0) {
-				$errormessage = "$Lang::tr{'certificate file move failed'}: $!";
+			unless (move($filename, "${General::swroot}/certs/$cgiparams{'NAME'}cert.pem")) {
+				$errormessage = "$Lang::tr{'certificate file move failed'} ($filename): $!";
 				unlink ($filename);
 				goto VPNCONF_ERROR;
 			}
@@ -1662,6 +2132,10 @@ END
 			$errormessage = $Lang::tr{'password too short'};
 			goto VPNCONF_ERROR;
 		}
+		if ($cgiparams{'CERT_PASS1'} =~ /["]/) {
+			$errormessage = $Lang::tr{'password has quotation mark'};
+			goto VPNCONF_ERROR;
+		}
 		if ($cgiparams{'CERT_PASS1'} ne $cgiparams{'CERT_PASS2'}) {
 			$errormessage = $Lang::tr{'passwords do not match'};
 			goto VPNCONF_ERROR;
@@ -1673,11 +2147,11 @@ END
 		(my $state = $cgiparams{'CERT_STATE'}) =~ s/^\s*$/\./;
 
 		# Create the Client certificate request
-		&General::log("ipsec", "Creating a cert...");
+		&General::log("charon", "Creating a cert...");
 
 		if (open(STDIN, "-|")) {
-			my $opt = " req -nodes -rand /proc/interrupts:/proc/net/rt_cache";
-			$opt .= " -newkey rsa:2048";
+			my $opt = " req -nodes";
+			$opt .= " -newkey rsa:4096";
 			$opt .= " -keyout ${General::swroot}/certs/$cgiparams{'NAME'}key.pem";
 			$opt .= " -out ${General::swroot}/certs/$cgiparams{'NAME'}req.pem";
 
@@ -1700,7 +2174,7 @@ END
 		}
 
 		# Sign the client certificate request
-		&General::log("ipsec", "Signing the cert $cgiparams{'NAME'}...");
+		&General::log("charon", "Signing the cert $cgiparams{'NAME'}...");
 
 		#No easy way for specifying the contain of subjectAltName without writing a config file...
 		my ($fh, $v3extname) = tempfile ('/tmp/XXXXXXXX');
@@ -1715,7 +2189,7 @@ END
 		print $fh "subjectAltName=$cgiparams{'SUBJECTALTNAME'}" if ($cgiparams{'SUBJECTALTNAME'});
 		close ($fh);
 
-		my $opt = " ca -md sha256 -days 999999 -batch -notext";
+		my $opt = " ca -md sha256 -days 825 -batch -notext";
 		$opt .= " -in ${General::swroot}/certs/$cgiparams{'NAME'}req.pem";
 		$opt .= " -out ${General::swroot}/certs/$cgiparams{'NAME'}cert.pem";
 		$opt .= " -extfile $v3extname";
@@ -1730,16 +2204,15 @@ END
 		} else {
 			unlink ($v3extname);
 			unlink ("${General::swroot}/certs/$cgiparams{'NAME'}req.pem");
-			&cleanssldatabase();
 		}
 
 		# Create the pkcs12 file
-		&General::log("ipsec", "Packing a pkcs12 file...");
-		$opt = " pkcs12 -export";
+		&General::log("charon", "Packing a pkcs12 file...");
+		$opt = " pkcs12 -legacy -export";
 		$opt .= " -inkey ${General::swroot}/certs/$cgiparams{'NAME'}key.pem";
 		$opt .= " -in ${General::swroot}/certs/$cgiparams{'NAME'}cert.pem";
 		$opt .= " -name \"$cgiparams{'NAME'}\"";
-		$opt .= " -passout pass:$cgiparams{'CERT_PASS1'}";
+		$opt .= " -passout pass:\"$cgiparams{'CERT_PASS1'}\"";
 		$opt .= " -certfile ${General::swroot}/ca/cacert.pem";
 		$opt .= " -caname \"$vpnsettings{'ROOTCERT_ORGANIZATION'} CA\"";
 		$opt .= " -out ${General::swroot}/certs/$cgiparams{'NAME'}.p12";
@@ -1778,7 +2251,7 @@ END
 	my $key = $cgiparams{'KEY'};
 	if (! $key) {
 		$key = &General::findhasharraykey (\%confighash);
-		foreach my $i (0 .. 32) { $confighash{$key}[$i] = "";}
+		foreach my $i (0 .. 40) { $confighash{$key}[$i] = "";}
 	}
 	$confighash{$key}[0] = $cgiparams{'ENABLED'};
 	$confighash{$key}[1] = $cgiparams{'NAME'};
@@ -1788,7 +2261,10 @@ END
 	$confighash{$key}[3] = $cgiparams{'TYPE'};
 	if ($cgiparams{'AUTH'} eq 'psk') {
 		$confighash{$key}[4] = 'psk';
-		$confighash{$key}[5] = $cgiparams{'PSK'};
+
+		# Always store the PSK base64-encoded, even if it wasn't base64 before
+		$confighash{$key}[5] = &MIME::Base64::encode_base64($cgiparams{'PSK'}, "");
+		$confighash{$key}[40] = 'YES';
 	} else {
 		$confighash{$key}[4] = 'cert';
 	}
@@ -1796,6 +2272,7 @@ END
 		my @remote_subnets = split(",", $cgiparams{'REMOTE_SUBNET'});
 		$confighash{$key}[11] = join('|', @remote_subnets);
 	}
+	$confighash{$key}[6] = $cgiparams{'LOCAL'};
 	$confighash{$key}[7] = $cgiparams{'LOCAL_ID'};
 	my @local_subnets = split(",", $cgiparams{'LOCAL_SUBNET'});
 	$confighash{$key}[8] = join('|', @local_subnets);
@@ -1822,15 +2299,21 @@ END
 	$confighash{$key}[30] = $cgiparams{'DPD_TIMEOUT'};
 	$confighash{$key}[31] = $cgiparams{'DPD_DELAY'};
 	$confighash{$key}[32] = $cgiparams{'FORCE_MOBIKE'};
+	$confighash{$key}[33] = $cgiparams{'START_ACTION'};
+	$confighash{$key}[34] = $cgiparams{'INACTIVITY_TIMEOUT'};
+	$confighash{$key}[35] = $cgiparams{'MODE'};
+	$confighash{$key}[36] = $cgiparams{'INTERFACE_MODE'};
+	$confighash{$key}[37] = $cgiparams{'INTERFACE_ADDRESS'};
+	$confighash{$key}[38] = $cgiparams{'INTERFACE_MTU'};
+	$confighash{$key}[39] = join("|", split(",", $cgiparams{'DNS_SERVERS'}));
 
 	# free unused fields!
-	$confighash{$key}[6] = 'off';
 	$confighash{$key}[15] = 'off';
 
 	&General::writehasharray("${General::swroot}/vpn/config", \%confighash);
 	&writeipsecfiles();
 	if (&vpnenabled) {
-		system('/usr/local/bin/ipsecctrl', 'S', $key);
+		&General::system('/usr/local/bin/ipsecctrl', 'S', $key);
 		sleep $sleepDelay;
 	}
 	if ($cgiparams{'EDIT_ADVANCED'} eq 'on') {
@@ -1847,7 +2330,12 @@ END
 	} else {
 		$cgiparams{'AUTH'} = 'certgen';
 	}
-	$cgiparams{'LOCAL_SUBNET'}		= "$netsettings{'GREEN_NETADDRESS'}/$netsettings{'GREEN_NETMASK'}";
+
+	if ($netsettings{"GREEN_NETADDRESS"} && $netsettings{"GREEN_NETMASK"}) {
+		$cgiparams{"LOCAL_SUBNET"} = $netsettings{'GREEN_NETADDRESS'} . "/" . $netsettings{'GREEN_NETMASK'};
+	} else {
+		$cgiparams{"LOCAL_SUBNET"} = "";
+	}
 	$cgiparams{'CERT_EMAIL'}		= $vpnsettings{'ROOTCERT_EMAIL'};
 	$cgiparams{'CERT_OU'}			= $vpnsettings{'ROOTCERT_OU'};
 	$cgiparams{'CERT_ORGANIZATION'}	= $vpnsettings{'ROOTCERT_ORGANIZATION'};
@@ -1884,17 +2372,23 @@ END
 	$cgiparams{'REMOTE_ID'} = '';
 
 	#use default advanced value
-	$cgiparams{'IKE_ENCRYPTION'}	= 'aes256gcm128|aes256gcm96|aes256gcm64|aes256|aes192gcm128|aes192gcm96|aes192gcm64|aes192|aes128gcm128|aes128gcm96|aes128gcm64|aes128'; #[18];
-	$cgiparams{'IKE_INTEGRITY'}		= 'sha2_512|sha2_256|sha'; #[19];
-	$cgiparams{'IKE_GROUPTYPE'}		= '4096|3072|2048|1536|1024'; #[20];
+	$cgiparams{'IKE_ENCRYPTION'}		= 'chacha20poly1305|aes256gcm128|aes256'; #[18];
+	$cgiparams{'IKE_INTEGRITY'}		= 'sha2_512|sha2_256'; #[19];
+	$cgiparams{'IKE_GROUPTYPE'}             = 'x25519-ke1_mlkem1024|x25519-ke1_mlkem768|x25519-ke1_mlkem512|curve448|curve25519|e521|e384|4096|3072'; #[20];
 	$cgiparams{'IKE_LIFETIME'}		= '3'; #[16];
-	$cgiparams{'ESP_ENCRYPTION'}	= 'aes256gcm128|aes256gcm96|aes256gcm64|aes256|aes192gcm128|aes192gcm96|aes192gcm64|aes192|aes128gcm128|aes128gcm96|aes128gcm64|aes128'; #[21];
-	$cgiparams{'ESP_INTEGRITY'}		= 'sha2_512|sha2_256|sha1'; #[22];
-	$cgiparams{'ESP_GROUPTYPE'}		= '4096|3072|2048|1536|1024'; #[23];
+	$cgiparams{'ESP_ENCRYPTION'}		= 'chacha20poly1305|aes256gcm128|aes256'; #[21];
+	$cgiparams{'ESP_INTEGRITY'}		= 'sha2_512|sha2_256'; #[22];
+	$cgiparams{'ESP_GROUPTYPE'}             = 'x25519-ke1_mlkem1024|x25519-ke1_mlkem768|x25519-ke1_mlkem512|curve448|curve25519|e521|e384|4096|3072'; #[23];
 	$cgiparams{'ESP_KEYLIFE'}		= '1'; #[17];
-	$cgiparams{'COMPRESSION'}		= 'on'; #[13];
-	$cgiparams{'ONLY_PROPOSED'}		= 'off'; #[24];
+	$cgiparams{'COMPRESSION'}		= 'off'; #[13];
+	$cgiparams{'ONLY_PROPOSED'}		= 'on'; #[24];
 	$cgiparams{'PFS'}				= 'on'; #[28];
+	$cgiparams{'INACTIVITY_TIMEOUT'}        = 900;
+	$cgiparams{'MODE'}        		= "tunnel";
+	$cgiparams{'INTERFACE_MODE'}        	= "";
+	$cgiparams{'INTERFACE_ADDRESS'}        	= "";
+	$cgiparams{'INTERFACE_MTU'}        	= 1500;
+	$cgiparams{'DNS_SERVERS'}        	= "";
 }
 
 VPNCONF_ERROR:
@@ -1913,6 +2407,23 @@ VPNCONF_ERROR:
 	$checked{'AUTH'}{'pkcs12'} = '';
 	$checked{'AUTH'}{'auth-dn'} = '';
 	$checked{'AUTH'}{$cgiparams{'AUTH'}} = "checked='checked'";
+
+	$selected{'MODE'}{'tunnel'} = '';
+	$selected{'MODE'}{'transport'} = '';
+	$selected{'MODE'}{$cgiparams{'MODE'}} = "selected='selected'";
+
+	$selected{'INTERFACE_MODE'}{''} = '';
+	$selected{'INTERFACE_MODE'}{'gre'} = '';
+	$selected{'INTERFACE_MODE'}{'vti'} = '';
+	$selected{'INTERFACE_MODE'}{$cgiparams{'INTERFACE_MODE'}} = "selected='selected'";
+
+	$selected{'LOCAL'}{''} = '';
+	foreach my $alias (sort keys %aliases) {
+		my $address = $aliases{$alias}{'IPT'};
+
+		$selected{'LOCAL'}{$address} = '';
+	}
+	$selected{'LOCAL'}{$cgiparams{'LOCAL'}} = "selected='selected'";
 
 	&Header::showhttpheaders();
 	&Header::openpage($Lang::tr{'ipsec'}, 1, '');
@@ -1950,6 +2461,8 @@ VPNCONF_ERROR:
 	<input type='hidden' name='DPD_DELAY' value='$cgiparams{'DPD_DELAY'}' />
 	<input type='hidden' name='DPD_TIMEOUT' value='$cgiparams{'DPD_TIMEOUT'}' />
 	<input type='hidden' name='FORCE_MOBIKE' value='$cgiparams{'FORCE_MOBIKE'}' />
+	<input type='hidden' name='START_ACTION' value='$cgiparams{'START_ACTION'}' />
+	<input type='hidden' name='INACTIVITY_TIMEOUT' value='$cgiparams{'INACTIVITY_TIMEOUT'}' />
 END
 ;
 	if ($cgiparams{'KEY'}) {
@@ -1972,11 +2485,8 @@ END
 EOF
 	}
 
-	my $disabled;
-	my $blob;
-	if ($cgiparams{'TYPE'} eq 'host') {
-		$disabled = "disabled='disabled'";
-	} elsif ($cgiparams{'TYPE'} eq 'net') {
+	my $blob = "";
+	if ($cgiparams{'TYPE'} eq 'net') {
 		$blob = "<img src='/blob.gif' alt='*' />";
 	};
 
@@ -1986,26 +2496,64 @@ EOF
 	my @remote_subnets = split(/\|/, $cgiparams{'REMOTE_SUBNET'});
 	my $remote_subnets = join(",", @remote_subnets);
 
-	print <<END
+	my @dns_servers = split(/\|/, $cgiparams{'DNS_SERVERS'});
+	my $dns_servers = join(",", @dns_servers);
+
+	print <<END;
 	<tr>
 		<td width='20%'>$Lang::tr{'enabled'}</td>
 		<td width='30%'>
 			<input type='checkbox' name='ENABLED' $checked{'ENABLED'}{'on'} />
 		</td>
-		<td class='boldbase' nowrap='nowrap' width='20%'>$Lang::tr{'local subnet'}&nbsp;<img src='/blob.gif' alt='*' /></td>
-		<td width='30%'>
-			<input type='text' name='LOCAL_SUBNET' value='$local_subnets' />
-		</td>
+		<td colspan="2"></td>
 	</tr>
 	<tr>
+		<td class='boldbase' width='20%'>$Lang::tr{'local ip address'}:</td>
+		<td width='30%'>
+			<select name="LOCAL">
+				<option value="" $selected{'LOCAL'}{''}>- $Lang::tr{'default IP address'} -</option>
+END
+
+				foreach my $alias (sort keys %aliases) {
+					my $address = $aliases{$alias}{'IPT'};
+					print <<END;
+						<option value="$address" $selected{'LOCAL'}{$address}>$alias ($address)</option>
+END
+				}
+
+	print <<END;
+			</select>
+		</td>
 		<td class='boldbase' width='20%'>$Lang::tr{'remote host/ip'}:&nbsp;$blob</td>
 		<td width='30%'>
 			<input type='text' name='REMOTE' value='$cgiparams{'REMOTE'}' size="25" />
 		</td>
-		<td class='boldbase' nowrap='nowrap' width='20%'>$Lang::tr{'remote subnet'}&nbsp;$blob</td>
+	</tr>
+	<tr>
+		<td class='boldbase' nowrap='nowrap' width='20%'>$Lang::tr{'local subnet'}&nbsp;<img src='/blob.gif' alt='*' /></td>
 		<td width='30%'>
-			<input $disabled type='text' name='REMOTE_SUBNET' value='$remote_subnets' />
+			<input type='text' name='LOCAL_SUBNET' value='$local_subnets' size="25" />
 		</td>
+END
+
+	if ($cgiparams{'TYPE'} eq "net") {
+		print <<END;
+		<td class='boldbase' nowrap='nowrap' width='20%'>$Lang::tr{'remote subnet'}&nbsp;<img src='/blob.gif' alt='*' /></td>
+		<td width='30%'>
+			<input type='text' name='REMOTE_SUBNET' value='$remote_subnets' size="25" />
+		</td>
+END
+
+	} elsif ($cgiparams{'TYPE'} eq "host") {
+		print <<END;
+		<td class='boldbase' nowrap='nowrap' width='20%'>$Lang::tr{'dns servers'}:</td>
+		<td width='30%'>
+			<input type='text' name='DNS_SERVERS' value='$dns_servers' size="25" />
+		</td>
+END
+	}
+
+	print <<END;
 	</tr>
 	<tr>
 		<td class='boldbase' width='20%'>$Lang::tr{'vpn local id'}:</td>
@@ -2031,6 +2579,51 @@ END
 	}
 	print "</table>";
 	&Header::closebox();
+
+	if ($cgiparams{'TYPE'} eq 'net') {
+		&Header::openbox('100%', 'left', $Lang::tr{'ipsec settings'});
+		print <<EOF;
+		<table width='100%'>
+			<tbody>
+				<tr>
+					<td class='boldbase' width='20%'>$Lang::tr{'mode'}:</td>
+					<td width='30%'>
+						<select name='MODE'>
+							<option value='tunnel' $selected{'MODE'}{'tunnel'}>$Lang::tr{'ipsec mode tunnel'}</option>
+							<option value='transport' $selected{'MODE'}{'transport'}>$Lang::tr{'ipsec mode transport'}</option>
+						</select>
+					</td>
+					<td colspan='2'></td>
+				</tr>
+
+				<tr>
+					<td class='boldbase' width='20%'>$Lang::tr{'interface mode'}:</td>
+					<td width='30%'>
+						<select name='INTERFACE_MODE'>
+							<option value='' $selected{'INTERFACE_MODE'}{''}>$Lang::tr{'ipsec interface mode none'}</option>
+							<option value='gre' $selected{'INTERFACE_MODE'}{'gre'}>$Lang::tr{'ipsec interface mode gre'}</option>
+							<option value='vti' $selected{'INTERFACE_MODE'}{'vti'}>$Lang::tr{'ipsec interface mode vti'}</option>
+						</select>
+					</td>
+
+					<td class='boldbase' width='20%'>$Lang::tr{'ip address'}/$Lang::tr{'subnet mask'}:</td>
+					<td width='30%'>
+						<input type="text" name="INTERFACE_ADDRESS" value="$cgiparams{'INTERFACE_ADDRESS'}">
+					</td>
+				</tr>
+
+				<tr>
+					<td class='boldbase' width='20%'>$Lang::tr{'mtu'}:</td>
+					<td width='30%'>
+						<input type="number" name="INTERFACE_MTU" value="$cgiparams{'INTERFACE_MTU'}" min="576" max="9000">
+					</td>
+					<td colspan='2'></td>
+				</tr>
+			</tbody>
+		</table>
+EOF
+		&Header::closebox();
+	}
 
 	if ($cgiparams{'KEY'} && $cgiparams{'AUTH'} eq 'psk') {
 		&Header::openbox('100%', 'left', $Lang::tr{'authentication'});
@@ -2144,7 +2737,7 @@ if(($cgiparams{'ACTION'} eq $Lang::tr{'advanced'}) ||
 			goto ADVANCED_ERROR;
 		}
 		foreach my $val (@temp) {
-			if ($val !~ /^(aes(256|192|128)(gcm(128|96|64))?|3des|camellia(256|192|128))$/) {
+			if ($val !~ /^(aes(256|192|128)(gcm(128|96|64))?|3des|chacha20poly1305|camellia(256|192|128))$/) {
 				$errormessage = $Lang::tr{'invalid input'};
 				goto ADVANCED_ERROR;
 			}
@@ -2166,7 +2759,7 @@ if(($cgiparams{'ACTION'} eq $Lang::tr{'advanced'}) ||
 			goto ADVANCED_ERROR;
 		}
 		foreach my $val (@temp) {
-			if ($val !~ /^(e521|e384|e256|e224|e192|e512bp|e384bp|e256bp|e224bp|1024|1536|2048|2048s256|2048s224|2048s160|3072|4096|6144|8192)$/) {
+			if ($val !~ /^(x25519-ke1_mlkem(1024|768|512)|curve448|curve25519|e521|e384|e256|e224|e192|e512bp|e384bp|e256bp|e224bp|768|1024|1536|2048|3072|4096|6144|8192)$/) {
 				$errormessage = $Lang::tr{'invalid input'};
 				goto ADVANCED_ERROR;
 			}
@@ -2175,8 +2768,8 @@ if(($cgiparams{'ACTION'} eq $Lang::tr{'advanced'}) ||
 			$errormessage = $Lang::tr{'invalid input for ike lifetime'};
 			goto ADVANCED_ERROR;
 		}
-		if ($cgiparams{'IKE_LIFETIME'} < 1 || $cgiparams{'IKE_LIFETIME'} > 8) {
-			$errormessage = $Lang::tr{'ike lifetime should be between 1 and 8 hours'};
+		if ($cgiparams{'IKE_LIFETIME'} < 1 || $cgiparams{'IKE_LIFETIME'} > 24) {
+			$errormessage = $Lang::tr{'ike lifetime should be between 1 and 24 hours'};
 			goto ADVANCED_ERROR;
 		}
 		@temp = split('\|', $cgiparams{'ESP_ENCRYPTION'});
@@ -2185,7 +2778,7 @@ if(($cgiparams{'ACTION'} eq $Lang::tr{'advanced'}) ||
 			goto ADVANCED_ERROR;
 		}
 		foreach my $val (@temp) {
-			if ($val !~ /^(aes(256|192|128)(gcm(128|96|64))?|3des|camellia(256|192|128))$/) {
+			if ($val !~ /^(aes(256|192|128)(gcm(128|96|64))?|3des|chacha20poly1305|camellia(256|192|128))$/) {
 				$errormessage = $Lang::tr{'invalid input'};
 				goto ADVANCED_ERROR;
 			}
@@ -2207,7 +2800,7 @@ if(($cgiparams{'ACTION'} eq $Lang::tr{'advanced'}) ||
 			goto ADVANCED_ERROR;
 		}
 		foreach my $val (@temp) {
-			if ($val !~ /^(e521|e384|e256|e224|e192|e512bp|e384bp|e256bp|e224bp|1024|1536|2048|2048s256|2048s224|2048s160|3072|4096|6144|8192|none)$/) {
+			if ($val !~ /^(x25519-ke1_mlkem(1024|768|512)|curve448|curve25519|e521|e384|e256|e224|e192|e512bp|e384bp|e256bp|e224bp|768|1024|1536|2048|3072|4096|6144|8192|none)$/) {
 				$errormessage = $Lang::tr{'invalid input'};
 				goto ADVANCED_ERROR;
 			}
@@ -2239,6 +2832,11 @@ if(($cgiparams{'ACTION'} eq $Lang::tr{'advanced'}) ||
 			goto ADVANCED_ERROR;
 		}
 
+		if ($cgiparams{'INACTIVITY_TIMEOUT'} !~ /^\d+$/) {
+			$errormessage = $Lang::tr{'invalid input for inactivity timeout'};
+			goto ADVANCED_ERROR;
+		}
+
 		$confighash{$cgiparams{'KEY'}}[29] = $cgiparams{'IKE_VERSION'};
 		$confighash{$cgiparams{'KEY'}}[18] = $cgiparams{'IKE_ENCRYPTION'};
 		$confighash{$cgiparams{'KEY'}}[19] = $cgiparams{'IKE_INTEGRITY'};
@@ -2256,10 +2854,12 @@ if(($cgiparams{'ACTION'} eq $Lang::tr{'advanced'}) ||
 		$confighash{$cgiparams{'KEY'}}[30] = $cgiparams{'DPD_TIMEOUT'};
 		$confighash{$cgiparams{'KEY'}}[31] = $cgiparams{'DPD_DELAY'};
 		$confighash{$cgiparams{'KEY'}}[32] = $cgiparams{'FORCE_MOBIKE'};
+		$confighash{$cgiparams{'KEY'}}[33] = $cgiparams{'START_ACTION'};
+		$confighash{$cgiparams{'KEY'}}[34] = $cgiparams{'INACTIVITY_TIMEOUT'};
 		&General::writehasharray("${General::swroot}/vpn/config", \%confighash);
 		&writeipsecfiles();
 		if (&vpnenabled) {
-			system('/usr/local/bin/ipsecctrl', 'S', $cgiparams{'KEY'});
+			&General::system('/usr/local/bin/ipsecctrl', 'S', $cgiparams{'KEY'});
 			sleep $sleepDelay;
 		}
 		goto ADVANCED_END;
@@ -2283,6 +2883,13 @@ if(($cgiparams{'ACTION'} eq $Lang::tr{'advanced'}) ||
 		$cgiparams{'DPD_TIMEOUT'}		= $confighash{$cgiparams{'KEY'}}[30];
 		$cgiparams{'DPD_DELAY'}			= $confighash{$cgiparams{'KEY'}}[31];
 		$cgiparams{'FORCE_MOBIKE'}		= $confighash{$cgiparams{'KEY'}}[32];
+		$cgiparams{'START_ACTION'}		= $confighash{$cgiparams{'KEY'}}[33];
+		$cgiparams{'INACTIVITY_TIMEOUT'}	= $confighash{$cgiparams{'KEY'}}[34];
+		$cgiparams{'MODE'}			= $confighash{$cgiparams{'KEY'}}[35];
+		$cgiparams{'INTERFACE_MODE'}		= $confighash{$cgiparams{'KEY'}}[36];
+		$cgiparams{'INTERFACE_ADDRESS'}		= $confighash{$cgiparams{'KEY'}}[37];
+		$cgiparams{'INTERFACE_MTU'}		= $confighash{$cgiparams{'KEY'}}[38];
+		$cgiparams{'DNS_SERVERS'}		= $confighash{$cgiparams{'KEY'}}[39];
 
 		if (!$cgiparams{'DPD_DELAY'}) {
 			$cgiparams{'DPD_DELAY'} = 30;
@@ -2291,9 +2898,22 @@ if(($cgiparams{'ACTION'} eq $Lang::tr{'advanced'}) ||
 		if (!$cgiparams{'DPD_TIMEOUT'}) {
 			$cgiparams{'DPD_TIMEOUT'} = 120;
 		}
+
+		if (!$cgiparams{'START_ACTION'}) {
+			$cgiparams{'START_ACTION'} = "start";
+		}
+
+		if ($cgiparams{'INACTIVITY_TIMEOUT'} eq "") {
+			$cgiparams{'INACTIVITY_TIMEOUT'} = 900; # 15 min
+		}
+
+		if ($cgiparams{'MODE'} eq "") {
+			$cgiparams{'MODE'} = "tunnel";
+		}
 	}
 
 	ADVANCED_ERROR:
+	$checked{'IKE_ENCRYPTION'}{'chacha20poly1305'} = '';
 	$checked{'IKE_ENCRYPTION'}{'aes256'} = '';
 	$checked{'IKE_ENCRYPTION'}{'aes192'} = '';
 	$checked{'IKE_ENCRYPTION'}{'aes128'} = '';
@@ -2320,6 +2940,11 @@ if(($cgiparams{'ACTION'} eq $Lang::tr{'advanced'}) ||
 	$checked{'IKE_INTEGRITY'}{'aesxcbc'} = '';
 	@temp = split('\|', $cgiparams{'IKE_INTEGRITY'});
 	foreach my $key (@temp) {$checked{'IKE_INTEGRITY'}{$key} = "selected='selected'"; }
+	$checked{'IKE_GROUPTYPE'}{'x25519-ke1_mlkem1024'} = '';
+	$checked{'IKE_GROUPTYPE'}{'x25519-ke1_mlkem768'} = '';
+	$checked{'IKE_GROUPTYPE'}{'x25519-ke1_mlkem512'} = '';
+	$checked{'IKE_GROUPTYPE'}{'curve448'} = '';
+	$checked{'IKE_GROUPTYPE'}{'curve25519'} = '';
 	$checked{'IKE_GROUPTYPE'}{'768'} = '';
 	$checked{'IKE_GROUPTYPE'}{'1024'} = '';
 	$checked{'IKE_GROUPTYPE'}{'1536'} = '';
@@ -2331,9 +2956,7 @@ if(($cgiparams{'ACTION'} eq $Lang::tr{'advanced'}) ||
 	@temp = split('\|', $cgiparams{'IKE_GROUPTYPE'});
 	foreach my $key (@temp) {$checked{'IKE_GROUPTYPE'}{$key} = "selected='selected'"; }
 
-	# 768 is not supported by strongswan
-	$checked{'IKE_GROUPTYPE'}{'768'} = '';
-
+	$checked{'ESP_ENCRYPTION'}{'chacha20poly1305'} = '';
 	$checked{'ESP_ENCRYPTION'}{'aes256'} = '';
 	$checked{'ESP_ENCRYPTION'}{'aes192'} = '';
 	$checked{'ESP_ENCRYPTION'}{'aes128'} = '';
@@ -2360,6 +2983,11 @@ if(($cgiparams{'ACTION'} eq $Lang::tr{'advanced'}) ||
 	$checked{'ESP_INTEGRITY'}{'aesxcbc'} = '';
 	@temp = split('\|', $cgiparams{'ESP_INTEGRITY'});
 	foreach my $key (@temp) {$checked{'ESP_INTEGRITY'}{$key} = "selected='selected'"; }
+	$checked{'ESP_GROUPTYPE'}{'x25519-ke1_mlkem1024'} = '';
+	$checked{'ESP_GROUPTYPE'}{'x25519-ke1_mlkem768'} = '';
+	$checked{'ESP_GROUPTYPE'}{'x25519-ke1_mlkem512'} = '';
+	$checked{'ESP_GROUPTYPE'}{'curve448'} = '';
+	$checked{'ESP_GROUPTYPE'}{'curve25519'} = '';
 	$checked{'ESP_GROUPTYPE'}{'768'} = '';
 	$checked{'ESP_GROUPTYPE'}{'1024'} = '';
 	$checked{'ESP_GROUPTYPE'}{'1536'} = '';
@@ -2387,6 +3015,17 @@ if(($cgiparams{'ACTION'} eq $Lang::tr{'advanced'}) ||
 	$selected{'DPD_ACTION'}{'none'} = '';
 	$selected{'DPD_ACTION'}{$cgiparams{'DPD_ACTION'}} = "selected='selected'";
 
+	$selected{'START_ACTION'}{'add'} = '';
+	$selected{'START_ACTION'}{'route'} = '';
+	$selected{'START_ACTION'}{'start'} = '';
+	$selected{'START_ACTION'}{$cgiparams{'START_ACTION'}} = "selected='selected'";
+
+	$selected{'INACTIVITY_TIMEOUT'} = ();
+	foreach my $timeout (keys %INACTIVITY_TIMEOUTS) {
+		$selected{'INACTIVITY_TIMEOUT'}{$timeout} = "";
+	}
+	$selected{'INACTIVITY_TIMEOUT'}{$cgiparams{'INACTIVITY_TIMEOUT'}} = "selected";
+
 	&Header::showhttpheaders();
 	&Header::openpage($Lang::tr{'ipsec'}, 1, '');
 	&Header::openbigbox('100%', 'left', '', $errormessage);
@@ -2406,7 +3045,7 @@ if(($cgiparams{'ACTION'} eq $Lang::tr{'advanced'}) ||
 	}
 
 	&Header::openbox('100%', 'left', "$Lang::tr{'advanced'}:");
-	print <<EOF
+	print <<EOF;
 	<form method='post' enctype='multipart/form-data' action='$ENV{'SCRIPT_NAME'}'>
 	<input type='hidden' name='ADVANCED' value='yes' />
 	<input type='hidden' name='KEY' value='$cgiparams{'KEY'}' />
@@ -2434,6 +3073,7 @@ if(($cgiparams{'ACTION'} eq $Lang::tr{'advanced'}) ||
 			<td class='boldbase' width="15%">$Lang::tr{'encryption'}</td>
 			<td class='boldbase'>
 				<select name='IKE_ENCRYPTION' multiple='multiple' size='6' style='width: 100%'>
+					<option value='chacha20poly1305' $checked{'IKE_ENCRYPTION'}{'chacha20poly1305'}>256 bit ChaCha20-Poly1305/128 bit ICV</option>
 					<option value='aes256gcm128' $checked{'IKE_ENCRYPTION'}{'aes256gcm128'}>256 bit AES-GCM/128 bit ICV</option>
 					<option value='aes256gcm96' $checked{'IKE_ENCRYPTION'}{'aes256gcm96'}>256 bit AES-GCM/96 bit ICV</option>
 					<option value='aes256gcm64' $checked{'IKE_ENCRYPTION'}{'aes256gcm64'}>256 bit AES-GCM/64 bit ICV</option>
@@ -2449,11 +3089,12 @@ if(($cgiparams{'ACTION'} eq $Lang::tr{'advanced'}) ||
 					<option value='aes128gcm64' $checked{'IKE_ENCRYPTION'}{'aes128gcm64'}>128 bit AES-GCM/64 bit ICV</option>
 					<option value='aes128' $checked{'IKE_ENCRYPTION'}{'aes128'}>128 bit AES-CBC</option>
 					<option value='camellia128' $checked{'IKE_ENCRYPTION'}{'camellia128'}>128 bit Camellia-CBC</option>
-					<option value='3des' $checked{'IKE_ENCRYPTION'}{'3des'}>168 bit 3DES-EDE-CBC</option>
+					<option value='3des' $checked{'IKE_ENCRYPTION'}{'3des'}>168 bit 3DES-EDE-CBC ($Lang::tr{'vpn weak'})</option>
 				</select>
 			</td>
 			<td class='boldbase'>
 				<select name='ESP_ENCRYPTION' multiple='multiple' size='6' style='width: 100%'>
+					<option value='chacha20poly1305' $checked{'ESP_ENCRYPTION'}{'chacha20poly1305'}>256 bit ChaCha20-Poly1305/128 bit ICV</option>
 					<option value='aes256gcm128' $checked{'ESP_ENCRYPTION'}{'aes256gcm128'}>256 bit AES-GCM/128 bit ICV</option>
 					<option value='aes256gcm96' $checked{'ESP_ENCRYPTION'}{'aes256gcm96'}>256 bit AES-GCM/96 bit ICV</option>
 					<option value='aes256gcm64' $checked{'ESP_ENCRYPTION'}{'aes256gcm64'}>256 bit AES-GCM/64 bit ICV</option>
@@ -2469,7 +3110,7 @@ if(($cgiparams{'ACTION'} eq $Lang::tr{'advanced'}) ||
 					<option value='aes128gcm64' $checked{'ESP_ENCRYPTION'}{'aes128gcm64'}>128 bit AES-GCM/64 bit ICV</option>
 					<option value='aes128' $checked{'ESP_ENCRYPTION'}{'aes128'}>128 bit AES-CBC</option>
 					<option value='camellia128' $checked{'ESP_ENCRYPTION'}{'camellia128'}>128 bit Camellia-CBC</option>
-					<option value='3des' $checked{'ESP_ENCRYPTION'}{'3des'}>168 bit 3DES-EDE-CBC</option>
+					<option value='3des' $checked{'ESP_ENCRYPTION'}{'3des'}>168 bit 3DES-EDE-CBC ($Lang::tr{'vpn weak'})</option>
 				</select>
 			</td>
 		</tr>
@@ -2482,8 +3123,8 @@ if(($cgiparams{'ACTION'} eq $Lang::tr{'advanced'}) ||
 					<option value='sha2_384' $checked{'IKE_INTEGRITY'}{'sha2_384'}>SHA2 384 bit</option>
 					<option value='sha2_256' $checked{'IKE_INTEGRITY'}{'sha2_256'}>SHA2 256 bit</option>
 					<option value='aesxcbc' $checked{'IKE_INTEGRITY'}{'aesxcbc'}>AES XCBC</option>
-					<option value='sha' $checked{'IKE_INTEGRITY'}{'sha'}>SHA1</option>
-					<option value='md5' $checked{'IKE_INTEGRITY'}{'md5'}>MD5</option>
+					<option value='sha' $checked{'IKE_INTEGRITY'}{'sha'}>SHA1 ($Lang::tr{'vpn weak'})</option>
+					<option value='md5' $checked{'IKE_INTEGRITY'}{'md5'}>MD5 ($Lang::tr{'vpn broken'})</option>
 				</select>
 			</td>
 			<td class='boldbase'>
@@ -2492,8 +3133,8 @@ if(($cgiparams{'ACTION'} eq $Lang::tr{'advanced'}) ||
 					<option value='sha2_384' $checked{'ESP_INTEGRITY'}{'sha2_384'}>SHA2 384 bit</option>
 					<option value='sha2_256' $checked{'ESP_INTEGRITY'}{'sha2_256'}>SHA2 256 bit</option>
 					<option value='aesxcbc' $checked{'ESP_INTEGRITY'}{'aesxcbc'}>AES XCBC</option>
-					<option value='sha1' $checked{'ESP_INTEGRITY'}{'sha1'}>SHA1</option>
-					<option value='md5' $checked{'ESP_INTEGRITY'}{'md5'}>MD5</option>
+					<option value='sha1' $checked{'ESP_INTEGRITY'}{'sha1'}>SHA1 ($Lang::tr{'vpn weak'})</option>
+					<option value='md5' $checked{'ESP_INTEGRITY'}{'md5'}>MD5 ($Lang::tr{'vpn broken'})</option>
 				</select>
 			</td>
 		</tr>
@@ -2510,6 +3151,11 @@ if(($cgiparams{'ACTION'} eq $Lang::tr{'advanced'}) ||
 			<td class='boldbase' width="15%">$Lang::tr{'grouptype'}</td>
 			<td class='boldbase'>
 				<select name='IKE_GROUPTYPE' multiple='multiple' size='6' style='width: 100%'>
+					<option value='x25519-ke1_mlkem1024' $checked{'IKE_GROUPTYPE'}{'x25519-ke1_mlkem1024'}>Curve 25519 x ML-KEM 1024 (256 bit)</option>
+					<option value='x25519-ke1_mlkem768' $checked{'IKE_GROUPTYPE'}{'x25519-ke1_mlkem768'}>Curve 25519 x ML-KEM 768 (192 bit)</option>
+					<option value='x25519-ke1_mlkem512' $checked{'IKE_GROUPTYPE'}{'x25519-ke1_mlkem512'}>Curve 25519 x ML-KEM 512 (128 bit)</option>
+					<option value='curve448' $checked{'IKE_GROUPTYPE'}{'curve448'}>Curve 448 (224 bit)</option>
+					<option value='curve25519' $checked{'IKE_GROUPTYPE'}{'curve25519'}>Curve 25519 (128 bit)</option>
 					<option value='e521' $checked{'IKE_GROUPTYPE'}{'e521'}>ECP-521 (NIST)</option>
 					<option value='e512bp' $checked{'IKE_GROUPTYPE'}{'e512bp'}>ECP-512 (Brainpool)</option>
 					<option value='e384' $checked{'IKE_GROUPTYPE'}{'e384'}>ECP-384 (NIST)</option>
@@ -2523,16 +3169,19 @@ if(($cgiparams{'ACTION'} eq $Lang::tr{'advanced'}) ||
 					<option value='6144' $checked{'IKE_GROUPTYPE'}{'6144'}>MODP-6144</option>
 					<option value='4096' $checked{'IKE_GROUPTYPE'}{'4096'}>MODP-4096</option>
 					<option value='3072' $checked{'IKE_GROUPTYPE'}{'3072'}>MODP-3072</option>
-					<option value='2048s256' $checked{'IKE_GROUPTYPE'}{'2048s256'}>MODP-2048/256</option>
-					<option value='2048s224' $checked{'IKE_GROUPTYPE'}{'2048s224'}>MODP-2048/224</option>
-					<option value='2048s160' $checked{'IKE_GROUPTYPE'}{'2048s160'}>MODP-2048/160</option>
-					<option value='2048' $checked{'IKE_GROUPTYPE'}{'2048'}>MODP-2048</option>
-					<option value='1536' $checked{'IKE_GROUPTYPE'}{'1536'}>MODP-1536</option>
-					<option value='1024' $checked{'IKE_GROUPTYPE'}{'1024'}>MODP-1024</option>
+					<option value='2048' $checked{'IKE_GROUPTYPE'}{'2048'}>MODP-2048 ($Lang::tr{'vpn weak'})</option>
+					<option value='1536' $checked{'IKE_GROUPTYPE'}{'1536'}>MODP-1536 ($Lang::tr{'vpn broken'})</option>
+					<option value='1024' $checked{'IKE_GROUPTYPE'}{'1024'}>MODP-1024 ($Lang::tr{'vpn broken'})</option>
+					<option value='768' $checked{'IKE_GROUPTYPE'}{'768'}>MODP-768 ($Lang::tr{'vpn broken'})</option>
 				</select>
 			</td>
 			<td class='boldbase'>
 				<select name='ESP_GROUPTYPE' multiple='multiple' size='6' style='width: 100%'>
+					<option value='x25519-ke1_mlkem1024' $checked{'ESP_GROUPTYPE'}{'x25519-ke1_mlkem1024'}>Curve 25519 x ML-KEM 1024 (256 bit)</option>
+					<option value='x25519-ke1_mlkem768' $checked{'ESP_GROUPTYPE'}{'x25519-ke1_mlkem768'}>Curve 25519 x ML-KEM 768 (192 bit)</option>
+					<option value='x25519-ke1_mlkem512' $checked{'ESP_GROUPTYPE'}{'x25519-ke1_mlkem512'}>Curve 25519 x ML-KEM 512 (128 bit)</option>
+					<option value='curve448' $checked{'ESP_GROUPTYPE'}{'curve448'}>Curve 448 (224 bit)</option>
+					<option value='curve25519' $checked{'ESP_GROUPTYPE'}{'curve25519'}>Curve 25519 (128 bit)</option>
 					<option value='e521' $checked{'ESP_GROUPTYPE'}{'e521'}>ECP-521 (NIST)</option>
 					<option value='e512bp' $checked{'ESP_GROUPTYPE'}{'e512bp'}>ECP-512 (Brainpool)</option>
 					<option value='e384' $checked{'ESP_GROUPTYPE'}{'e384'}>ECP-384 (NIST)</option>
@@ -2546,12 +3195,10 @@ if(($cgiparams{'ACTION'} eq $Lang::tr{'advanced'}) ||
 					<option value='6144' $checked{'ESP_GROUPTYPE'}{'6144'}>MODP-6144</option>
 					<option value='4096' $checked{'ESP_GROUPTYPE'}{'4096'}>MODP-4096</option>
 					<option value='3072' $checked{'ESP_GROUPTYPE'}{'3072'}>MODP-3072</option>
-					<option value='2048s256' $checked{'ESP_GROUPTYPE'}{'2048s256'}>MODP-2048/256</option>
-					<option value='2048s224' $checked{'ESP_GROUPTYPE'}{'2048s224'}>MODP-2048/224</option>
-					<option value='2048s160' $checked{'ESP_GROUPTYPE'}{'2048s160'}>MODP-2048/160</option>
-					<option value='2048' $checked{'ESP_GROUPTYPE'}{'2048'}>MODP-2048</option>
-					<option value='1536' $checked{'ESP_GROUPTYPE'}{'1536'}>MODP-1536</option>
-					<option value='1024' $checked{'ESP_GROUPTYPE'}{'1024'}>MODP-1024</option>
+					<option value='2048' $checked{'ESP_GROUPTYPE'}{'2048'}>MODP-2048 ($Lang::tr{'vpn weak'})</option>
+					<option value='1536' $checked{'ESP_GROUPTYPE'}{'1536'}>MODP-1536 ($Lang::tr{'vpn broken'})</option>
+					<option value='1024' $checked{'ESP_GROUPTYPE'}{'1024'}>MODP-1024 ($Lang::tr{'vpn broken'})</option>
+					<option value='768' $checked{'ESP_GROUPTYPE'}{'768'}>MODP-768 ($Lang::tr{'vpn broken'})</option>
 					<option value='none' $checked{'ESP_GROUPTYPE'}{'none'}>- $Lang::tr{'none'} -</option>
 				</select>
 			</td>
@@ -2599,6 +3246,14 @@ if(($cgiparams{'ACTION'} eq $Lang::tr{'advanced'}) ||
 				IKE+ESP: $Lang::tr{'use only proposed settings'}
 			</label>
 		</td>
+		<td>
+			<label>$Lang::tr{'vpn start action'}</label>
+			<select name="START_ACTION">
+				<option value="route" $selected{'START_ACTION'}{'route'}>$Lang::tr{'vpn start action route'}</option>
+				<option value="start" $selected{'START_ACTION'}{'start'}>$Lang::tr{'vpn start action start'}</option>
+				<option value="add"   $selected{'START_ACTION'}{'add'}  >$Lang::tr{'vpn start action add'}</option>
+			</select>
+		</td>
 	</tr>
 	<tr>
 		<td>
@@ -2607,9 +3262,21 @@ if(($cgiparams{'ACTION'} eq $Lang::tr{'advanced'}) ||
 				$Lang::tr{'pfs yes no'}
 			</label>
 		</td>
+		<td>
+			<label>$Lang::tr{'vpn inactivity timeout'}</label>
+			<select name="INACTIVITY_TIMEOUT">
+EOF
+	foreach my $t (sort { $a <=> $b } keys %INACTIVITY_TIMEOUTS) {
+		print "<option value=\"$t\" $selected{'INACTIVITY_TIMEOUT'}{$t}>$INACTIVITY_TIMEOUTS{$t}</option>\n";
+	}
+
+	print <<EOF;
+
+			</select>
+		</td>
 	</tr>
 	<tr>
-		<td>
+		<td colspan="2">
 			<label>
 				<input type='checkbox' name='COMPRESSION' $checked{'COMPRESSION'} />
 				$Lang::tr{'vpn payload compression'}
@@ -2617,20 +3284,16 @@ if(($cgiparams{'ACTION'} eq $Lang::tr{'advanced'}) ||
 		</td>
 	</tr>
 	<tr>
-		<td>
+		<td colspan="2">
 			<label>
 				<input type='checkbox' name='FORCE_MOBIKE' $checked{'FORCE_MOBIKE'} />
 				$Lang::tr{'vpn force mobike'}
 			</label>
 		</td>
 	</tr>
-EOF
-;
-
-	print <<EOF;
 	<tr>
-		<td align='left' colspan='1'><img src='/blob.gif' align='top' alt='*' />&nbsp;$Lang::tr{'required field'}</td>
-		<td align='right' colspan='2'>
+		<td align='left'><img src='/blob.gif' align='top' alt='*' />&nbsp;$Lang::tr{'required field'}</td>
+		<td align='right'>
 			<input type='submit' name='ACTION' value='$Lang::tr{'save'}' />
 			<input type='submit' name='ACTION' value='$Lang::tr{'cancel'}' />
 		</td>
@@ -2657,24 +3320,8 @@ EOF
 	&General::readhasharray("${General::swroot}/vpn/config", \%confighash);
 	$cgiparams{'CA_NAME'} = '';
 
-	my @status = `/usr/local/bin/ipsecctrl I 2>/dev/null`;
+	my @status = &General::system_output("/usr/local/bin/ipsecctrl", "I");
 
-	# suggest a default name for this side
-	if ($cgiparams{'VPN_IP'} eq '' && -e "${General::swroot}/red/active") {
-		if (open(IPADDR, "${General::swroot}/red/local-ipaddress")) {
-			my $ipaddr = <IPADDR>;
-			close IPADDR;
-			chomp ($ipaddr);
-			$cgiparams{'VPN_IP'} = (gethostbyaddr(pack("C4", split(/\./, $ipaddr)), 2))[0];
-			if ($cgiparams{'VPN_IP'} eq '') {
-				$cgiparams{'VPN_IP'} = $ipaddr;
-			}
-		}
-	}
-	# no IP found, use %defaultroute
-	$cgiparams{'VPN_IP'} ='%defaultroute' if ($cgiparams{'VPN_IP'} eq '');
-
-	$cgiparams{'VPN_DELAYED_START'} = 0 if (! defined ($cgiparams{'VPN_DELAYED_START'}));
 	$checked{'ENABLED'} = $cgiparams{'ENABLED'} eq 'on' ? "checked='checked'" : '';
 
 	&Header::showhttpheaders();
@@ -2702,35 +3349,25 @@ EOF
 	print <<END
 	<form method='post' action='$ENV{'SCRIPT_NAME'}'>
 	<table width='100%'>
-	<tr>
-	<td width='20%' class='base' nowrap='nowrap'>$Lang::tr{'vpn red name'}:&nbsp;<img src='/blob.gif' alt='*' /></td>
-	<td width='20%'><input type='text' name='VPN_IP' value='$cgiparams{'VPN_IP'}' /></td>
-	<td width='20%' class='base'>$Lang::tr{'enabled'}<input type='checkbox' name='ENABLED' $checked{'ENABLED'} /></td>
-	</tr>
-END
-;
-print <<END
-	<tr>
-	<td class='base' nowrap='nowrap'>$Lang::tr{'vpn delayed start'}:&nbsp;<img src='/blob.gif' alt='*' /><img src='/blob.gif' alt='*' /></td>
-	<td ><input type='text' name='VPN_DELAYED_START' value='$cgiparams{'VPN_DELAYED_START'}' /></td>
-	</tr>
-	<tr>
-	<td class='base' nowrap='nowrap'>$Lang::tr{'host to net vpn'}:</td>
-	<td ><input type='text' name='RW_NET' value='$cgiparams{'RW_NET'}' /></td>
-	</tr>
-</table>
-<br>
-<hr />
-<table width='100%'>
-<tr>
-	<td class='base' valign='top'><img src='/blob.gif' alt='*' /></td>
-	<td width='70%' class='base' valign='top'>$Lang::tr{'required field'}</td><td width='30%' align='right' class='base'><input type='submit' name='ACTION' value='$Lang::tr{'save'}' /></td>
-</tr>
-<tr>
-	<td class='base' valign='top' nowrap='nowrap'><img src='/blob.gif' alt='*' /><img src='/blob.gif' alt='*' />&nbsp;</td>
-	<td class='base'>	<font class='base'>$Lang::tr{'vpn delayed start help'}</font></td>
-	<td></td>
-</tr>
+		<tr>
+			<td width='60%' class='base'>
+				$Lang::tr{'enabled'}
+			</td>
+			<td width="40%">
+				<input type='checkbox' name='ENABLED' $checked{'ENABLED'} />
+			</td>
+		</tr>
+		<tr>
+			<td class='base' nowrap='nowrap' width="60%">$Lang::tr{'ipsec roadwarrior endpoint'}:</td>
+			<td width="40%"><input type='text' name='RW_ENDPOINT' value='$cgiparams{'RW_ENDPOINT'}' /></td>
+		</tr>
+		<tr>
+			<td class='base' nowrap='nowrap' width="60%">$Lang::tr{'host to net vpn'}:</td>
+			<td width="40%"><input type='text' name='RW_NET' value='$cgiparams{'RW_NET'}' /></td>
+		</tr>
+		<tr>
+			<td width='100%' colspan="2" align='right' class='base'><input type='submit' name='ACTION' value='$Lang::tr{'save'}' /></td>
+		</tr>
 </table>
 END
 ;
@@ -2746,7 +3383,7 @@ END
 	<th width='23%' class='boldbase' align='center'><b>$Lang::tr{'common name'}</b></th>
 	<th width='30%' class='boldbase' align='center'><b>$Lang::tr{'remark'}</b></th>
 	<th width='10%' class='boldbase' align='center'><b>$Lang::tr{'status'}</b></th>
-	<th class='boldbase' align='center' colspan='6'><b>$Lang::tr{'action'}</b></th>
+	<th class='boldbase' align='center' colspan='7'><b>$Lang::tr{'action'}</b></th>
 	</tr>
 END
 ;
@@ -2772,20 +3409,30 @@ END
 		print "<td align='left' $col>&nbsp;</td>";
 	}
 	print "<td align='center' $col>$confighash{$key}[25]</td>";
-	my $col1="bgcolor='${Header::colourred}'";
-	# get real state
-	my $active = "<b><font color='#FFFFFF'>$Lang::tr{'capsclosed'}</font></b>";
+	my $col1="class='status is-disconnected'";
+	my $active = "$Lang::tr{'capsclosed'}";
+	if ($confighash{$key}[33] eq "add") {
+		$col1="class='status is-connecting'";
+		$active = "$Lang::tr{'vpn wait'}";
+	}
 	foreach my $line (@status) {
 		if (($line =~ /\"$confighash{$key}[1]\".*IPsec SA established/) ||
 		($line =~ /$confighash{$key}[1]\{.*INSTALLED/)) {
-			$col1="bgcolor='${Header::colourgreen}'";
-			$active = "<b><font color='#FFFFFF'>$Lang::tr{'capsopen'}</font></b>";
+			$col1="class='status is-connected'";
+			$active = "$Lang::tr{'capsopen'}";
+			last;
+		} elsif ($line =~ /$confighash{$key}[1]\[.*CONNECTING/) {
+			$col1="class='status is-connecting'";
+			$active = "$Lang::tr{'vpn connecting'}";
+		} elsif ($line =~ /$confighash{$key}[1]\{.*ROUTED/) {
+			$col1="class='status is-connecting'";
+			$active = "$Lang::tr{'vpn on-demand'}";
 		}
 	}
 	# move to blue if really down
 	if ($confighash{$key}[0] eq 'off' && $col1 =~ /${Header::colourred}/ ) {
-		$col1="bgcolor='${Header::colourblue}'";
-		$active = "<b><font color='#FFFFFF'>$Lang::tr{'capsclosed'}</font></b>";
+		$col1="class='status is-disabled'";
+		$active = "$Lang::tr{'capsclosed'}";
 	}
 	print <<END
 	<td align='center' $col1>$active</td>
@@ -2837,6 +3484,22 @@ END
 	} else {
 		print "<td width='2%' $col>&nbsp;</td>";
 	}
+
+	# Apple Profile
+	if ($confighash{$key}[3] eq 'host') {
+		print <<END;
+		<td align='center' $col>
+			<form method='post' action='$ENV{'SCRIPT_NAME'}'>
+			<input type='image' name='$Lang::tr{'download apple profile'}' src='/images/apple.png' alt='$Lang::tr{'download apple profile'}' title='$Lang::tr{'download apple profile'}' />
+			<input type='hidden' name='ACTION' value='$Lang::tr{'download apple profile'}' />
+			<input type='hidden' name='KEY' value='$key' />
+			</form>
+		</td>
+END
+	} else {
+		print "<td width='2%' $col>&nbsp;</td>";
+	}
+
 	print <<END
 	<td align='center' $col>
 		<form method='post' action='$ENV{'SCRIPT_NAME'}'>
@@ -2971,7 +3634,12 @@ END
 			<input type='hidden' name='ACTION' value="$Lang::tr{'download host certificate'}" />
 			</form>
 		</td>
-		<td width='4%' $col2>&nbsp;</td></tr>
+		<td width='4%' align='center' $col2>
+			<form method='post' action='$ENV{'SCRIPT_NAME'}'>
+				<input type='image' name='$Lang::tr{'regenerate host certificate'}' src='/images/reload.gif' alt='$Lang::tr{'regenerate host certificate'}' title='$Lang::tr{'regenerate host certificate'}' />
+				<input type='hidden' name='ACTION' value='$Lang::tr{'regenerate host certificate'}' />
+			</form>
+		</td></tr>
 END
 ;
 	} else {
@@ -3089,23 +3757,31 @@ sub make_algos($$$$$) {
 				if ($mode eq "ike") {
 					push(@algo, $int);
 
-					if ($grp =~ m/^e(.*)$/) {
+					if ($grp =~ m/^x25519-ke1_mlkem(\d+)$/) {
+						push(@algo, "$grp");
+					} elsif ($grp =~ m/^e(.*)$/) {
 						push(@algo, "ecp$1");
+					} elsif ($grp =~ m/curve(448|25519)/) {
+						push(@algo, "$grp");
 					} else {
 						push(@algo, "modp$grp");
 					}
 
-				} elsif ($mode eq "esp" && $pfs) {
+				} elsif ($mode eq "esp") {
 					my $is_aead = ($enc =~ m/[cg]cm/);
 
 					if (!$is_aead) {
 						push(@algo, $int);
 					}
 
-					if ($grp eq "none") {
+					if (!$pfs || $grp eq "none") {
 						# noop
+					} elsif ($grp =~ m/^x25519-ke1_mlkem(\d+)$/) {
+						push(@algo, "$grp");
 					} elsif ($grp =~ m/^e(.*)$/) {
 						push(@algo, "ecp$1");
+					} elsif ($grp =~ m/curve(448|25519)/) {
+						push(@algo, "$grp");
 					} else {
 						push(@algo, "modp$grp");
 					}
@@ -3119,15 +3795,62 @@ sub make_algos($$$$$) {
 	return &array_unique(\@algos);
 }
 
-sub make_subnets($) {
+sub make_subnets($$) {
+	my $direction = shift;
 	my $subnets = shift;
 
 	my @nets = split(/\|/, $subnets);
 	my @cidr_nets = ();
 	foreach my $net (@nets) {
 		my $cidr_net = &General::ipcidr($net);
+
+		# Skip 0.0.0.0/0 for remote because this renders the
+		# while system inaccessible
+		next if (($direction eq "right") && ($cidr_net eq "0.0.0.0/0"));
+
 		push(@cidr_nets, $cidr_net);
 	}
 
 	return join(",", @cidr_nets);
+}
+
+sub regenerate_host_certificate() {
+	my $errormessage = "";
+
+	&General::log("charon", "Regenerating host certificate...");
+
+	# Create a CSR based on the existing certificate
+	my $opt = " x509 -x509toreq -copy_extensions copyall";
+	$opt .= " -signkey ${General::swroot}/certs/hostkey.pem";
+	$opt .= " -in ${General::swroot}/certs/hostcert.pem";
+	$opt .= " -out ${General::swroot}/certs/hostreq.pem";
+	$errormessage = &callssl($opt);
+
+	# Revoke the old certificate
+	if (!$errormessage) {
+		&General::log("charon", "Revoking the old host cert...");
+
+		my $opt = " ca -revoke ${General::swroot}/certs/hostcert.pem";
+		$errormessage = &callssl($opt);
+	}
+
+	# Sign the host certificate request
+	if (!$errormessage) {
+		&General::log("charon", "Self signing host cert...");
+
+		my $opt = " ca -md sha256 -days 825";
+		$opt .= " -batch -notext";
+		$opt .= " -in ${General::swroot}/certs/hostreq.pem";
+		$opt .= " -out ${General::swroot}/certs/hostcert.pem";
+		$errormessage = &callssl ($opt);
+
+		unlink ("${General::swroot}/certs/hostreq.pem"); #no more needed
+	}
+
+	# Reload the new certificate
+	if (!$errormessage) {
+		&General::system('/usr/local/bin/ipsecctrl', 'R');
+	}
+
+	return $errormessage;
 }

@@ -1,4 +1,5 @@
 bin/kmod
+#etc/depmod.d
 sbin/depmod
 sbin/insmod
 sbin/lsmod
@@ -6,8 +7,11 @@ sbin/modinfo
 sbin/modprobe
 sbin/rmmod
 #usr/include/libkmod.h
-#usr/lib/libkmod.la
-usr/lib/libkmod.so
+#usr/lib/depmod.d
+#usr/lib/libkmod.so
 usr/lib/libkmod.so.2
-usr/lib/libkmod.so.2.2.3
+usr/lib/libkmod.so.2.5.1
+#usr/lib/modprobe.d
 #usr/lib/pkgconfig/libkmod.pc
+#usr/share/pkgconfig
+#usr/share/pkgconfig/kmod.pc

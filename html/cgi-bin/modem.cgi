@@ -40,13 +40,13 @@ $modemsettings{'VALID'} = '';
 &Header::getcgihash(\%modemsettings);
 
 if ($modemsettings{'ACTION'} eq $Lang::tr{'save'})
-{ 
+{
         if (!($modemsettings{'TIMEOUT'} =~ /^\d+$/))
         {
       	 	$errormessage = $Lang::tr{'timeout must be a number'};
 	 	goto ERROR;
         }
-ERROR:   
+ERROR:
         if ($errormessage) {
                 $modemsettings{'VALID'} = 'no'; }
         else {
@@ -57,7 +57,7 @@ ERROR:
 
 if ($modemsettings{'ACTION'} eq $Lang::tr{'restore defaults'})
 {
-	system('/bin/cp', "${General::swroot}/modem/defaults", "${General::swroot}/modem/settings", '-f');
+	&General::system("cp", "-f", "${General::swroot}/modem/defaults", "${General::swroot}/modem/settings");
 }
 
 &General::readhash("${General::swroot}/modem/settings", \%modemsettings);

@@ -21,6 +21,7 @@ srv/web/ipfire/cgi-bin/multimon.cgi
 srv/web/ipfire/cgi-bin/upsfstats.cgi
 srv/web/ipfire/cgi-bin/upsimage.cgi
 srv/web/ipfire/cgi-bin/upsstats.cgi
+srv/web/ipfire/cgi-bin/apcupsd.cgi
 #usr/share/hal
 #usr/share/hal/fdi
 #usr/share/hal/fdi/policy
@@ -33,3 +34,4 @@ srv/web/ipfire/cgi-bin/upsstats.cgi
 #usr/share/man/man8/apcupsd.8
 etc/rc.d/init.d/apcupsd
 var/ipfire/menu.d/EX-apcupsd.menu
+var/ipfire/backup/addons/includes/apcupsd

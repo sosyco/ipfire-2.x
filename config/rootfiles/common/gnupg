@@ -6,13 +6,10 @@ usr/bin/gpg
 usr/lib/gnupg/gpgkeys_curl
 usr/lib/gnupg/gpgkeys_finger
 usr/lib/gnupg/gpgkeys_hkp
-usr/lib/gnupg/gpgkeys_ldap
 #usr/share/gnupg
 #usr/share/gnupg/FAQ
 #usr/share/gnupg/options.skel
 #usr/share/info/gnupg1.info
 #usr/share/man/man1/gpg-zip.1
 #usr/share/man/man1/gpg.1
-#usr/share/man/man1/gpg.ru.1
 #usr/share/man/man1/gpgv.1
-#usr/share/man/man7/gnupg.7

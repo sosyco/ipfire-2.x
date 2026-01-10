@@ -80,7 +80,7 @@ my @vendors=();
 my %vendorstats=();
 
 my $repository = "/var/updatecache/";
-my $webhome = "/srv/web/ipfire/html"; 
+my $webhome = "/srv/web/ipfire/html";
 my $hintcolour = '#FFFFCC';
 my $colourgray = '#808080';
 
@@ -103,7 +103,7 @@ my @metadata=();
 &General::readhash("${General::swroot}/ethernet/settings", \%netsettings);
 &General::readhash("${General::swroot}/main/settings", \%mainsettings);
 &General::readhash("${General::swroot}/proxy/settings", \%proxysettings);
-&General::readhash("/srv/web/ipfire/html/themes/".$mainsettings{'THEME'}."/include/colors.txt", \%color);
+&General::readhash("/srv/web/ipfire/html/themes/ipfire/include/colors.txt", \%color);
 
 $xlratorsettings{'ACTION'} = '';
 $xlratorsettings{'ENABLE_LOG'} = 'off';
@@ -192,33 +192,33 @@ if ($xlratorsettings{'ACTION'} eq $Lang::tr{'updxlrtr purge'})
 
 			if (($xlratorsettings{'REMOVE_NOSOURCE'} eq 'on') && ($status == $sfNoSource))
 			{
-				if (-e "$repository/$vendorid/$uuid/$updatefile") { system("rm -r $repository/$vendorid/$uuid"); }
+				if (-e "$repository/$vendorid/$uuid/$updatefile") { &General::system("rm", "-r", "$repository/$vendorid/$uuid"); }
 			}
 			if (($xlratorsettings{'REMOVE_OUTDATED'} eq 'on') && ($status == $sfOutdated))
 			{
-				if (-e "$repository/$vendorid/$uuid/$updatefile") { system("rm -r $repository/$vendorid/$uuid"); }
+				if (-e "$repository/$vendorid/$uuid/$updatefile") { &General::system("rm", "-r", "$repository/$vendorid/$uuid"); }
 			}
 			if ($xlratorsettings{'REMOVE_OBSOLETE'} eq 'on')
 			{
 				if (($xlratorsettings{'NOT_ACCESSED_LAST'} eq 'week') && ($lastaccess < (time - 604800)))
 				{
-					if (-e "$repository/$vendorid/$uuid/$updatefile") { system("rm -r $repository/$vendorid/$uuid"); }
+					if (-e "$repository/$vendorid/$uuid/$updatefile") { &General::system("rm", "-r", "$repository/$vendorid/$uuid"); }
 				}
 				if (($xlratorsettings{'NOT_ACCESSED_LAST'} eq 'month1') && ($lastaccess < (time - 2505600)))
 				{
-					if (-e "$repository/$vendorid/$uuid/$updatefile") { system("rm -r $repository/$vendorid/$uuid"); }
+					if (-e "$repository/$vendorid/$uuid/$updatefile") { &General::system("rm", "-r", "$repository/$vendorid/$uuid"); }
 				}
 				if (($xlratorsettings{'NOT_ACCESSED_LAST'} eq 'month3') && ($lastaccess < (time - 7516800)))
 				{
-					if (-e "$repository/$vendorid/$uuid/$updatefile") { system("rm -r $repository/$vendorid/$uuid"); }
+					if (-e "$repository/$vendorid/$uuid/$updatefile") { &General::system("rm", "-r", "$repository/$vendorid/$uuid"); }
 				}
 				if (($xlratorsettings{'NOT_ACCESSED_LAST'} eq 'month6') && ($lastaccess < (time - 15033600)))
 				{
-					if (-e "$repository/$vendorid/$uuid/$updatefile") { system("rm -r $repository/$vendorid/$uuid"); }
+					if (-e "$repository/$vendorid/$uuid/$updatefile") { &General::system("rm", "-r", "$repository/$vendorid/$uuid"); }
 				}
 				if (($xlratorsettings{'NOT_ACCESSED_LAST'} eq 'year') && ($lastaccess < (time - 31536000)))
 				{
-					if (-e "$repository/$vendorid/$uuid/$updatefile") { system("rm -r $repository/$vendorid/$uuid"); }
+					if (-e "$repository/$vendorid/$uuid/$updatefile") { &General::system("rm", "-r", "$repository/$vendorid/$uuid"); }
 				}
 			}
 		}
@@ -266,7 +266,7 @@ if ($xlratorsettings{'ACTION'} eq $Lang::tr{'updxlrtr save and restart'})
 
 	&savesettings;
 
-	system('/usr/local/bin/squidctrl restart >/dev/null 2>&1');
+	&General::system('/usr/local/bin/squidctrl', 'restart');
 }
 
 if ($xlratorsettings{'ACTION'} eq $Lang::tr{'updxlrtr remove file'})
@@ -278,7 +278,7 @@ if ($xlratorsettings{'ACTION'} eq $Lang::tr{'updxlrtr remove file'})
 	unless ($updatefile =~ /^download\//)
 	{
 		($vendorid,$uuid,$updatefile) = split('/',$updatefile);
-		if (-e "$repository/$vendorid/$uuid/$updatefile") { system("rm -r $repository/$vendorid/$uuid"); }
+		if (-e "$repository/$vendorid/$uuid/$updatefile") { &General::system("rm", "-r", "$repository/$vendorid/$uuid"); }
 	}
 }
 
@@ -295,16 +295,16 @@ if (($xlratorsettings{'ACTION'} eq $Lang::tr{'updxlrtr cancel download'}) || ($x
 			&General::readhash("$repository/download/$vendorid/$updatefile.info", \%dlinfo);
 
 			$id = &getPID("\\s${General::swroot}/updatexlrator/bin/download\\s.*\\s".quotemeta($dlinfo{'SRCURL'})."\\s\\d\\s\\d\$");
-			if ($id) { system("/bin/kill -9 $id"); }
+			if ($id) { &General::system("/bin/kill", "-9", "$id"); }
 			$id = &getPID("\\s/usr/bin/wget\\s.*\\s".quotemeta($dlinfo{'SRCURL'})."\$");
-			if ($id) { system("/bin/kill -9 $id"); }
+			if ($id) { &General::system("/bin/kill", "-9", "$id"); }
 
-			system("rm $repository/download/$vendorid/$updatefile.info");
+			&General::system("rm", "$repository/download/$vendorid/$updatefile.info");
 		}
 
 		if (-e "$repository/download/$vendorid/$updatefile")
 		{
-			system("rm $repository/download/$vendorid/$updatefile");
+			&General::system("rm", "$repository/download/$vendorid/$updatefile");
 		}
 	}
 
@@ -369,7 +369,7 @@ $selected{'NOT_ACCESSED_LAST'}{$xlratorsettings{'NOT_ACCESSED_LAST'}} = "selecte
 
 &Header::showhttpheaders();
 
-&Header::openpage($Lang::tr{'updxlrtr configuration'}, 1, '');
+&Header::openpage($Lang::tr{'updxlrtr configuration'}, 1, $Header::extraHead);
 
 &Header::openbigbox('100%', 'left', '', $errormessage);
 
@@ -398,7 +398,7 @@ print <<END
 	<td class='base'>$Lang::tr{'updxlrtr passive mode'}:</td>
 	<td class='base'><input type='checkbox' name='PASSIVE_MODE' $checked{'PASSIVE_MODE'}{'on'} /></td>
 	<td class='base'>$Lang::tr{'updxlrtr max disk usage'}:&nbsp;<img src='/blob.gif' alt='*' /></td>
-	<td class='base'><input type='text' name='MAX_DISK_USAGE' value='$xlratorsettings{'MAX_DISK_USAGE'}' size='1' /> %</td>
+	<td class='base'><input type='text' name='MAX_DISK_USAGE' value='$xlratorsettings{'MAX_DISK_USAGE'}' size='3' /> %</td>
 </tr>
 </table>
 <hr size='1'>
@@ -532,9 +532,9 @@ END
 
 			$id++;
 			if ($id % 2) {
-				print "<tr bgcolor='$Header::table1colour'>\n"; }
+				print "<tr class='table1colour'>\n"; }
 			else {
-				print "<tr bgcolor='$Header::table2colour'>\n"; }
+				print "<tr class='table2colour'>\n"; }
 
 			$filesize = $size_updatefile;
 			1 while $filesize =~ s/^(-?\d+)(\d{3})/$1.$2/;
@@ -722,15 +722,18 @@ unless ($numfiles) { print "<i>$Lang::tr{'updxlrtr empty repository'}</i>\n<hr s
 
 print <<END
 <table>
-<tr><td class='boldbase'><b>$Lang::tr{'updxlrtr disk usage'}</b></td></tr>
-</table>
-<table cellpadding='3'>
 <tr>
-<td align='left' class='base'><i>$Lang::tr{'updxlrtr cache dir'}</i></td>
-<td align='center' class='base'><i>$Lang::tr{'size'}</i></td>
-<td align='center' class='base'><i>$Lang::tr{'used'}</i></td>
-<td align='center' class='base'><i>$Lang::tr{'free'}</i></td>
-<td align='left' class='base' colspan='2'><i>$Lang::tr{'percentage'}</i></td>
+<td class='boldbase'><b>$Lang::tr{'updxlrtr disk usage'}</b></td>
+</tr>
+</table>
+<table width='75%' cellspacing='5'>
+<tr>
+<td align='center' class='boldbase'><b>$Lang::tr{'updxlrtr cache dir'}</b></td>
+<td align='center' class='boldbase'><b>$Lang::tr{'size'}</b></td>
+<td align='center' class='boldbase'><b>$Lang::tr{'used'}</b></td>
+<td align='center' class='boldbase'><b>$Lang::tr{'free'}</b></td>
+<td></td>
+<td align='left' class='boldbase' colspan='2'><b>$Lang::tr{'percentage'}</b></td>
 </tr>
 END
 ;
@@ -745,17 +748,17 @@ my ($device,$size,$used,$free,$percent,$mount) = split(' ',$dfstr);
 
 print <<END
 <tr>
-<td>[$repository]</td>
-<td align='right'>$size</td>
-<td align='right'>$used</td>
-<td align='right'>$free</td>
-<td>
+<td align='center'>[$repository]</td>
+<td align='center'>$size</td>
+<td align='center'>$used</td>
+<td align='center'>$free</td>
+<td align='right' colspan='2'>
 END
 ;
 &percentbar($percent);
 print <<END
 </td>
-<td align='right'>$percent</td>
+<td align='center'>$percent</td>
 </tr>
 </table>
 END
@@ -820,9 +823,9 @@ foreach (@vendors)
 
 	$id++;
 	if ($id % 2) {
-		print "<tr bgcolor=''$color{'color20'}'>\n"; }
+		print "<tr class='color20'>\n"; }
 	else {
-		print "<tr bgcolor=''$color{'color22'}'>\n"; }
+		print "<tr class='color22'>\n"; }
 
 	print "<td class='base' align='center'><nobr>&nbsp;";
 
@@ -1015,15 +1018,18 @@ unless (@repositoryfiles) { print "<i>$Lang::tr{'updxlrtr empty repository'}</i>
 
 print <<END
 <table>
-<tr><td class='boldbase'><b>$Lang::tr{'updxlrtr disk usage'}</b></td></tr>
-</table>
-<table cellpadding='3'>
 <tr>
-<td align='left' class='base'><i>$Lang::tr{'updxlrtr cache dir'}</i></td>
-<td align='center' class='base'><i>$Lang::tr{'size'}</i></td>
-<td align='center' class='base'><i>$Lang::tr{'used'}</i></td>
-<td align='center' class='base'><i>$Lang::tr{'free'}</i></td>
-<td align='left' class='base' colspan='2'><i>$Lang::tr{'percentage'}</i></td>
+<td class='boldbase'><b>$Lang::tr{'updxlrtr disk usage'}</b></td>
+</tr>
+</table>
+<table width='75%' cellspacing='5'>
+<tr>
+<td align='center' class='boldbase'><b>$Lang::tr{'updxlrtr cache dir'}</b></td>
+<td align='center' class='boldbase'><b>$Lang::tr{'size'}</b></td>
+<td align='center' class='boldbase'><b>$Lang::tr{'used'}</b></td>
+<td align='center' class='boldbase'><b>$Lang::tr{'free'}</b></td>
+<td></td>
+<td align='left' class='boldbase' colspan='2'><b>$Lang::tr{'percentage'}</b></td>
 </tr>
 END
 ;
@@ -1038,17 +1044,17 @@ my ($device,$size,$used,$free,$percent,$mount) = split(' ',$dfstr);
 
 print <<END
 <tr>
-<td>[$repository]</td>
-<td align='right'>$size</td>
-<td align='right'>$used</td>
-<td align='right'>$free</td>
-<td>
+<td align='center'>[$repository]</td>
+<td align='center'>$size</td>
+<td align='center'>$used</td>
+<td align='center'>$free</td>
+<td align='right' colspan='2'>
 END
 ;
 &percentbar($percent);
 print <<END
 </td>
-<td align='right'>$percent</td>
+<td align='center'>$percent</td>
 </tr>
 </table>
 END
@@ -1156,9 +1162,9 @@ END
 
 		$id++;
 		if ($id % 2) {
-			print "<tr bgcolor='$Header::table1colour'>\n"; }
+			print "<tr class='table1colour'>\n"; }
 		else {
-			print "<tr bgcolor='$Header::table2colour'>\n"; }
+			print "<tr class='table2colour'>\n"; }
 
 		$filesize = $size_updatefile;
 		1 while $filesize =~ s/^(-?\d+)(\d{3})/$1.$2/;
@@ -1478,15 +1484,15 @@ sub savesettings
 
 	if (($xlratorsettings{'ENABLE_AUTOCHECK'} eq 'on') && ($xlratorsettings{'AUTOCHECK_SCHEDULE'} eq 'daily'))
 	{
-		system('/usr/local/bin/updxlratorctrl cron daily >/dev/null 2>&1');
+		&General::system('/usr/local/bin/updxlratorctrl', 'cron', 'daily');
 	}
 	if (($xlratorsettings{'ENABLE_AUTOCHECK'} eq 'on') && ($xlratorsettings{'AUTOCHECK_SCHEDULE'} eq 'weekly'))
 	{
-		system('/usr/local/bin/updxlratorctrl cron weekly >/dev/null 2>&1');
+		&General::system('/usr/local/bin/updxlratorctrl', 'cron', 'weekly');
 	}
 	if (($xlratorsettings{'ENABLE_AUTOCHECK'} eq 'on') && ($xlratorsettings{'AUTOCHECK_SCHEDULE'} eq 'monthly'))
 	{
-		system('/usr/local/bin/updxlratorctrl cron monthly >/dev/null 2>&1');
+		&General::system('/usr/local/bin/updxlratorctrl', 'cron', 'monthly');
 	}
 
 	# don't save those variable to the settings file,
@@ -1516,22 +1522,20 @@ sub savesettings
 sub percentbar
 {
   my $percent = $_[0];
-  my $fg = '#a0a0a0';
-  my $bg = '#e2e2e2';
 
   if ($percent =~ m/^(\d+)%$/ )
   {
     print <<END
-<table width='100' border='1' cellspacing='0' cellpadding='0' style='border-width:1px;border-style:solid;border-color:$fg;width:100px;height:10px;'>
+<table width='100' border='1' cellspacing='0' cellpadding='0' class='percent-box'>
 <tr>
 END
 ;
     if ($percent eq "100%") {
-      print "<td width='100%' bgcolor='$fg' style='background-color:$fg;border-style:solid;border-width:1px;border-color:$bg'>"
+      print "<td width='100%' class='percent-bar'>"
     } elsif ($percent eq "0%") {
-      print "<td width='100%' bgcolor='$bg' style='background-color:$bg;border-style:solid;border-width:1px;border-color:$bg'>"
+      print "<td width='100%' class='percent-space'>"
     } else {
-      print "<td width='$percent' bgcolor='$fg' style='background-color:$fg;border-style:solid;border-width:1px;border-color:$bg'></td><td width='" . (100-$1) . "%' bgcolor='$bg' style='background-color:$bg;border-style:solid;border-width:1px;border-color:$bg'>"
+      print "<td width='$percent' class='percent-bar'></td><td width='" . (100-$1) . "%' class='percent-space'>"
     }
     print <<END
 <img src='/images/null.gif' width='1' height='1' alt='' /></td></tr></table>

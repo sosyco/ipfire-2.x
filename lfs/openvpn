@@ -1,7 +1,7 @@
 ###############################################################################
 #                                                                             #
 # IPFire.org - A linux based firewall                                         #
-# Copyright (C) 2007-2014  IPFire Team  <info@ipfire.org>                     #
+# Copyright (C) 2007-2025  IPFire Team  <info@ipfire.org>                     #
 #                                                                             #
 # This program is free software: you can redistribute it and/or modify        #
 # it under the terms of the GNU General Public License as published by        #
@@ -24,10 +24,10 @@
 
 include Config
 
-VER        = 2.3.6
+VER        = 2.6.16
 
 THISAPP    = openvpn-$(VER)
-DL_FILE    = $(THISAPP).tar.xz
+DL_FILE    = $(THISAPP).tar.gz
 DL_FROM    = $(URL_IPFIRE)
 DIR_APP    = $(DIR_SRC)/$(THISAPP)
 TARGET     = $(DIR_INFO)/$(THISAPP)
@@ -40,7 +40,7 @@ objects = $(DL_FILE)
 
 $(DL_FILE) = $(DL_FROM)/$(DL_FILE)
 
-$(DL_FILE)_MD5 = bcc30c296566df14feebdd8aa0e408ca
+$(DL_FILE)_BLAKE2 = d4219d5974ecb0d73b865f436ed5a57874dee7295446a10d47354024564a25098ea2210f3356f3938fd24fb99c2310797bb70936ad5423eafad7cbacc94c71c5
 
 install : $(TARGET)
 
@@ -48,10 +48,10 @@ check : $(patsubst %,$(DIR_CHK)/%,$(objects))
 
 download :$(patsubst %,$(DIR_DL)/%,$(objects))
 
-md5 : $(subst %,%_MD5,$(objects))
+b2 : $(subst %,%_BLAKE2,$(objects))
 
 ###############################################################################
-# Downloading, checking, md5sum
+# Downloading, checking, b2sum
 ###############################################################################
 
 $(patsubst %,$(DIR_CHK)/%,$(objects)) :
@@ -60,8 +60,8 @@ $(patsubst %,$(DIR_CHK)/%,$(objects)) :
 $(patsubst %,$(DIR_DL)/%,$(objects)) :
 	@$(LOAD)
 
-$(subst %,%_MD5,$(objects)) :
-	@$(MD5)
+$(subst %,%_BLAKE2,$(objects)) :
+	@$(B2SUM)
 
 ###############################################################################
 # Installation Details
@@ -69,16 +69,14 @@ $(subst %,%_MD5,$(objects)) :
 
 $(TARGET) : $(patsubst %,$(DIR_DL)/%,$(objects))
 	@$(PREBUILD)
-	@rm -rf $(DIR_APP) && cd $(DIR_SRC) && tar Jxf $(DIR_DL)/$(DL_FILE)
+	@rm -rf $(DIR_APP) && cd $(DIR_SRC) && tar axf $(DIR_DL)/$(DL_FILE)
 	cd $(DIR_APP) && ./configure \
-		--prefix=/usr \
-		--sysconfdir=/var/ipfire/ovpn \
-		--enable-iproute2 \
-		--enable-password-save \
-		--enable-plugins \
-		--enable-plugin-auth-pam \
-		--enable-plugin-down-root
-
+				--prefix=/usr \
+				--sysconfdir=/var/ipfire/ovpn \
+				--enable-iproute2 \
+				--enable-plugins \
+				--enable-plugin-auth-pam \
+				--enable-plugin-down-root
 	cd $(DIR_APP) && make $(MAKETUNING)
 	cd $(DIR_APP) && make install
 	cd $(DIR_APP) && cp -Rvf $(DIR_SRC)/config/ovpn /var/ipfire
@@ -90,12 +88,27 @@ $(TARGET) : $(patsubst %,$(DIR_DL)/%,$(objects))
 	-mkdir -vp /var/ipfire/ovpn/n2nconf
 	-mkdir -vp /var/ipfire/ovpn/scripts
 	touch /var/ipfire/ovpn/ovpn-leases.db
-	chmod 700 /var/ipfire/ovpn/ovpn-leases.db
+	chmod 600 /var/ipfire/ovpn/ovpn-leases.db
 	chown -R root:root /var/ipfire/ovpn/scripts
 	chown -R nobody:nobody /var/ipfire/ovpn
 	chmod 700 /var/ipfire/ovpn/certs
 	mv -v /var/ipfire/ovpn/verify /usr/lib/openvpn/verify
 	chown root:root /usr/lib/openvpn/verify
 	chmod 755 /usr/lib/openvpn/verify
+	# Add crl updater
+	mv -v /var/ipfire/ovpn/openvpn-crl-updater /etc/fcron.daily
+	chown root:root /etc/fcron.daily/openvpn-crl-updater
+	chmod 750 /etc/fcron.daily/openvpn-crl-updater
+
+	# Move the OpenSSL configuration file out of /var/ipfire
+	mkdir -pv /usr/share/openvpn
+	mv -v /var/ipfire/ovpn/openssl/ovpn.cnf \
+		/usr/share/openvpn/
+	rmdir -v /var/ipfire/ovpn/openssl
+
+	# Install authenticator
+	install -v -m 755 $(DIR_SRC)/config/ovpn/openvpn-authenticator \
+		/usr/sbin/openvpn-authenticator
+
 	@rm -rf $(DIR_APP)
 	@$(POSTBUILD)

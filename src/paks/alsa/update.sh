@@ -17,12 +17,24 @@
 # along with IPFire; if not, write to the Free Software                    #
 # Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307 USA #
 #                                                                          #
-# Copyright (C) 2007 IPFire-Team <info@ipfire.org>.                        #
+# Copyright (C) 2007-2020 IPFire-Team <info@ipfire.org>.                   #
 #                                                                          #
 ############################################################################
 #
 . /opt/pakfire/lib/functions.sh
-mv /etc/asound.state /tmp
+
+# Backup /etc/asound.state
+if [ -e "/etc/asound.state" ]; then
+	mv /etc/asound.state /tmp/asound.state
+fi
+
+extract_backup_includes
 ./uninstall.sh
 ./install.sh
-mv /tmp/asound.state /etc
+
+# Restore asound.state
+if [ -e "/tmp/asound.state" ]; then
+	mv /tmp/asound.state /etc/asound.state
+fi
+
+exit 0
